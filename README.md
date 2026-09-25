@@ -5,6 +5,8 @@
 ![License](https://img.shields.io/badge/license-TBD-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
 
+![Logo](assets\logo.png)
+
 LANShare is a local network application designed to share a computer's screen and audio with other devices in real time.
 The project is currently in early development, starting with the basic network connection between a Host and a Client.
 
