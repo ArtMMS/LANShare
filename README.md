@@ -1,11 +1,7 @@
 # 🖥️ LANShare
 
-## 📝 Description
-
 LANShare is a local network application designed to share a computer's screen and audio with other devices in real time.
 The project is currently in early development, starting with the basic network connection between a Host and a Client.
-
-## 📸 Screenshot
 
 > Screenshots will be added as the application develops.
 
@@ -40,7 +36,7 @@ More information will be added as issues are discovered.
 
 ## 📋 Roadmap
 
-### 🟢 V0.1 — Connection
+### V0.1 — Connection
 
 - [ ] Create Host application
 - [ ] Create Client application
@@ -48,14 +44,14 @@ More information will be added as issues are discovered.
 - [ ] Establish a connection
 - [ ] Detect disconnections
 
-### 🟢 V0.2 — Communication
+### V0.2 — Communication
 
 - [ ] Send messages between Host and Client
 - [ ] Add usernames
 - [ ] Implement a simple chat
 - [ ] Display connection status
 
-### 🟡 V0.3 — Screen Capture
+### V0.3 — Screen Capture
 
 - [ ] Capture the Host's entire screen
 - [ ] Compress frames
@@ -63,7 +59,7 @@ More information will be added as issues are discovered.
 - [ ] Display the screen on the Client
 - [ ] Target approximately 30 FPS
 
-### 🟡 V0.4 — Streaming
+### V0.4 — Streaming
 
 - [ ] Select which monitor to share
 - [ ] Select which application to share
@@ -74,7 +70,7 @@ More information will be added as issues are discovered.
 - [ ] Optimize CPU usage
 - [ ] Optimize network bandwidth
 
-### 🟡 V0.5 — Audio
+### V0.5 — Audio
 
 - [ ] Capture system audio
 - [ ] Encode audio
@@ -82,7 +78,7 @@ More information will be added as issues are discovered.
 - [ ] Synchronize audio and video
 - [ ] Volume control
 
-### 🟠 V0.6 — Multiple Clients
+### V0.6 — Multiple Clients
 
 - [ ] Support multiple viewers
 - [ ] Display connected users
