@@ -5,6 +5,7 @@
 ### Added
 - Bidirectional communication between Host and Client.
     - The Host can now send messages to the Client while simultaneously receiving messages from the Client in real time.
+- Added username identification for both Host and Client.
 
 ---
 

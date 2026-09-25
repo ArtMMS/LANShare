@@ -1,13 +1,14 @@
 import socket
 import threading
 
-PORT = 5555  # tem que ser a mesma porta usada no host.py
+PORT = 5555
 
-connected = True  # controla se ainda estamos conectados
+connected = True
+host_username = "Host"  # nome padrão até recebermos o real
 
 
 def receive_messages(sock):
-    global connected
+    global connected, host_username
     while connected:
         try:
             data = sock.recv(1024)
@@ -15,7 +16,7 @@ def receive_messages(sock):
                 print("\n[CLIENT] O Host desconectou.")
                 connected = False
                 break
-            print(f"\n[CLIENT] Mensagem do Host: {data.decode('utf-8')}")
+            print(f"\n{host_username}: {data.decode('utf-8')}")
         except (ConnectionResetError, OSError):
             print("\n[CLIENT] Conexão perdida com o Host.")
             connected = False
@@ -23,8 +24,10 @@ def receive_messages(sock):
 
 
 def start_client():
-    global connected
+    global connected, host_username
+
     host_ip = input("Digite o IP do Host: ").strip()
+    username = input("Digite seu nome de usuário: ").strip() or "Client"
 
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -35,7 +38,11 @@ def start_client():
         print("[CLIENT] Não foi possível conectar. O Host está rodando e o IP está correto?")
         return
 
-    # thread separada só para ficar "escutando" o Host o tempo todo
+    # troca de nomes de usuário logo após conectar
+    client_socket.sendall(username.encode("utf-8"))
+    host_username = client_socket.recv(1024).decode("utf-8")
+    print(f"[CLIENT] Conectado com: {host_username}")
+
     receiver_thread = threading.Thread(target=receive_messages, args=(client_socket,), daemon=True)
     receiver_thread.start()
 

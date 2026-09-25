@@ -54,8 +54,8 @@ More information will be added as issues are discovered.
 
 ### V0.2 — Communication
 
-- [ ] Send messages between Host and Client
-- [ ] Add usernames
+- [x] Send messages between Host and Client
+- [x] Add usernames
 - [ ] Implement a simple chat
 - [ ] Display connection status
 
