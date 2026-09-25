@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0] - 2026-09-25
+
+### Added
+- Bidirectional communication between Host and Client.
+    - The Host can now send messages to the Client while simultaneously receiving messages from the Client in real time.
+
+---
+
 ## [0.1.0] - 2026-09-25
 
 ### Added
