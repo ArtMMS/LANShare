@@ -2,11 +2,11 @@ import cv2
 import mss
 import numpy as np
 
-JPEG_QUALITY = 70
+DEFAULT_JPEG_QUALITY = 70
 
 
 def choose_monitor(sct):
-    monitors = sct.monitors  # índice 0 = todos os monitores juntos; 1, 2, 3... = monitores individuais
+    monitors = sct.monitors
 
     print("\nMonitores disponíveis:")
     for i, monitor in enumerate(monitors):
@@ -23,9 +23,47 @@ def choose_monitor(sct):
         print("Opção inválida, tente novamente.")
 
 
-def compress_frame(frame, verbose=False):
+def choose_resolution_scale():
+    print("\nQualidade de resolução da transmissão:")
+    print("  [1] 100% (nítido, mais dados)")
+    print("  [2] 75%")
+    print("  [3] 50% (mais leve, menos nítido)")
+
+    options = {"1": 1.0, "2": 0.75, "3": 0.5}
+    while True:
+        escolha = input("Escolha uma opção: ").strip()
+        if escolha in options:
+            return options[escolha]
+        print("Opção inválida, tente novamente.")
+
+
+def choose_target_bitrate():
+    print("\nMeta de bitrate da transmissão (controla o quanto de dados é usado por segundo):")
+    print("  [1] Baixo (~1500 kbps) — prioriza economia de rede")
+    print("  [2] Médio (~4000 kbps) — equilíbrio")
+    print("  [3] Alto (~8000 kbps) — prioriza qualidade")
+
+    options = {"1": 1500, "2": 4000, "3": 8000}
+    while True:
+        escolha = input("Escolha uma opção: ").strip()
+        if escolha in options:
+            return options[escolha]
+        print("Opção inválida, tente novamente.")
+
+
+def resize_frame(frame, scale):
+    """Redimensiona o frame pela escala informada (1.0 = tamanho original)."""
+    if scale >= 1.0:
+        return frame
+    height, width = frame.shape[:2]
+    new_width = max(2, int(width * scale) // 2 * 2)   # garante dimensão par
+    new_height = max(2, int(height * scale) // 2 * 2)
+    return cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+
+def compress_frame(frame, quality=DEFAULT_JPEG_QUALITY, verbose=False):
     """Recebe um frame já capturado (array BGR) e devolve os bytes comprimidos em JPEG."""
-    success, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    success, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
     compressed_bytes = encoded.tobytes()
 
     if verbose:
@@ -40,7 +78,6 @@ def compress_frame(frame, verbose=False):
 
 
 def capture_screen(output_path="screenshot.jpg"):
-    """Teste isolado de um único print — continua usando mss, simples o bastante para não precisar do dxcam aqui."""
     with mss.mss() as sct:
         _, monitor = choose_monitor(sct)
         screenshot = sct.grab(monitor)

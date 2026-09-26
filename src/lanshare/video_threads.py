@@ -5,7 +5,8 @@ import dxcam
 from PySide6.QtCore import QThread, Signal
 
 from streaming import send_frame, receive_frame
-from screen_capture import compress_frame
+from screen_capture import compress_frame, resize_frame
+from bitrate_controller import BitrateController
 from window_selector import get_window_region, get_current_monitor_index
 
 STREAM_PORT = 5556
@@ -18,15 +19,19 @@ class VideoSendServerThread(QThread):
 
     client_connected = Signal()
     fps_updated = Signal(float)
+    stats_updated = Signal(float, int)  # bitrate atual (kbps), qualidade JPEG atual
     error_occurred = Signal(str)
 
-    def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors):
+    def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
+                 resolution_scale=1.0, target_bitrate_kbps=4000):
         super().__init__()
         self.monitor_index = monitor_index
         self.monitor = monitor
         self.target_hwnd = target_hwnd
         self.monitor_mapping = monitor_mapping
         self.mss_monitors = mss_monitors
+        self.resolution_scale = resolution_scale
+        self.bitrate_controller = BitrateController(target_bitrate_kbps)
         self._running = True
 
     def run(self):
@@ -77,14 +82,20 @@ class VideoSendServerThread(QThread):
                     time.sleep(0.001)
                     continue
 
-                frame_bytes = compress_frame(frame, verbose=False)
+                frame = resize_frame(frame, self.resolution_scale)
+
+                current_quality = self.bitrate_controller.quality
+                frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
                 send_frame(conn, frame_bytes)
+
+                new_quality = self.bitrate_controller.register_frame(len(frame_bytes))
 
                 frames_since_report += 1
                 now = time.time()
                 if now - last_report_time >= 1.0:
                     fps = frames_since_report / (now - last_report_time)
                     self.fps_updated.emit(fps)
+                    self.stats_updated.emit(self.bitrate_controller.current_bitrate_kbps(), new_quality)
                     frames_since_report = 0
                     last_report_time = now
 

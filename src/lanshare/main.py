@@ -3,7 +3,7 @@ import sys
 import mss
 from PySide6.QtWidgets import QApplication
 
-from screen_capture import choose_monitor
+from screen_capture import choose_monitor, choose_resolution_scale, choose_target_bitrate
 from window_selector import choose_window
 from monitor_mapping import calibrate_monitor_mapping
 from gui import HostWindow, ClientWindow
@@ -20,10 +20,15 @@ def main():
             monitor_index, monitor = choose_monitor(sct)
 
         target_hwnd = choose_window(monitor)
+        resolution_scale = choose_resolution_scale()
+        target_bitrate_kbps = choose_target_bitrate()
         monitor_mapping = calibrate_monitor_mapping(mss_monitors)
 
         app = QApplication(sys.argv)
-        window = HostWindow(username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors)
+        window = HostWindow(
+            username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
+            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate_kbps
+        )
         window.show()
         sys.exit(app.exec())
 

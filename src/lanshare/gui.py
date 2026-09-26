@@ -46,7 +46,6 @@ class ChatPanel(QWidget):
         self.chat_thread.message_received.connect(self._on_message_received)
         self.chat_thread.disconnected.connect(self._on_disconnected)
 
-        # heartbeat: envia sinal de vida a cada 5s e confere a cada 1s se o outro lado sumiu
         self.heartbeat_timer = QTimer(self)
         self.heartbeat_timer.timeout.connect(self.chat_thread.send_ping)
         self.heartbeat_timer.start(5000)
@@ -89,18 +88,21 @@ class ChatPanel(QWidget):
 
 
 class HostWindow(QMainWindow):
-    def __init__(self, username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors):
+    def __init__(self, username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
+                 resolution_scale=1.0, target_bitrate_kbps=4000):
         super().__init__()
         self.setWindowTitle("LANShare - Host")
         self.resize(700, 500)
 
         self.video_status_label = QLabel("Aguardando conexão de vídeo...")
+        self.stats_label = QLabel("")
 
         chat_thread = ChatServerThread(username)
         self.chat_panel = ChatPanel(username, chat_thread)
 
         layout = QVBoxLayout()
         layout.addWidget(self.video_status_label)
+        layout.addWidget(self.stats_label)
         layout.addWidget(self.chat_panel)
 
         container = QWidget()
@@ -108,13 +110,19 @@ class HostWindow(QMainWindow):
         self.setCentralWidget(container)
 
         self.video_thread = VideoSendServerThread(
-            monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors
+            monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
+            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate_kbps
         )
         self.video_thread.client_connected.connect(
             lambda: self.video_status_label.setText("Transmitindo tela...")
         )
         self.video_thread.fps_updated.connect(
             lambda fps: self.video_status_label.setText(f"Transmitindo tela... ({fps:.1f} FPS)")
+        )
+        self.video_thread.stats_updated.connect(
+            lambda kbps, quality: self.stats_label.setText(
+                f"Bitrate: {kbps:.0f} kbps | Qualidade JPEG: {quality}"
+            )
         )
         self.video_thread.error_occurred.connect(
             lambda msg: self.video_status_label.setText(f"Erro na transmissão: {msg}")

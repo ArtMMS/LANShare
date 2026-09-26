@@ -72,11 +72,8 @@ More information will be added as issues are discovered.
 - [x] Select which monitor to share
 - [x] Select which application to share
 - [x] Implement continuous streaming
-- [ ] Reduce latency
-- [ ] Control bitrate
-- [ ] Adjust resolution
-- [ ] Optimize CPU usage
-- [ ] Optimize network bandwidth
+- [x] Adjust resolution & Control bitrate
+- [ ] Basic GUI
 
 ### V0.5 — Audio
 
@@ -90,6 +87,10 @@ More information will be added as issues are discovered.
 
 - [ ] Support multiple viewers
 - [ ] Display connected users
+
+### V1.0 - Optimization
+- [ ] Reduce latency
+- [ ] Optimize network bandwidth
 
 ---
 
