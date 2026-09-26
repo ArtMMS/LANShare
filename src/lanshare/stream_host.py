@@ -6,7 +6,8 @@ import mss
 
 from streaming import send_frame
 from screen_capture import choose_monitor, compress_frame
-from window_selector import choose_window, get_window_region
+from window_selector import choose_window, get_window_region, get_current_monitor_index
+from monitor_mapping import calibrate_monitor_mapping
 
 STREAM_PORT = 5556
 TARGET_FPS = 30
@@ -24,11 +25,15 @@ def start_stream_host():
     print(f"[STREAM] Cliente de vídeo conectado: {addr}")
 
     with mss.mss() as sct:
+        mss_monitors = sct.monitors
         monitor_index, monitor = choose_monitor(sct)
 
-    target_hwnd = choose_window(monitor)  # None = monitor inteiro; ou o hwnd de uma janela específica
+    target_hwnd = choose_window(monitor)
 
-    camera = dxcam.create(output_idx=monitor_index - 1, output_color="BGR")
+    # descobre a correspondência real mss <-> dxcam (uma vez, no início)
+    monitor_mapping = calibrate_monitor_mapping(mss_monitors)
+
+    camera = dxcam.create(output_idx=monitor_mapping[monitor_index], output_color="BGR")
 
     frames_since_report = 0
     last_report_time = time.time()
@@ -38,10 +43,16 @@ def start_stream_host():
             frame_start = time.time()
 
             if target_hwnd is not None:
+                current_index = get_current_monitor_index(target_hwnd, mss_monitors)
+                if current_index is not None and current_index != monitor_index and current_index in monitor_mapping:
+                    print(f"[STREAM] Janela mudou para o monitor {current_index}, recriando captura...")
+                    del camera
+                    monitor_index = current_index
+                    monitor = mss_monitors[monitor_index]
+                    camera = dxcam.create(output_idx=monitor_mapping[monitor_index], output_color="BGR")
+
                 region = get_window_region(target_hwnd, monitor)
                 if region is None:
-                    # janela minimizada, fechada ou fora dos limites do monitor no momento;
-                    # pula esse frame em vez de derrubar a conexão
                     time.sleep(0.01)
                     continue
                 try:

@@ -1,8 +1,9 @@
+import win32api
+import win32con
 import win32gui
 
 
 def list_windows():
-    """Retorna uma lista de (hwnd, título) de janelas visíveis e com título, ignorando janelas do sistema."""
     windows = []
 
     def enum_handler(hwnd, _):
@@ -16,22 +17,18 @@ def list_windows():
 
 
 def window_is_in_monitor(hwnd, monitor):
-    """Verifica se a janela tem alguma sobreposição real com o monitor informado."""
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
     mon_left = monitor["left"]
     mon_top = monitor["top"]
     mon_right = monitor["left"] + monitor["width"]
     mon_bottom = monitor["top"] + monitor["height"]
 
-    # não há sobreposição se a janela está totalmente fora dos limites do monitor
     if right <= mon_left or left >= mon_right or bottom <= mon_top or top >= mon_bottom:
         return False
     return True
 
 
 def choose_window(monitor):
-    """Deixa o usuário escolher compartilhar o monitor inteiro ou uma janela específica,
-    listando só janelas que estão de fato dentro do monitor escolhido."""
     all_windows = list_windows()
     windows = [(hwnd, title) for hwnd, title in all_windows if window_is_in_monitor(hwnd, monitor)]
 
@@ -50,9 +47,6 @@ def choose_window(monitor):
 
 
 def get_window_region(hwnd, monitor):
-    """Retorna o retângulo da janela (left, top, right, bottom) relativo ao monitor,
-    recortado para os limites do monitor e ajustado para dimensões pares
-    (exigência de várias APIs de captura de vídeo)."""
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
 
     rel_left = max(0, left - monitor["left"])
@@ -60,11 +54,9 @@ def get_window_region(hwnd, monitor):
     rel_right = min(monitor["width"], right - monitor["left"])
     rel_bottom = min(monitor["height"], bottom - monitor["top"])
 
-    # garante que a região é válida (largura e altura positivas)
     if rel_right <= rel_left or rel_bottom <= rel_top:
         return None
 
-    # arredonda para dimensões pares, cortando 1px se necessário
     if (rel_right - rel_left) % 2 != 0:
         rel_right -= 1
     if (rel_bottom - rel_top) % 2 != 0:
@@ -74,3 +66,21 @@ def get_window_region(hwnd, monitor):
         return None
 
     return (rel_left, rel_top, rel_right, rel_bottom)
+
+
+def get_current_monitor_index(hwnd, mss_monitors):
+    """Descobre em qual monitor (índice no formato mss) a janela está AGORA,
+    já que ela pode ter sido arrastada para outro monitor durante a transmissão."""
+    try:
+        hmonitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
+        info = win32api.GetMonitorInfo(hmonitor)
+        win_left, win_top = info["Monitor"][0], info["Monitor"][1]
+    except Exception:
+        return None
+
+    for i, monitor in enumerate(mss_monitors):
+        if i == 0:
+            continue
+        if monitor["left"] == win_left and monitor["top"] == win_top:
+            return i
+    return None
