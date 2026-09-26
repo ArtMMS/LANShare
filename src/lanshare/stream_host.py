@@ -1,12 +1,15 @@
 import socket
 import time
 import mss
+import numpy as np
 from streaming import send_frame
-from screen_capture import choose_monitor, capture_and_compress
+from screen_capture import choose_monitor, draw_cursor
+import cv2
 
 STREAM_PORT = 5556
 TARGET_FPS = 30
 FRAME_INTERVAL = 1 / TARGET_FPS
+JPEG_QUALITY = 70
 
 
 def start_stream_host():
@@ -24,21 +27,46 @@ def start_stream_host():
 
         frames_since_report = 0
         last_report_time = time.time()
+        t_capture_total = t_cursor_total = t_encode_total = t_send_total = 0.0
 
         try:
             while True:
                 frame_start = time.time()
 
-                frame_bytes = capture_and_compress(monitor, sct, verbose=False)
+                t0 = time.time()
+                screenshot = sct.grab(monitor)
+                t1 = time.time()
+
+                frame = np.ascontiguousarray(np.array(screenshot, dtype=np.uint8)[:, :, :3])
+                t2 = time.time()
+
+                draw_cursor(frame, monitor)
+                t3 = time.time()
+
+                success, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                frame_bytes = encoded.tobytes()
+                t4 = time.time()
+
                 send_frame(conn, frame_bytes)
+                t5 = time.time()
+
+                t_capture_total += (t1 - t0)
+                t_cursor_total += (t3 - t2)
+                t_encode_total += (t4 - t3)
+                t_send_total += (t5 - t4)
 
                 frames_since_report += 1
                 now = time.time()
-                if now - last_report_time >= 1.0:  # reporta a cada 1 segundo real
+                if now - last_report_time >= 1.0:
                     fps_real = frames_since_report / (now - last_report_time)
-                    print(f"[STREAM] FPS médio: {fps_real:.1f}")
+                    print(f"[STREAM] FPS médio: {fps_real:.1f} | "
+                          f"captura: {t_capture_total*1000/frames_since_report:.1f}ms | "
+                          f"cursor: {t_cursor_total*1000/frames_since_report:.1f}ms | "
+                          f"encode: {t_encode_total*1000/frames_since_report:.1f}ms | "
+                          f"envio: {t_send_total*1000/frames_since_report:.1f}ms")
                     frames_since_report = 0
                     last_report_time = now
+                    t_capture_total = t_cursor_total = t_encode_total = t_send_total = 0.0
 
                 elapsed_frame = time.time() - frame_start
                 sleep_time = FRAME_INTERVAL - elapsed_frame

@@ -26,7 +26,9 @@ The project is currently in early development, starting with the basic network c
 - **Python 3.11+**
 - **Radmin VPN** — Virtual LAN connection
 - **mss 10.1.0** — Screen Capture
-- **Pillow 11.0.0** — Image processing
+- **opencv-python 5.0.0** — Image and video processing
+- **numpy 2.5.3** — Numerical and array processing
+- **PySide6 6.9.0** — GUI
 
 ---
 
@@ -60,7 +62,7 @@ More information will be added as issues are discovered.
 - [x] Capture the Host's entire screen
 - [x] Compress frames
 - [x] Send frames to the Client
-- [ ] Display the screen on the Client
+- [x] Display the screen on the Client
 - [ ] Target approximately 30 FPS
 
 ### V0.4 — Streaming
