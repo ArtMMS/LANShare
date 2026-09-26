@@ -6,9 +6,10 @@
 - Bidirectional communication between Host and Client.
     - The Host can now send messages to the Client while simultaneously receiving messages from the Client in real time.
 - Added username identification for both Host and Client.
--Added graceful disconnection handling using the __DISCONNECT__ control message.
--Host and Client now notify each other when a user intentionally leaves the network.
--Added a user-friendly exit command (sair) for both Host and Client.
+- Added graceful disconnection handling using the __DISCONNECT__ control message.
+- Host and Client now notify each other when a user intentionally leaves the network.
+- Added a user-friendly exit command (sair) for both Host and Client.
+- Added timeout-based detection for silent connection failures.
 
 ### Improved
 - Chat messages sent by the local user are now displayed with their username.
@@ -17,6 +18,8 @@
 - Added support for handling __DISCONNECT__ messages on both Host and Client.
 - Improved synchronization between communication and shutdown routines.
 - Enhanced terminal output behavior using ANSI escape sequences (\033[F\033[K) to prevent duplicated message display.
+- Improved reliability of connection status detection.
+- Connections are now automatically closed when no response is received within the configured timeout period.
 
 ---
 

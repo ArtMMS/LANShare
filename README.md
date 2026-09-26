@@ -56,8 +56,8 @@ More information will be added as issues are discovered.
 
 - [x] Send messages between Host and Client
 - [x] Add usernames
-- [ ] Implement a simple chat
-- [ ] Display connection status
+- [x] Implement a simple chat
+- [x] Display connection status
 
 ### V0.3 — Screen Capture
 
