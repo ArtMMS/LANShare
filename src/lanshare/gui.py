@@ -6,7 +6,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QTextEdit, QLineEdit,
     QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QSlider,
-    QDialog, QListWidget, QListWidgetItem, QRadioButton, QButtonGroup,
+    QDialog, QListWidget, QListWidgetItem, QRadioButton,
     QComboBox, QDialogButtonBox, QApplication
 )
 
@@ -66,8 +66,6 @@ def numpy_bgr_to_pixmap(frame, max_width=280):
 # ---------------------------------------------------------------------------
 
 class MonitorChoiceDialog(QDialog):
-    """Passo 1: escolher qual monitor compartilhar, com uma prévia visual de cada um."""
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Escolha o monitor")
@@ -80,9 +78,9 @@ class MonitorChoiceDialog(QDialog):
         layout.addWidget(QLabel("Qual monitor você deseja compartilhar?"))
 
         self.list_widget = QListWidget()
-        self.list_widget.setIconSize(self.list_widget.iconSize())
         layout.addWidget(self.list_widget)
 
+        pixmap = None
         for index, monitor in self.monitors:
             frame = capture_monitor_preview(monitor)
             pixmap = numpy_bgr_to_pixmap(frame, max_width=200)
@@ -92,7 +90,8 @@ class MonitorChoiceDialog(QDialog):
             item.setIcon(QIcon(pixmap))
             self.list_widget.addItem(item)
 
-        self.list_widget.setIconSize(pixmap.size() if self.monitors else self.list_widget.iconSize())
+        if pixmap is not None:
+            self.list_widget.setIconSize(pixmap.size())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._on_accept)
@@ -117,14 +116,12 @@ class MonitorChoiceDialog(QDialog):
 
 
 class CaptureTargetDialog(QDialog):
-    """Passo 2: monitor inteiro ou uma janela específica dentro do monitor escolhido."""
-
     def __init__(self, monitor):
         super().__init__()
         self.setWindowTitle("O que deseja compartilhar?")
         self.resize(420, 380)
         self.monitor = monitor
-        self.selected_hwnd = None  # None = monitor inteiro
+        self.selected_hwnd = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Escolha o que transmitir:"))
@@ -162,8 +159,6 @@ class CaptureTargetDialog(QDialog):
 
 
 class StreamSettingsDialog(QDialog):
-    """Passo 3: resolução e bitrate, antes de confirmar o início da transmissão."""
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Configurações da transmissão")
@@ -179,7 +174,7 @@ class StreamSettingsDialog(QDialog):
         layout.addWidget(QLabel("Meta de bitrate:"))
         self.bitrate_combo = QComboBox()
         self.bitrate_combo.addItems(list(BITRATE_PRESETS.keys()))
-        self.bitrate_combo.setCurrentIndex(1)  # Médio por padrão
+        self.bitrate_combo.setCurrentIndex(1)
         layout.addWidget(self.bitrate_combo)
 
         layout.addStretch()
@@ -197,8 +192,6 @@ class StreamSettingsDialog(QDialog):
 
 
 class JoinStreamDialog(QDialog):
-    """Dialog para o Client: IP do Host e nome de usuário, para entrar em uma transmissão."""
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Entrar em uma transmissão")
@@ -226,11 +219,9 @@ class JoinStreamDialog(QDialog):
 
 
 class HostSetupDialog(QDialog):
-    """Dialog inicial simples só para pedir o nome de usuário do Host."""
-
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Iniciar transmissão")
+        self.setWindowTitle("Nome de usuário")
         self.resize(320, 140)
 
         layout = QVBoxLayout(self)
@@ -292,36 +283,15 @@ class LauncherWindow(QMainWindow):
         self.setCentralWidget(container)
 
     def _on_transmit_clicked(self):
+        """Só pede o nome de usuário aqui. A escolha de monitor/janela/qualidade
+        acontece dentro da HostWindow, ao clicar em 'Start Streaming' — assim
+        dá para refazer essas escolhas toda vez que a transmissão for reiniciada."""
         username_dialog = HostSetupDialog()
         if username_dialog.exec() != QDialog.Accepted:
             return
         username = username_dialog.get_username()
 
-        monitor_dialog = MonitorChoiceDialog()
-        if monitor_dialog.exec() != QDialog.Accepted:
-            return
-        monitor_index, monitor = monitor_dialog.get_selected_monitor()
-        if monitor is None:
-            return
-
-        target_dialog = CaptureTargetDialog(monitor)
-        if target_dialog.exec() != QDialog.Accepted:
-            return
-        target_hwnd = target_dialog.selected_hwnd
-
-        settings_dialog = StreamSettingsDialog()
-        if settings_dialog.exec() != QDialog.Accepted:
-            return
-        resolution_scale, target_bitrate = settings_dialog.get_settings()
-
-        with mss.mss() as sct:
-            mss_monitors = sct.monitors
-        monitor_mapping = auto_map_monitors(mss_monitors)
-
-        self.host_window = HostWindow(
-            username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate
-        )
+        self.host_window = HostWindow(username)
         self.host_window.show()
         self.close()
 
@@ -339,13 +309,15 @@ class LauncherWindow(QMainWindow):
 
 
 # ---------------------------------------------------------------------------
-# Vídeo com badge "LANShare Live"
+# Vídeo com badge "LANShare Live" e placeholder de "aguardando"
 # ---------------------------------------------------------------------------
 
 class VideoContainer(QWidget):
-    def __init__(self):
+    def __init__(self, placeholder_text="Aguardando stream..."):
         super().__init__()
-        self.video_label = QLabel("Aguardando stream...")
+        self.placeholder_text = placeholder_text
+
+        self.video_label = QLabel(placeholder_text)
         self.video_label.setObjectName("videoPlaceholder")
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setScaledContents(True)
@@ -365,6 +337,12 @@ class VideoContainer(QWidget):
         image = QImage.fromData(frame_bytes, "JPG")
         pixmap = QPixmap.fromImage(image)
         self.video_label.setPixmap(pixmap)
+
+    def show_placeholder(self, text=None):
+        """Limpa o vídeo e volta a exibir o texto de espera (ex: ao parar a transmissão)."""
+        self.video_label.setPixmap(QPixmap())
+        self.video_label.setText(text or self.placeholder_text)
+        self.set_live(False)
 
     def resizeEvent(self, event):
         self.video_label.setGeometry(0, 0, self.width(), self.height())
@@ -548,12 +526,10 @@ class Sidebar(QFrame):
         entry.setObjectName("statusText")
         self.users_layout.addWidget(entry)
 
-    def clear_users(self, keep_first=True):
-        while self.users_layout.count() > (1 if keep_first else 0):
-            item = self.users_layout.takeAt(self.users_layout.count() - 1)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+    def reset_stream_info(self):
+        self.fps_label.setText("FPS: —")
+        self.latency_label.setText("Latência: —")
+        self.bitrate_label.setText("Bitrate: —")
 
     def set_status(self, active, text):
         self.status_dot.setObjectName("statusDot" if active else "statusDotOff")
@@ -573,28 +549,28 @@ class Sidebar(QFrame):
 
 
 # ---------------------------------------------------------------------------
-# HostWindow — já transmite sozinho ao abrir, com Start/Stop manuais também
+# HostWindow — abre parado ("Aguardando stream"); Start reconfigura tudo;
+# Stop encerra a captura por completo e volta ao estado inicial
 # ---------------------------------------------------------------------------
 
 class HostWindow(QMainWindow):
-    def __init__(self, username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-                 resolution_scale=1.0, target_bitrate_kbps=4000):
+    def __init__(self, username):
         super().__init__()
         self.setWindowTitle("LANShare - Host")
         self.resize(1200, 700)
         self.setStyleSheet(DARK_STYLESHEET)
+        self.username = username
 
-        self.sidebar = Sidebar(username, "Host (Broadcasting)")
-        self.sidebar.set_connection("Transmitindo — aguardando visualizadores")
+        self.sidebar = Sidebar(username, "Host (Aguardando)")
+        self.sidebar.set_connection("Nenhuma transmissão ativa")
 
-        self.video_container = VideoContainer()
-        self.video_container.set_live(True)
+        self.video_container = VideoContainer(placeholder_text="Aguardando stream...")
 
         self.start_button = QPushButton("▶ Start Streaming")
         self.start_button.setObjectName("startButton")
-        self.start_button.setEnabled(False)
         self.stop_button = QPushButton("⏹ Stop Streaming")
         self.stop_button.setObjectName("stopButton")
+        self.stop_button.setEnabled(False)
         self.start_button.clicked.connect(self._on_start)
         self.stop_button.clicked.connect(self._on_stop)
         self.sidebar.controls_layout.addWidget(self.start_button)
@@ -615,9 +591,35 @@ class HostWindow(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
 
+        self.video_thread = None  # só existe enquanto a transmissão está ativa
+
+    def _on_start(self):
+        """Reabre a configuração completa (monitor, janela, resolução, bitrate)
+        toda vez que a transmissão é (re)iniciada."""
+        monitor_dialog = MonitorChoiceDialog()
+        if monitor_dialog.exec() != QDialog.Accepted:
+            return
+        monitor_index, monitor = monitor_dialog.get_selected_monitor()
+        if monitor is None:
+            return
+
+        target_dialog = CaptureTargetDialog(monitor)
+        if target_dialog.exec() != QDialog.Accepted:
+            return
+        target_hwnd = target_dialog.selected_hwnd
+
+        settings_dialog = StreamSettingsDialog()
+        if settings_dialog.exec() != QDialog.Accepted:
+            return
+        resolution_scale, target_bitrate = settings_dialog.get_settings()
+
+        with mss.mss() as sct:
+            mss_monitors = sct.monitors
+        monitor_mapping = auto_map_monitors(mss_monitors)
+
         self.video_thread = VideoSendServerThread(
             monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate_kbps
+            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate
         )
         self.video_thread.client_connected.connect(self._on_client_connected)
         self.video_thread.client_disconnected.connect(self._on_client_disconnected)
@@ -625,11 +627,35 @@ class HostWindow(QMainWindow):
         self.video_thread.stats_updated.connect(
             lambda kbps, quality: self.sidebar.set_stream_info(bitrate_kbps=kbps)
         )
-        self.video_thread.streaming_state_changed.connect(self._on_streaming_state_changed)
-        self.video_thread.error_occurred.connect(
-            lambda msg: self.sidebar.set_status(False, f"Erro: {msg}")
-        )
+        self.video_thread.frame_captured.connect(self._on_frame_captured)
+        self.video_thread.error_occurred.connect(self._on_stream_error)
         self.video_thread.start()
+
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.video_container.set_live(True)
+        self.sidebar.set_status(True, "Host (Broadcasting)")
+        self.sidebar.set_connection("Transmitindo — aguardando visualizadores")
+
+    def _on_stop(self):
+        """Encerra a transmissão por completo. Volta ao estado inicial:
+        placeholder 'Aguardando stream' e Start Streaming disponível de novo."""
+        if self.video_thread:
+            self.video_thread.stop()
+            self.video_thread.wait()
+            self.video_thread = None
+
+        self.video_container.show_placeholder("Aguardando stream...")
+        self.sidebar.set_status(False, "Host (Aguardando)")
+        self.sidebar.set_connection("Nenhuma transmissão ativa")
+        self.sidebar.reset_stream_info()
+
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+
+    def _on_frame_captured(self, frame_bytes):
+        """Alimenta a prévia do próprio Host com os mesmos frames que estão sendo enviados."""
+        self.video_container.update_frame(frame_bytes)
 
     def _on_client_connected(self):
         self.sidebar.set_connection("Client(s) assistindo")
@@ -637,28 +663,20 @@ class HostWindow(QMainWindow):
     def _on_client_disconnected(self):
         self.sidebar.set_connection("Transmitindo — aguardando visualizadores")
 
+    def _on_stream_error(self, msg):
+        self.sidebar.set_status(False, f"Erro: {msg}")
+
     def _on_peer_connected(self, peer_username):
         self.sidebar.add_user(f"{peer_username} (Client)")
 
     def _on_peer_disconnected(self, reason):
         pass  # o vídeo continua rodando mesmo sem o chat conectado
 
-    def _on_start(self):
-        self.video_thread.start_streaming()
-
-    def _on_stop(self):
-        self.video_thread.stop_streaming()
-
-    def _on_streaming_state_changed(self, active):
-        self.start_button.setEnabled(not active)
-        self.stop_button.setEnabled(active)
-        self.video_container.set_live(active)
-        self.sidebar.set_status(active, "Host (Broadcasting)" if active else "Host (Pausado)")
-
     def closeEvent(self, event):
         self.chat_panel.shutdown()
-        self.video_thread.stop()
-        self.video_thread.wait()
+        if self.video_thread:
+            self.video_thread.stop()
+            self.video_thread.wait()
         event.accept()
 
 
@@ -678,7 +696,7 @@ class ClientWindow(QMainWindow):
         self.sidebar = Sidebar(username, "Client (Conectando...)")
         self.sidebar.set_connection(host_ip)
 
-        self.video_container = VideoContainer()
+        self.video_container = VideoContainer(placeholder_text="Conectando ao stream...")
 
         self.leave_stream_button = QPushButton("🚪 Sair da transmissão")
         self.rejoin_button = QPushButton("🔄 Entrar novamente")
@@ -745,7 +763,7 @@ class ClientWindow(QMainWindow):
             self._last_report_time = now
 
     def _on_connection_lost(self):
-        self.video_container.set_live(False)
+        self.video_container.show_placeholder("Conexão com o stream perdida.")
         self.leave_stream_button.setEnabled(False)
         self.rejoin_button.setEnabled(True)
 
@@ -753,11 +771,12 @@ class ClientWindow(QMainWindow):
         if self.video_thread:
             self.video_thread.stop()
             self.video_thread.wait()
-        self.video_container.set_live(False)
+        self.video_container.show_placeholder("Você saiu da transmissão.")
         self.leave_stream_button.setEnabled(False)
         self.rejoin_button.setEnabled(True)
 
     def _on_rejoin(self):
+        self.video_container.show_placeholder("Conectando ao stream...")
         self._start_video_thread()
 
     def closeEvent(self, event):

@@ -17,13 +17,15 @@ FRAME_INTERVAL = 1 / TARGET_FPS
 class VideoSendServerThread(QThread):
     """Usado pelo Host: transmite continuamente assim que iniciado, mesmo sem
     nenhum Client conectado. Aceita e perde clientes a qualquer momento, sem
-    interromper a captura."""
+    interromper a captura. Também emite os próprios frames via frame_captured,
+    para o Host poder ver a prévia da própria transmissão."""
 
     client_connected = Signal()
     client_disconnected = Signal()
     fps_updated = Signal(float)
     stats_updated = Signal(float, int)
     streaming_state_changed = Signal(bool)
+    frame_captured = Signal(bytes)
     error_occurred = Signal(str)
 
     def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
@@ -36,25 +38,17 @@ class VideoSendServerThread(QThread):
         self.mss_monitors = mss_monitors
         self.resolution_scale = resolution_scale
         self.bitrate_controller = BitrateController(target_bitrate_kbps)
-        self.streaming_enabled = True  # começa transmitindo assim que a thread inicia
+        self.streaming_enabled = True
         self._running = True
         self._clients = []
         self._server_socket = None
-
-    def start_streaming(self):
-        self.streaming_enabled = True
-        self.streaming_state_changed.emit(True)
-
-    def stop_streaming(self):
-        self.streaming_enabled = False
-        self.streaming_state_changed.emit(False)
 
     def run(self):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_socket.bind(("0.0.0.0", STREAM_PORT))
         self._server_socket.listen(5)
-        self._server_socket.settimeout(0.01)  # accept não bloqueante
+        self._server_socket.settimeout(0.01)
 
         try:
             camera = dxcam.create(output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR")
@@ -67,7 +61,6 @@ class VideoSendServerThread(QThread):
 
         try:
             while self._running:
-                # tenta aceitar um novo client sem travar o loop de captura
                 try:
                     conn, addr = self._server_socket.accept()
                     conn.settimeout(None)
@@ -114,6 +107,8 @@ class VideoSendServerThread(QThread):
                 frame = resize_frame(frame, self.resolution_scale)
                 current_quality = self.bitrate_controller.quality
                 frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
+
+                self.frame_captured.emit(frame_bytes)  # alimenta a prévia do próprio Host
 
                 if self._clients:
                     still_connected = []
