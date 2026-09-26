@@ -4,7 +4,6 @@
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![Version](https://img.shields.io/badge/version-v0.5.0-orange)
-![License](https://img.shields.io/badge/license-TBD-lightgrey)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
 ![Localized](https://img.shields.io/badge/localized-73%25-green)
 
@@ -90,4 +89,10 @@ The project is currently in early development, starting with the basic network c
 
 ## 📋 License
 
-This project is currently under development.
+LANShare is released under the **LANShare Source-Available Non-Commercial License v1.0**.
+
+You are free to use, study, modify, and redistribute the software for non-commercial purposes.
+
+Commercial use, sale, licensing, monetization, or inclusion in paid products or services is not permitted without prior permission from the copyright holder.
+
+See the [LICENSE](LICENSE) file for the complete license terms.

@@ -1,0 +1,104 @@
+# LANShare Source-Available Non-Commercial License v1.0
+
+Copyright (c) 2026 [Copyright Holder]
+
+## 1. Definitions
+
+"Software" refers to the LANShare software, including its source code, compiled versions, documentation, and associated files distributed by the copyright holder.
+
+"Derivative Work" means any work that is based on, incorporates, modifies, or extends the Software.
+
+"Commercial Use" means any use of the Software or a Derivative Work that is primarily intended for or directed toward commercial advantage, monetary compensation, or revenue generation.
+
+This includes, but is not limited to:
+
+* Selling the Software or a Derivative Work;
+* Licensing or sublicensing the Software for a fee;
+* Including the Software in a paid product or service;
+* Offering the Software as part of a paid hosting, SaaS, or subscription service;
+* Charging users for access to functionality primarily provided by the Software;
+* Using the Software as a component of a commercial product or service without permission from the copyright holder.
+
+## 2. Permissions
+
+Subject to the terms and conditions of this License, permission is hereby granted, free of charge, to any person obtaining a copy of the Software to:
+
+* Use the Software for personal, educational, research, and other non-commercial purposes;
+* Study and inspect the source code;
+* Modify the source code;
+* Create Derivative Works;
+* Copy and redistribute the original Software;
+* Copy and redistribute modified versions of the Software;
+
+provided that such use and redistribution remain non-commercial.
+
+## 3. Non-Commercial Restriction
+
+The Software and any Derivative Work may not be sold, licensed for a fee, monetized, or otherwise used for Commercial Use without prior written permission from the copyright holder.
+
+This restriction applies to both the original Software and modified or derivative versions.
+
+Nothing in this License grants permission to use the Software for Commercial Use.
+
+Commercial Use may be permitted by the copyright holder through a separate written agreement or license.
+
+## 4. Redistribution
+
+When redistributing the Software or a Derivative Work, you must:
+
+* Include a copy of this License;
+* Retain existing copyright notices;
+* Clearly indicate any significant modifications made to the Software;
+* Not imply that the original copyright holder endorses or supports the modified version.
+
+You may redistribute the Software or a Derivative Work free of charge, provided that the redistribution complies with this License.
+
+## 5. Derivative Works
+
+You are permitted to modify, adapt, and extend the Software.
+
+Derivative Works may be distributed under this License or under terms that preserve the non-commercial restrictions established by this License.
+
+You may not remove or circumvent the non-commercial restrictions of this License from a Derivative Work based on the Software.
+
+## 6. Third-Party Components
+
+The Software may include or depend upon third-party libraries, frameworks, tools, or other components that are distributed under their own licenses.
+
+This License does not replace, modify, or restrict the rights granted by those third-party licenses.
+
+Users and distributors are responsible for complying with the applicable licenses of third-party components.
+
+## 7. Trademarks
+
+This License does not grant permission to use the LANShare name, logo, trademarks, or other branding for purposes that imply endorsement, sponsorship, or official affiliation.
+
+The copyright holder retains all rights to the LANShare name and branding unless explicitly stated otherwise.
+
+## 8. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## 9. Termination
+
+Any rights granted under this License terminate automatically if you violate its terms.
+
+Upon termination, you must cease the use and distribution of the Software to the extent required by applicable law.
+
+Rights granted to you under third-party licenses are not affected by the termination of this License.
+
+## 10. Copyright
+
+The Software and its original source code remain protected by applicable copyright laws.
+
+This License grants specific permissions to use, modify, and redistribute the Software under the conditions described above. It does not transfer ownership of the Software or its copyright.
+
+## 11. License Status
+
+This is a custom source-available, non-commercial software license created for LANShare.
+
+It is not intended to be an Open Source Initiative (OSI) Approved License.
+
+By using, modifying, or redistributing the Software, you agree to the terms of this License.
