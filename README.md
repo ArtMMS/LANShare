@@ -23,14 +23,9 @@ The project is currently in early development, starting with the basic network c
 
 ## 🛠️ Technologies
 
-- **Python**
-- **PySide6** — Graphical User Interface
+- **Python 3.11+**
 - **Radmin VPN** — Virtual LAN connection
-- **H.264** — Video encoding
-- **Opus** — Audio encoding
-- **PyAV / FFmpeg** — Audio and video processing
-- **Windows Graphics Capture** — Screen capture
-- **NVENC / QuickSync / AMF** — Hardware-accelerated encoding
+- **mss** — Screen Capture
 
 ---
 
@@ -61,7 +56,7 @@ More information will be added as issues are discovered.
 
 ### V0.3 — Screen Capture
 
-- [ ] Capture the Host's entire screen
+- [x] Capture the Host's entire screen
 - [ ] Compress frames
 - [ ] Send frames to the Client
 - [ ] Display the screen on the Client
