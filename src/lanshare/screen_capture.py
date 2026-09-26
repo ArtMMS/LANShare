@@ -1,5 +1,3 @@
-import ctypes
-
 import cv2
 import mss
 import numpy as np
@@ -7,42 +5,8 @@ import numpy as np
 JPEG_QUALITY = 70
 
 
-class POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-
-def get_cursor_position():
-    pt = POINT()
-    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
-    return pt.x, pt.y
-
-
-def draw_cursor(frame, monitor):
-    cursor_x, cursor_y = get_cursor_position()
-    x = cursor_x - monitor["left"]
-    y = cursor_y - monitor["top"]
-
-    height, width = frame.shape[:2]
-    if not (0 <= x < width and 0 <= y < height):
-        return
-
-    points = np.array([
-        [x, y],
-        [x, y + 16],
-        [x + 4, y + 12],
-        [x + 7, y + 19],
-        [x + 9, y + 18],
-        [x + 6, y + 11],
-        [x + 11, y + 11],
-    ], dtype=np.int32)
-
-    cv2.fillPoly(frame, [points], color=(255, 255, 255))
-    cv2.polylines(frame, [points], isClosed=True, color=(0, 0, 0), thickness=1)
-
-
 def choose_monitor(sct):
-    """Continua usando mss só para listar monitores e saber a posição (left/top) de cada um."""
-    monitors = sct.monitors
+    monitors = sct.monitors  # índice 0 = todos os monitores juntos; 1, 2, 3... = monitores individuais
 
     print("\nMonitores disponíveis:")
     for i, monitor in enumerate(monitors):
@@ -81,7 +45,6 @@ def capture_screen(output_path="screenshot.jpg"):
         _, monitor = choose_monitor(sct)
         screenshot = sct.grab(monitor)
         frame = np.ascontiguousarray(np.array(screenshot, dtype=np.uint8)[:, :, :3])
-        draw_cursor(frame, monitor)
         compressed_bytes = compress_frame(frame, verbose=True)
 
         with open(output_path, "wb") as f:

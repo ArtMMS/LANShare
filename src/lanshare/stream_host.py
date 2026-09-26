@@ -5,7 +5,7 @@ import dxcam
 import mss
 
 from streaming import send_frame
-from screen_capture import choose_monitor, draw_cursor, compress_frame
+from screen_capture import choose_monitor, compress_frame
 
 STREAM_PORT = 5556
 TARGET_FPS = 30
@@ -42,7 +42,6 @@ def start_stream_host():
                 time.sleep(0.001)
                 continue
 
-            draw_cursor(frame, monitor)
             frame_bytes = compress_frame(frame, verbose=False)
             send_frame(conn, frame_bytes)
 
