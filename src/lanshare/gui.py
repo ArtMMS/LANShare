@@ -1,6 +1,9 @@
 import sys
-
 import mss
+import ipaddress
+import socket
+
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
@@ -9,6 +12,9 @@ from PySide6.QtWidgets import (
     QDialog, QListWidget, QListWidgetItem, QRadioButton,
     QComboBox, QDialogButtonBox, QApplication
 )
+
+from PySide6.QtWidgets import QMessageBox  # adicione QMessageBox à linha de import já existente
+from chat_threads import ChatServerThread, ChatClientThread, CHAT_PORT
 
 from chat_threads import ChatServerThread, ChatClientThread
 from video_threads import VideoSendServerThread, VideoReceiveThread
@@ -228,9 +234,45 @@ class JoinStreamDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Entrar")
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _on_accept(self):
+        ip_text = self.ip_input.text().strip()
+
+        if not self._is_valid_ip(ip_text):
+            QMessageBox.warning(
+                self, "IP inválido",
+                "Digite um endereço IP válido (ex: 192.168.1.10)."
+            )
+            return
+
+        if not self._host_reachable(ip_text):
+            QMessageBox.warning(
+                self, "Host não encontrado",
+                f"Não foi possível encontrar um LANShare Host em {ip_text}.\n"
+                "Verifique o IP e se o Host está com o aplicativo aberto."
+            )
+            return
+
+        self.accept()
+
+    def _is_valid_ip(self, ip_text):
+        try:
+            ipaddress.ip_address(ip_text)
+            return True
+        except ValueError:
+            return False
+
+    def _host_reachable(self, ip_text, timeout=2.0):
+        """Testa uma conexão real e rápida na porta do chat, que fica ativa assim
+        que o Host abre o app — mesmo antes de ele começar a transmitir vídeo."""
+        try:
+            with socket.create_connection((ip_text, CHAT_PORT), timeout=timeout):
+                return True
+        except OSError:
+            return False
 
     def get_values(self):
         return self.ip_input.text().strip(), (self.username_input.text().strip() or "Client")
@@ -716,13 +758,10 @@ class ClientWindow(QMainWindow):
 
         self.video_container = VideoContainer(placeholder_text="Conectando ao stream...")
 
-        self.leave_stream_button = QPushButton("🚪 Sair da transmissão")
-        self.rejoin_button = QPushButton("🔄 Entrar novamente")
-        self.rejoin_button.setEnabled(False)
-        self.leave_stream_button.clicked.connect(self._on_leave_stream)
-        self.rejoin_button.clicked.connect(self._on_rejoin)
-        self.sidebar.controls_layout.addWidget(self.leave_stream_button)
-        self.sidebar.controls_layout.addWidget(self.rejoin_button)
+        self.stream_toggle_button = QPushButton("🚪 Sair da transmissão")
+        self.stream_toggle_button.clicked.connect(self._on_toggle_stream)
+        self.sidebar.controls_layout.addWidget(self.stream_toggle_button)
+        self._watching = True
 
         chat_thread = ChatClientThread(username, host_ip)
         self.chat_panel = ChatPanel(username, chat_thread)
@@ -750,9 +789,8 @@ class ClientWindow(QMainWindow):
         self.video_thread = VideoReceiveThread(self.host_ip)
         self.video_thread.frame_received.connect(self._on_frame_received)
         self.video_thread.connection_lost.connect(self._on_connection_lost)
+        self.video_thread.reconnected.connect(self._on_reconnected)
         self.video_thread.start()
-        self.leave_stream_button.setEnabled(True)
-        self.rejoin_button.setEnabled(False)
 
     def _on_peer_connected(self, peer_username):
         self.sidebar.set_status(True, "Client (Viewing)")
@@ -781,21 +819,31 @@ class ClientWindow(QMainWindow):
             self._last_report_time = now
 
     def _on_connection_lost(self):
-        self.video_container.show_placeholder("Conexão com o stream perdida.")
-        self.leave_stream_button.setEnabled(False)
-        self.rejoin_button.setEnabled(True)
+        """A transmissão caiu (ex: Host clicou em Stop Streaming). Não é preciso
+        nenhuma ação do usuário — a thread já está tentando reconectar sozinha
+        em segundo plano."""
+        self.video_container.show_placeholder("Transmissão interrompida. Reconectando automaticamente...")
 
-    def _on_leave_stream(self):
-        if self.video_thread:
-            self.video_thread.stop()
-            self.video_thread.wait()
-        self.video_container.show_placeholder("Você saiu da transmissão.")
-        self.leave_stream_button.setEnabled(False)
-        self.rejoin_button.setEnabled(True)
+    def _on_reconnected(self):
+        """A thread conseguiu reconectar sozinha após uma queda."""
+        pass  # a própria chegada de novos frames já atualiza o vídeo e o status
 
-    def _on_rejoin(self):
-        self.video_container.show_placeholder("Conectando ao stream...")
-        self._start_video_thread()
+    def _on_toggle_stream(self):
+        """Ação explícita do usuário: sair da transmissão de propósito, ou
+        voltar a assistir depois de ter saído. Diferente da reconexão automática
+        acima, que cobre o Host parando/reiniciando a transmissão sozinho."""
+        if self._watching:
+            if self.video_thread:
+                self.video_thread.stop()
+                self.video_thread.wait()
+            self.video_container.show_placeholder("Você saiu da transmissão.")
+            self.stream_toggle_button.setText("🔄 Entrar novamente")
+            self._watching = False
+        else:
+            self.video_container.show_placeholder("Conectando ao stream...")
+            self._start_video_thread()
+            self.stream_toggle_button.setText("🚪 Sair da transmissão")
+            self._watching = True
 
     def closeEvent(self, event):
         self.chat_panel.shutdown()

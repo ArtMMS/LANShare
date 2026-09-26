@@ -10,12 +10,12 @@ from bitrate_controller import BitrateController
 from window_selector import get_window_region, get_current_monitor_index
 
 STREAM_PORT = 5556
+RECONNECT_RETRY_INTERVAL = 2.0
 
 
 class VideoSendServerThread(QThread):
     """Usado pelo Host: transmite continuamente assim que iniciado, mesmo sem
-    nenhum Client conectado. FPS e resolução-alvo agora são configuráveis
-    por instância, escolhidos nos dialogs de configuração."""
+    nenhum Client conectado. FPS e resolução-alvo são configuráveis por instância."""
 
     client_connected = Signal()
     client_disconnected = Signal()
@@ -153,39 +153,58 @@ class VideoSendServerThread(QThread):
 
 
 class VideoReceiveThread(QThread):
-    """Usado pelo Client: conecta no vídeo do Host. Uma nova instância é criada
-    a cada tentativa de entrar, permitindo sair e entrar de novo livremente."""
+    """Usado pelo Client: conecta no vídeo do Host e reconecta automaticamente
+    em segundo plano sempre que a conexão cair (ex: Host parou/reiniciou a
+    transmissão), sem exigir clique manual em 'Entrar novamente'. Só para de
+    tentar quando stop() é chamado explicitamente (o usuário decide sair)."""
 
     frame_received = Signal(bytes, float)
     connection_lost = Signal()
+    reconnected = Signal()
 
     def __init__(self, host_ip):
         super().__init__()
         self.host_ip = host_ip
         self._running = True
         self.socket = None
+        self._ever_connected = False
 
     def run(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            self.socket.connect((self.host_ip, STREAM_PORT))
-        except OSError:
-            self.connection_lost.emit()
-            return
-
         while self._running:
-            frame_bytes, timestamp = receive_frame(self.socket)
-            if frame_bytes is None:
-                if self._running:
-                    self.connection_lost.emit()
-                break
-            latency = max(0.0, time.time() - timestamp)
-            self.frame_received.emit(frame_bytes, latency)
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(2.0)
+            try:
+                self.socket.connect((self.host_ip, STREAM_PORT))
+                self.socket.settimeout(None)
+            except OSError:
+                try:
+                    self.socket.close()
+                except OSError:
+                    pass
+                if not self._running:
+                    break
+                time.sleep(RECONNECT_RETRY_INTERVAL)
+                continue
 
-        try:
-            self.socket.close()
-        except OSError:
-            pass
+            if self._ever_connected:
+                self.reconnected.emit()
+            self._ever_connected = True
+
+            while self._running:
+                frame_bytes, timestamp = receive_frame(self.socket)
+                if frame_bytes is None:
+                    break
+                latency = max(0.0, time.time() - timestamp)
+                self.frame_received.emit(frame_bytes, latency)
+
+            try:
+                self.socket.close()
+            except OSError:
+                pass
+
+            if self._running:
+                self.connection_lost.emit()
+                time.sleep(RECONNECT_RETRY_INTERVAL)
 
     def stop(self):
         self._running = False

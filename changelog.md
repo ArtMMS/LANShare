@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.4.0] - 2026-09-26
+
+### Added
+
+* Unified application (`main.py` + `gui.py`): chat and video now run in a single session/window, with an initial **Launcher** screen to choose between "Share my screen" or "Join a stream".
+* Monitor selection for screen sharing, now with a **visual preview** of each detected monitor.
+* Specific application window selection instead of sharing the entire monitor, with automatic region cropping and support for moving the window between monitors during the stream.
+* Host can now **stream without a Client connected** — capture starts as soon as streaming begins, and Clients can join or leave at any time without interrupting the Host.
+* Client can **leave and rejoin** a stream at any time without restarting the application.
+* Host-side **self-preview** of the active stream, replacing the empty waiting screen while streaming.
+* Functional **Start/Stop Streaming** buttons: Stop fully terminates capture and returns to the "Waiting for stream" state; Start reopens the complete configuration (monitor, window, resolution, FPS, bitrate) each time.
+* Graphical interface with a sidebar (status, connection, users, reserved audio controls for V0.5, stream information) and an integrated, collapsible chat panel.
+* Live interface metrics: FPS, bitrate, and **real latency** (calculated using a timestamp embedded in each frame).
+* Configurable **stream resolution** (720p, 1080p, 1440p, 2160p) and **frame rate** (15/30/60 FPS), selectable before starting the stream.
+* **Dynamic bitrate control**: JPEG quality is automatically adjusted to keep the actual bitrate close to the selected target (Low/Medium/High).
+* Automatic mapping between monitors (MSS) and capture outputs (DXCam) based on visual similarity, eliminating the need for manual calibration.
+* Synthetic cursor rendered on top of the frame.
+* Old standalone scripts (`host.py`, `client.py`, `stream_host.py`, `stream_client_gui.py`), superseded by the unified application.
+* Manual monitor calibration workflow (replaced by automatic mapping).
+
+### Technical
+
+* Added new external dependencies: `dxcam`, `pywin32`.
+* Updated the framing protocol (`streaming.py`) to include a capture timestamp in each frame, enabling latency calculation.
+
+---
+
 ## [0.3.0] - 2026-09-26
 
 ### Added
