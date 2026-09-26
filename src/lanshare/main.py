@@ -1,48 +1,15 @@
 import sys
 
-import mss
 from PySide6.QtWidgets import QApplication
 
-from screen_capture import choose_monitor, choose_resolution_scale, choose_target_bitrate
-from window_selector import choose_window
-from monitor_mapping import calibrate_monitor_mapping
-from gui import HostWindow, ClientWindow
+from gui import LauncherWindow
 
 
 def main():
-    role = input("Você é [1] Host ou [2] Client? ").strip()
-
-    if role == "1":
-        username = input("Digite seu nome de usuário: ").strip() or "Host"
-
-        with mss.mss() as sct:
-            mss_monitors = sct.monitors
-            monitor_index, monitor = choose_monitor(sct)
-
-        target_hwnd = choose_window(monitor)
-        resolution_scale = choose_resolution_scale()
-        target_bitrate_kbps = choose_target_bitrate()
-        monitor_mapping = calibrate_monitor_mapping(mss_monitors)
-
-        app = QApplication(sys.argv)
-        window = HostWindow(
-            username, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate_kbps
-        )
-        window.show()
-        sys.exit(app.exec())
-
-    elif role == "2":
-        host_ip = input("Digite o IP do Host: ").strip()
-        username = input("Digite seu nome de usuário: ").strip() or "Client"
-
-        app = QApplication(sys.argv)
-        window = ClientWindow(host_ip, username)
-        window.show()
-        sys.exit(app.exec())
-
-    else:
-        print("Opção inválida.")
+    app = QApplication(sys.argv)
+    launcher = LauncherWindow()
+    launcher.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

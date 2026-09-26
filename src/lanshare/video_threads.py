@@ -15,12 +15,14 @@ FRAME_INTERVAL = 1 / TARGET_FPS
 
 
 class VideoSendServerThread(QThread):
-    """Usado pelo Host: espera o Client conectar no vídeo, mas só transmite de fato
-    quando streaming_enabled é ligado (via start_streaming/stop_streaming)."""
+    """Usado pelo Host: transmite continuamente assim que iniciado, mesmo sem
+    nenhum Client conectado. Aceita e perde clientes a qualquer momento, sem
+    interromper a captura."""
 
     client_connected = Signal()
+    client_disconnected = Signal()
     fps_updated = Signal(float)
-    stats_updated = Signal(float, int)  # bitrate atual (kbps), qualidade JPEG atual
+    stats_updated = Signal(float, int)
     streaming_state_changed = Signal(bool)
     error_occurred = Signal(str)
 
@@ -34,8 +36,10 @@ class VideoSendServerThread(QThread):
         self.mss_monitors = mss_monitors
         self.resolution_scale = resolution_scale
         self.bitrate_controller = BitrateController(target_bitrate_kbps)
-        self.streaming_enabled = False
+        self.streaming_enabled = True  # começa transmitindo assim que a thread inicia
         self._running = True
+        self._clients = []
+        self._server_socket = None
 
     def start_streaming(self):
         self.streaming_enabled = True
@@ -46,24 +50,34 @@ class VideoSendServerThread(QThread):
         self.streaming_state_changed.emit(False)
 
     def run(self):
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_socket.bind(("0.0.0.0", STREAM_PORT))
-        server_socket.listen(1)
+        self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server_socket.bind(("0.0.0.0", STREAM_PORT))
+        self._server_socket.listen(5)
+        self._server_socket.settimeout(0.01)  # accept não bloqueante
 
         try:
-            conn, addr = server_socket.accept()
-        except OSError:
+            camera = dxcam.create(output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR")
+        except Exception as e:
+            self.error_occurred.emit(f"Falha ao iniciar captura: {e}")
             return
-        self.client_connected.emit()
-
-        camera = dxcam.create(output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR")
 
         frames_since_report = 0
         last_report_time = time.time()
 
         try:
             while self._running:
+                # tenta aceitar um novo client sem travar o loop de captura
+                try:
+                    conn, addr = self._server_socket.accept()
+                    conn.settimeout(None)
+                    self._clients.append(conn)
+                    self.client_connected.emit()
+                except socket.timeout:
+                    pass
+                except OSError:
+                    pass
+
                 if not self.streaming_enabled:
                     time.sleep(0.05)
                     continue
@@ -98,10 +112,22 @@ class VideoSendServerThread(QThread):
                     continue
 
                 frame = resize_frame(frame, self.resolution_scale)
-
                 current_quality = self.bitrate_controller.quality
                 frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
-                send_frame(conn, frame_bytes, timestamp=frame_start)
+
+                if self._clients:
+                    still_connected = []
+                    for client_conn in self._clients:
+                        try:
+                            send_frame(client_conn, frame_bytes, timestamp=frame_start)
+                            still_connected.append(client_conn)
+                        except OSError:
+                            try:
+                                client_conn.close()
+                            except OSError:
+                                pass
+                            self.client_disconnected.emit()
+                    self._clients = still_connected
 
                 new_quality = self.bitrate_controller.register_frame(len(frame_bytes))
 
@@ -119,45 +145,59 @@ class VideoSendServerThread(QThread):
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 
-        except (ConnectionResetError, OSError) as e:
+        except Exception as e:
             self.error_occurred.emit(str(e))
         finally:
-            conn.close()
-            server_socket.close()
+            for c in self._clients:
+                try:
+                    c.close()
+                except OSError:
+                    pass
+            self._server_socket.close()
 
     def stop(self):
         self._running = False
 
 
 class VideoReceiveThread(QThread):
-    """Usado pelo Client: conecta no vídeo do Host e recebe os frames, junto com a
-    latência calculada a partir do timestamp embutido em cada frame."""
+    """Usado pelo Client: conecta no vídeo do Host. Uma nova instância é criada
+    a cada tentativa de entrar, permitindo sair e entrar de novo livremente."""
 
-    frame_received = Signal(bytes, float)  # bytes do frame, latência em segundos
+    frame_received = Signal(bytes, float)
     connection_lost = Signal()
 
     def __init__(self, host_ip):
         super().__init__()
         self.host_ip = host_ip
         self._running = True
+        self.socket = None
 
     def run(self):
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            client_socket.connect((self.host_ip, STREAM_PORT))
+            self.socket.connect((self.host_ip, STREAM_PORT))
         except OSError:
             self.connection_lost.emit()
             return
 
         while self._running:
-            frame_bytes, timestamp = receive_frame(client_socket)
+            frame_bytes, timestamp = receive_frame(self.socket)
             if frame_bytes is None:
-                self.connection_lost.emit()
+                if self._running:
+                    self.connection_lost.emit()
                 break
             latency = max(0.0, time.time() - timestamp)
             self.frame_received.emit(frame_bytes, latency)
 
-        client_socket.close()
+        try:
+            self.socket.close()
+        except OSError:
+            pass
 
     def stop(self):
         self._running = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except OSError:
+                pass

@@ -2,23 +2,32 @@ import time
 
 import cv2
 import dxcam
+import mss
+import numpy as np
 
 
-def _count_dxcam_outputs():
-    info = dxcam.output_info()
-    return len([line for line in info.strip().split("\n") if line.strip()])
+def _small_gray(frame, size=(160, 90)):
+    resized = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    return gray.astype(np.float32)
 
 
-def calibrate_monitor_mapping(mss_monitors):
-    """Descobre a correspondência real entre os índices de monitor do mss e os
-    output_idx do dxcam. O dxcam não informa a posição (left/top) de cada saída,
-    só a ordem interna dele — que pode não bater com a do mss, especialmente
-    com monitores de mesma resolução. Por isso, pedimos confirmação visual."""
+def auto_map_monitors(mss_monitors):
+    """Descobre automaticamente a correspondência entre os índices de monitor do mss
+    (que sabemos a posição) e as saídas do dxcam (que não informam posição),
+    comparando a similaridade visual de uma prévia de cada um. Não pede nada ao usuário."""
 
-    output_count = _count_dxcam_outputs()
-    previews = []
+    real_monitors = [(i, m) for i, m in enumerate(mss_monitors) if i != 0]
 
-    print("\n[CALIBRAÇÃO] Identificando monitores, aguarde...")
+    mss_previews = {}
+    with mss.mss() as sct:
+        for i, monitor in real_monitors:
+            shot = sct.grab(monitor)
+            frame = np.array(shot, dtype=np.uint8)[:, :, :3]
+            mss_previews[i] = _small_gray(frame)
+
+    dxcam_previews = {}
+    output_count = len([line for line in dxcam.output_info().strip().split("\n") if line.strip()])
     for output_idx in range(output_count):
         camera = dxcam.create(output_idx=output_idx, output_color="BGR")
         frame = None
@@ -28,34 +37,23 @@ def calibrate_monitor_mapping(mss_monitors):
                 break
             time.sleep(0.05)
         del camera
+        if frame is not None:
+            dxcam_previews[output_idx] = _small_gray(frame)
 
-        if frame is None:
-            print(f"[CALIBRAÇÃO] Não foi possível capturar a saída {output_idx}, pulando.")
-            continue
-
-        preview_path = f"monitor_preview_{output_idx}.jpg"
-        small = cv2.resize(frame, (frame.shape[1] // 3, frame.shape[0] // 3))
-        cv2.imwrite(preview_path, small)
-        previews.append(output_idx)
-        print(f"[CALIBRAÇÃO] Prévia salva: {preview_path} (output_idx={output_idx})")
-
-    print("\nAbra essas imagens (na raiz do projeto) e identifique qual monitor cada uma mostra.")
-
-    real_monitors = [(i, m) for i, m in enumerate(mss_monitors) if i != 0]
-    for i, monitor in real_monitors:
-        print(f"  Monitor mss [{i}]: posição left={monitor['left']} top={monitor['top']}, "
-              f"{monitor['width']}x{monitor['height']}")
-
-    mapping = {}  # mss_index -> dxcam_output_idx
-    for i, monitor in real_monitors:
-        while True:
-            escolha = input(
-                f"\nQual output_idx corresponde ao monitor mss [{i}] "
-                f"(left={monitor['left']}, top={monitor['top']})? "
-            ).strip()
-            if escolha.isdigit() and int(escolha) in previews:
-                mapping[i] = int(escolha)
-                break
-            print("Opção inválida, tente novamente.")
+    mapping = {}
+    used_outputs = set()
+    for mss_idx, mss_img in mss_previews.items():
+        best_output, best_diff = None, None
+        for output_idx, dx_img in dxcam_previews.items():
+            if output_idx in used_outputs:
+                continue
+            if mss_img.shape != dx_img.shape:
+                continue
+            diff = float(np.mean(np.abs(mss_img - dx_img)))
+            if best_diff is None or diff < best_diff:
+                best_diff, best_output = diff, output_idx
+        if best_output is not None:
+            mapping[mss_idx] = best_output
+            used_outputs.add(best_output)
 
     return mapping

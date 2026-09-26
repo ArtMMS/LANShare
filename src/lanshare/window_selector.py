@@ -18,8 +18,7 @@ def list_windows():
 
 def window_is_in_monitor(hwnd, monitor):
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    mon_left = monitor["left"]
-    mon_top = monitor["top"]
+    mon_left, mon_top = monitor["left"], monitor["top"]
     mon_right = monitor["left"] + monitor["width"]
     mon_bottom = monitor["top"] + monitor["height"]
 
@@ -28,22 +27,8 @@ def window_is_in_monitor(hwnd, monitor):
     return True
 
 
-def choose_window(monitor):
-    all_windows = list_windows()
-    windows = [(hwnd, title) for hwnd, title in all_windows if window_is_in_monitor(hwnd, monitor)]
-
-    print("\nO que deseja compartilhar?")
-    print("  [0] Monitor inteiro")
-    for i, (hwnd, title) in enumerate(windows, start=1):
-        print(f"  [{i}] {title}")
-
-    while True:
-        escolha = input("\nDigite o número da opção: ").strip()
-        if escolha == "0":
-            return None
-        if escolha.isdigit() and 1 <= int(escolha) <= len(windows):
-            return windows[int(escolha) - 1][0]
-        print("Opção inválida, tente novamente.")
+def windows_in_monitor(monitor):
+    return [(hwnd, title) for hwnd, title in list_windows() if window_is_in_monitor(hwnd, monitor)]
 
 
 def get_window_region(hwnd, monitor):
@@ -69,8 +54,6 @@ def get_window_region(hwnd, monitor):
 
 
 def get_current_monitor_index(hwnd, mss_monitors):
-    """Descobre em qual monitor (índice no formato mss) a janela está AGORA,
-    já que ela pode ter sido arrastada para outro monitor durante a transmissão."""
     try:
         hmonitor = win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTONEAREST)
         info = win32api.GetMonitorInfo(hmonitor)

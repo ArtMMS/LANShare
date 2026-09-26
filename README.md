@@ -73,7 +73,7 @@ More information will be added as issues are discovered.
 - [x] Select which application to share
 - [x] Implement continuous streaming
 - [x] Adjust resolution & Control bitrate
-- [ ] Basic GUI
+- [x] Basic GUI
 
 ### V0.5 — Audio
 
