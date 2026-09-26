@@ -3,3 +3,7 @@ pip install -r requirements.txt
 # Screen capture
 mss>=10.1.0
 python -m pip install mss
+
+# Image processing
+Pillow>=11.0.0
+python -m pip install Pillow

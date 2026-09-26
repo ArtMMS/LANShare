@@ -1,13 +1,9 @@
 # Changelog
 
-## [0.3.0] - 2026-09-25
+## [0.3.0] - 2026-09-26
 
 ### Added
-- screen_capture.py test script to validate screen capture functionality independently from the Host/Client connection.
-- Full-screen capture using the mss library.
-- Monitor selection support: users can choose which connected monitor to capture when multiple displays are available.
-- Export captured screenshots as .png files.
-- Added a new external dependency: mss (cross-platform screen capture).
+-
 
 ---
 

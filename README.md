@@ -25,7 +25,8 @@ The project is currently in early development, starting with the basic network c
 
 - **Python 3.11+**
 - **Radmin VPN** — Virtual LAN connection
-- **mss** — Screen Capture
+- **mss 10.1.0** — Screen Capture
+- **Pillow 11.0.0** — Image processing
 
 ---
 
