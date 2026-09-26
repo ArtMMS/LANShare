@@ -37,9 +37,7 @@ The project is currently in early development, starting with the basic network c
 
 ## 🐛 Known Issues
 
-This project is currently in early development.
-
-More information will be added as issues are discovered.
+- After switching to a non-blocking accept() socket to fix hidden per-frame latency, the Client gets stuck connecting to the stream indefinitely.
 
 ---
 
@@ -87,7 +85,6 @@ More information will be added as issues are discovered.
 ### V0.6 — Multiple Clients
 
 - [ ] Support multiple viewers
-- [ ] Display connected users
 
 ---
 
