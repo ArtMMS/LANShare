@@ -5,8 +5,8 @@ import dxcam
 from PySide6.QtCore import QThread, Signal
 
 from streaming import send_frame, receive_frame
-from screen_capture import compress_frame, resize_frame
-from bitrate_controller import BitrateController
+from screen_capture import resize_frame
+from video_codec import create_encoder, create_decoder, encode_frame, decode_packet
 from window_selector import get_window_region, get_current_monitor_index
 
 STREAM_PORT = 5556
@@ -14,15 +14,19 @@ RECONNECT_RETRY_INTERVAL = 2.0
 
 
 class VideoSendServerThread(QThread):
-    """Usado pelo Host: transmite continuamente assim que iniciado, mesmo sem
-    nenhum Client conectado. FPS e resolução-alvo são configuráveis por instância."""
+    """Usado pelo Host: transmite vídeo H.264 continuamente, acelerado por GPU
+    quando disponível (Nvidia/AMD/Intel), com fallback automático para
+    software. Usa o modo de captura contínua do dxcam (video_mode=True),
+    que roda em thread própria e entrega frames de forma mais consistente
+    que chamadas avulsas de grab() — essencial para manter FPS estável
+    mesmo com a tela parada."""
 
     client_connected = Signal()
     client_disconnected = Signal()
     fps_updated = Signal(float)
-    stats_updated = Signal(float, int)
-    streaming_state_changed = Signal(bool)
-    frame_captured = Signal(bytes)
+    stats_updated = Signal(float)
+    encoder_selected = Signal(str)
+    frame_captured = Signal(object)
     error_occurred = Signal(str)
 
     def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
@@ -34,12 +38,19 @@ class VideoSendServerThread(QThread):
         self.monitor_mapping = monitor_mapping
         self.mss_monitors = mss_monitors
         self.target_height = target_height
-        self.frame_interval = 1 / target_fps
-        self.bitrate_controller = BitrateController(target_bitrate_kbps)
-        self.streaming_enabled = True
+        self.target_fps = target_fps
+        self.target_bitrate_kbps = target_bitrate_kbps
         self._running = True
         self._clients = []
         self._server_socket = None
+
+    def _current_region(self):
+        if self.target_hwnd is None:
+            return None
+        return get_window_region(self.target_hwnd, self.monitor)
+
+    def _start_capture(self, camera, region):
+        camera.start(region=region, target_fps=self.target_fps, video_mode=True)
 
     def run(self):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -54,8 +65,42 @@ class VideoSendServerThread(QThread):
             self.error_occurred.emit(f"Falha ao iniciar captura: {e}")
             return
 
+        current_region = self._current_region()
+        try:
+            self._start_capture(camera, current_region)
+        except Exception as e:
+            self.error_occurred.emit(f"Falha ao iniciar captura contínua: {e}")
+            return
+
+        first_frame = None
+        for _ in range(300):
+            raw = camera.get_latest_frame()
+            if raw is not None:
+                first_frame = resize_frame(raw, self.target_height)
+                break
+            time.sleep(0.005)
+
+        if first_frame is None:
+            self.error_occurred.emit("Não foi possível capturar o primeiro frame.")
+            camera.stop()
+            return
+
+        height, width = first_frame.shape[:2]
+        try:
+            encoder_ctx, encoder_name, encoder_label = create_encoder(
+                width, height, self.target_fps, self.target_bitrate_kbps
+            )
+            self.encoder_selected.emit(encoder_label)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+            camera.stop()
+            return
+
         frames_since_report = 0
+        bytes_since_report = 0
+        encode_time_total = 0.0
         last_report_time = time.time()
+        pending_frame = first_frame
 
         try:
             while self._running:
@@ -69,78 +114,101 @@ class VideoSendServerThread(QThread):
                 except OSError:
                     pass
 
-                if not self.streaming_enabled:
-                    time.sleep(0.05)
-                    continue
-
                 frame_start = time.time()
 
-                if self.target_hwnd is not None:
-                    current_index = get_current_monitor_index(self.target_hwnd, self.mss_monitors)
-                    if (current_index is not None and current_index != self.monitor_index
-                            and current_index in self.monitor_mapping):
-                        del camera
-                        self.monitor_index = current_index
-                        self.monitor = self.mss_monitors[current_index]
-                        camera = dxcam.create(
-                            output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR"
-                        )
-
-                    region = get_window_region(self.target_hwnd, self.monitor)
-                    if region is None:
-                        time.sleep(0.01)
-                        continue
-                    try:
-                        frame = camera.grab(region=region)
-                    except Exception:
-                        time.sleep(0.01)
-                        continue
+                if pending_frame is not None:
+                    frame = pending_frame
+                    pending_frame = None
                 else:
-                    frame = camera.grab()
+                    if self.target_hwnd is not None:
+                        current_index = get_current_monitor_index(self.target_hwnd, self.mss_monitors)
+                        if (current_index is not None and current_index != self.monitor_index
+                                and current_index in self.monitor_mapping):
+                            camera.stop()
+                            del camera
+                            self.monitor_index = current_index
+                            self.monitor = self.mss_monitors[current_index]
+                            camera = dxcam.create(
+                                output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR"
+                            )
+                            current_region = self._current_region()
+                            if current_region is None:
+                                time.sleep(0.01)
+                                continue
+                            self._start_capture(camera, current_region)
+                        else:
+                            new_region = self._current_region()
+                            if new_region is None:
+                                time.sleep(0.01)
+                                continue
+                            if new_region != current_region:
+                                # a janela moveu/redimensionou dentro do mesmo monitor;
+                                # reinicia a captura contínua com a nova região
+                                current_region = new_region
+                                camera.stop()
+                                try:
+                                    self._start_capture(camera, current_region)
+                                except Exception:
+                                    time.sleep(0.01)
+                                    continue
 
-                if frame is None:
-                    time.sleep(0.001)
+                    raw = camera.get_latest_frame()
+                    if raw is None:
+                        time.sleep(0.001)
+                        continue
+                    frame = resize_frame(raw, self.target_height)
+
+                self.frame_captured.emit(frame)
+
+                t_encode_start = time.time()
+                try:
+                    packets = encode_frame(encoder_ctx, frame)
+                except Exception as e:
+                    self.error_occurred.emit(f"Erro ao codificar frame: {e}")
+                    time.sleep(0.01)
                     continue
+                encode_time_total += (time.time() - t_encode_start)
 
-                frame = resize_frame(frame, self.target_height)
-                current_quality = self.bitrate_controller.quality
-                frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
+                for packet in packets:
+                    packet_bytes = bytes(packet)
+                    bytes_since_report += len(packet_bytes)
 
-                self.frame_captured.emit(frame_bytes)
-
-                if self._clients:
-                    still_connected = []
-                    for client_conn in self._clients:
-                        try:
-                            send_frame(client_conn, frame_bytes, timestamp=frame_start)
-                            still_connected.append(client_conn)
-                        except OSError:
+                    if self._clients:
+                        still_connected = []
+                        for client_conn in self._clients:
                             try:
-                                client_conn.close()
+                                send_frame(client_conn, packet_bytes, timestamp=frame_start)
+                                still_connected.append(client_conn)
                             except OSError:
-                                pass
-                            self.client_disconnected.emit()
-                    self._clients = still_connected
-
-                new_quality = self.bitrate_controller.register_frame(len(frame_bytes))
+                                try:
+                                    client_conn.close()
+                                except OSError:
+                                    pass
+                                self.client_disconnected.emit()
+                        self._clients = still_connected
 
                 frames_since_report += 1
                 now = time.time()
                 if now - last_report_time >= 1.0:
-                    fps = frames_since_report / (now - last_report_time)
+                    elapsed = now - last_report_time
+                    fps = frames_since_report / elapsed
+                    kbps = (bytes_since_report * 8 / 1024) / elapsed
+                    avg_encode_ms = (encode_time_total * 1000) / frames_since_report
+                    print(f"[STREAM] FPS: {fps:.1f} | kbps: {kbps:.0f} | encode médio: {avg_encode_ms:.1f}ms")
                     self.fps_updated.emit(fps)
-                    self.stats_updated.emit(self.bitrate_controller.current_bitrate_kbps(), new_quality)
+                    self.stats_updated.emit(kbps)
                     frames_since_report = 0
+                    bytes_since_report = 0
+                    encode_time_total = 0.0
                     last_report_time = now
-
-                elapsed = time.time() - frame_start
-                sleep_time = self.frame_interval - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
 
         except Exception as e:
             self.error_occurred.emit(str(e))
         finally:
+            try:
+                camera.stop()
+            except Exception:
+                pass
             for c in self._clients:
                 try:
                     c.close()
@@ -153,12 +221,10 @@ class VideoSendServerThread(QThread):
 
 
 class VideoReceiveThread(QThread):
-    """Usado pelo Client: conecta no vídeo do Host e reconecta automaticamente
-    em segundo plano sempre que a conexão cair (ex: Host parou/reiniciou a
-    transmissão), sem exigir clique manual em 'Entrar novamente'. Só para de
-    tentar quando stop() é chamado explicitamente (o usuário decide sair)."""
+    """Usado pelo Client: recebe o stream H.264 e decodifica continuamente.
+    Reconecta automaticamente em segundo plano se a conexão cair."""
 
-    frame_received = Signal(bytes, float)
+    frame_received = Signal(object, float, int)
     connection_lost = Signal()
     reconnected = Signal()
 
@@ -170,6 +236,8 @@ class VideoReceiveThread(QThread):
         self._ever_connected = False
 
     def run(self):
+        decoder_ctx = create_decoder()
+
         while self._running:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.settimeout(2.0)
@@ -191,11 +259,16 @@ class VideoReceiveThread(QThread):
             self._ever_connected = True
 
             while self._running:
-                frame_bytes, timestamp = receive_frame(self.socket)
-                if frame_bytes is None:
+                packet_bytes, timestamp = receive_frame(self.socket)
+                if packet_bytes is None:
                     break
                 latency = max(0.0, time.time() - timestamp)
-                self.frame_received.emit(frame_bytes, latency)
+                try:
+                    frames = decode_packet(decoder_ctx, packet_bytes)
+                except Exception:
+                    continue
+                for frame_ndarray in frames:
+                    self.frame_received.emit(frame_ndarray, latency, len(packet_bytes))
 
             try:
                 self.socket.close()

@@ -31,6 +31,7 @@ The project is currently in early development, starting with the basic network c
 - **numpy 2.5.3** — Numerical and array processing
 - **PySide6 6.9.0** — GUI
 - **pywin32-312** — Windows API and window management
+- **PyAV 18.1.0** — FFmpeg-based audio and video processing
 
 ---
 

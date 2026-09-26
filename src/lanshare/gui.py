@@ -1,22 +1,18 @@
-import sys
-import mss
 import ipaddress
 import socket
 
-
+import mss
+import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QTextEdit, QLineEdit,
     QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QSlider,
     QDialog, QListWidget, QListWidgetItem, QRadioButton,
-    QComboBox, QDialogButtonBox, QApplication
+    QComboBox, QDialogButtonBox, QApplication, QMessageBox
 )
 
-from PySide6.QtWidgets import QMessageBox  # adicione QMessageBox à linha de import já existente
 from chat_threads import ChatServerThread, ChatClientThread, CHAT_PORT
-
-from chat_threads import ChatServerThread, ChatClientThread
 from video_threads import VideoSendServerThread, VideoReceiveThread
 from screen_capture import (
     list_monitors, capture_monitor_preview, RESOLUTION_PRESETS, FPS_PRESETS, BITRATE_PRESETS
@@ -59,14 +55,16 @@ def status_dot(active):
     return dot
 
 
-def numpy_bgr_to_pixmap(frame, max_width=280):
+def numpy_bgr_to_pixmap(frame, max_width=None):
     import cv2
+    frame = np.ascontiguousarray(frame)
     height, width = frame.shape[:2]
-    scale = max_width / width
-    small = cv2.resize(frame, (max_width, int(height * scale)))
-    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    if max_width is not None and width > max_width:
+        scale = max_width / width
+        frame = cv2.resize(frame, (max_width, int(height * scale)))
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     qimage = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888)
-    return QPixmap.fromImage(qimage)
+    return QPixmap.fromImage(qimage.copy())
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +191,8 @@ class StreamSettingsDialog(QDialog):
         layout.addWidget(self.bitrate_combo)
 
         note = QLabel(
-            "Nota: 60 FPS e resoluções acima de 1080p exigem mais do hardware "
-            "e podem não ser totalmente atingidos sem aceleração por GPU."
+            "O encoder de vídeo (GPU quando disponível: Nvidia/AMD/Intel, ou "
+            "software como último recurso) é detectado automaticamente."
         )
         note.setObjectName("dimText")
         note.setWordWrap(True)
@@ -266,8 +264,6 @@ class JoinStreamDialog(QDialog):
             return False
 
     def _host_reachable(self, ip_text, timeout=2.0):
-        """Testa uma conexão real e rápida na porta do chat, que fica ativa assim
-        que o Host abre o app — mesmo antes de ele começar a transmitir vídeo."""
         try:
             with socket.create_connection((ip_text, CHAT_PORT), timeout=timeout):
                 return True
@@ -343,9 +339,6 @@ class LauncherWindow(QMainWindow):
         self.setCentralWidget(container)
 
     def _on_transmit_clicked(self):
-        """Só pede o nome de usuário aqui. A escolha de monitor/janela/qualidade
-        acontece dentro da HostWindow, ao clicar em 'Start Streaming' — assim
-        dá para refazer essas escolhas toda vez que a transmissão for reiniciada."""
         username_dialog = HostSetupDialog()
         if username_dialog.exec() != QDialog.Accepted:
             return
@@ -393,13 +386,12 @@ class VideoContainer(QWidget):
     def set_live(self, live):
         self.badge.setVisible(live)
 
-    def update_frame(self, frame_bytes):
-        image = QImage.fromData(frame_bytes, "JPG")
-        pixmap = QPixmap.fromImage(image)
+    def update_frame(self, frame_ndarray):
+        """Recebe um frame já decodificado (numpy array BGR) e exibe."""
+        pixmap = numpy_bgr_to_pixmap(frame_ndarray)
         self.video_label.setPixmap(pixmap)
 
     def show_placeholder(self, text=None):
-        """Limpa o vídeo e volta a exibir o texto de espera (ex: ao parar a transmissão)."""
         self.video_label.setPixmap(QPixmap())
         self.video_label.setText(text or self.placeholder_text)
         self.set_live(False)
@@ -550,9 +542,12 @@ class Sidebar(QFrame):
         self.latency_label.setObjectName("dimText")
         self.bitrate_label = QLabel("Bitrate: —")
         self.bitrate_label.setObjectName("dimText")
+        self.encoder_label = QLabel("Encoder: —")
+        self.encoder_label.setObjectName("dimText")
         self.layout.addWidget(self.fps_label)
         self.layout.addWidget(self.latency_label)
         self.layout.addWidget(self.bitrate_label)
+        self.layout.addWidget(self.encoder_label)
 
         self.layout.addStretch()
 
@@ -590,6 +585,7 @@ class Sidebar(QFrame):
         self.fps_label.setText("FPS: —")
         self.latency_label.setText("Latência: —")
         self.bitrate_label.setText("Bitrate: —")
+        self.encoder_label.setText("Encoder: —")
 
     def set_status(self, active, text):
         self.status_dot.setObjectName("statusDot" if active else "statusDotOff")
@@ -607,10 +603,12 @@ class Sidebar(QFrame):
         if bitrate_kbps is not None:
             self.bitrate_label.setText(f"Bitrate: {bitrate_kbps:.0f} kbps")
 
+    def set_encoder(self, label_text):
+        self.encoder_label.setText(f"Encoder: {label_text}")
+
 
 # ---------------------------------------------------------------------------
-# HostWindow — abre parado ("Aguardando stream"); Start reconfigura tudo;
-# Stop encerra a captura por completo e volta ao estado inicial
+# HostWindow
 # ---------------------------------------------------------------------------
 
 class HostWindow(QMainWindow):
@@ -651,11 +649,9 @@ class HostWindow(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
 
-        self.video_thread = None  # só existe enquanto a transmissão está ativa
+        self.video_thread = None
 
     def _on_start(self):
-        """Reabre a configuração completa (monitor, janela, resolução, bitrate)
-        toda vez que a transmissão é (re)iniciada."""
         monitor_dialog = MonitorChoiceDialog()
         if monitor_dialog.exec() != QDialog.Accepted:
             return
@@ -685,8 +681,9 @@ class HostWindow(QMainWindow):
         self.video_thread.client_disconnected.connect(self._on_client_disconnected)
         self.video_thread.fps_updated.connect(lambda fps: self.sidebar.set_stream_info(fps=fps))
         self.video_thread.stats_updated.connect(
-            lambda kbps, quality: self.sidebar.set_stream_info(bitrate_kbps=kbps)
+            lambda kbps: self.sidebar.set_stream_info(bitrate_kbps=kbps)
         )
+        self.video_thread.encoder_selected.connect(self.sidebar.set_encoder)
         self.video_thread.frame_captured.connect(self._on_frame_captured)
         self.video_thread.error_occurred.connect(self._on_stream_error)
         self.video_thread.start()
@@ -698,8 +695,6 @@ class HostWindow(QMainWindow):
         self.sidebar.set_connection("Transmitindo — aguardando visualizadores")
 
     def _on_stop(self):
-        """Encerra a transmissão por completo. Volta ao estado inicial:
-        placeholder 'Aguardando stream' e Start Streaming disponível de novo."""
         if self.video_thread:
             self.video_thread.stop()
             self.video_thread.wait()
@@ -713,9 +708,8 @@ class HostWindow(QMainWindow):
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
 
-    def _on_frame_captured(self, frame_bytes):
-        """Alimenta a prévia do próprio Host com os mesmos frames que estão sendo enviados."""
-        self.video_container.update_frame(frame_bytes)
+    def _on_frame_captured(self, frame_ndarray):
+        self.video_container.update_frame(frame_ndarray)
 
     def _on_client_connected(self):
         self.sidebar.set_connection("Client(s) assistindo")
@@ -730,7 +724,7 @@ class HostWindow(QMainWindow):
         self.sidebar.add_user(f"{peer_username} (Client)")
 
     def _on_peer_disconnected(self, reason):
-        pass  # o vídeo continua rodando mesmo sem o chat conectado
+        pass
 
     def closeEvent(self, event):
         self.chat_panel.shutdown()
@@ -741,7 +735,7 @@ class HostWindow(QMainWindow):
 
 
 # ---------------------------------------------------------------------------
-# ClientWindow — pode sair e entrar de novo livremente
+# ClientWindow
 # ---------------------------------------------------------------------------
 
 class ClientWindow(QMainWindow):
@@ -799,13 +793,13 @@ class ClientWindow(QMainWindow):
     def _on_peer_disconnected(self, reason):
         self.sidebar.set_status(False, f"Client ({reason})")
 
-    def _on_frame_received(self, frame_bytes, latency):
+    def _on_frame_received(self, frame_ndarray, latency, packet_size):
         import time
-        self.video_container.update_frame(frame_bytes)
+        self.video_container.update_frame(frame_ndarray)
         self.video_container.set_live(True)
 
         self._frame_count += 1
-        self._bytes_count += len(frame_bytes)
+        self._bytes_count += packet_size
         now = time.time()
         if self._last_report_time is None:
             self._last_report_time = now
@@ -819,19 +813,12 @@ class ClientWindow(QMainWindow):
             self._last_report_time = now
 
     def _on_connection_lost(self):
-        """A transmissão caiu (ex: Host clicou em Stop Streaming). Não é preciso
-        nenhuma ação do usuário — a thread já está tentando reconectar sozinha
-        em segundo plano."""
         self.video_container.show_placeholder("Transmissão interrompida. Reconectando automaticamente...")
 
     def _on_reconnected(self):
-        """A thread conseguiu reconectar sozinha após uma queda."""
-        pass  # a própria chegada de novos frames já atualiza o vídeo e o status
+        pass
 
     def _on_toggle_stream(self):
-        """Ação explícita do usuário: sair da transmissão de propósito, ou
-        voltar a assistir depois de ter saído. Diferente da reconexão automática
-        acima, que cobre o Host parando/reiniciando a transmissão sozinho."""
         if self._watching:
             if self.video_thread:
                 self.video_thread.stop()
