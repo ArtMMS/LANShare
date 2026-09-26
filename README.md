@@ -71,7 +71,7 @@ More information will be added as issues are discovered.
 
 - [x] Select which monitor to share
 - [x] Select which application to share
-- [ ] Implement continuous streaming
+- [x] Implement continuous streaming
 - [ ] Reduce latency
 - [ ] Control bitrate
 - [ ] Adjust resolution
