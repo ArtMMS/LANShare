@@ -15,11 +15,13 @@ FRAME_INTERVAL = 1 / TARGET_FPS
 
 
 class VideoSendServerThread(QThread):
-    """Usado pelo Host: espera o Client conectar no vídeo e começa a transmitir."""
+    """Usado pelo Host: espera o Client conectar no vídeo, mas só transmite de fato
+    quando streaming_enabled é ligado (via start_streaming/stop_streaming)."""
 
     client_connected = Signal()
     fps_updated = Signal(float)
     stats_updated = Signal(float, int)  # bitrate atual (kbps), qualidade JPEG atual
+    streaming_state_changed = Signal(bool)
     error_occurred = Signal(str)
 
     def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
@@ -32,7 +34,16 @@ class VideoSendServerThread(QThread):
         self.mss_monitors = mss_monitors
         self.resolution_scale = resolution_scale
         self.bitrate_controller = BitrateController(target_bitrate_kbps)
+        self.streaming_enabled = False
         self._running = True
+
+    def start_streaming(self):
+        self.streaming_enabled = True
+        self.streaming_state_changed.emit(True)
+
+    def stop_streaming(self):
+        self.streaming_enabled = False
+        self.streaming_state_changed.emit(False)
 
     def run(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -53,6 +64,10 @@ class VideoSendServerThread(QThread):
 
         try:
             while self._running:
+                if not self.streaming_enabled:
+                    time.sleep(0.05)
+                    continue
+
                 frame_start = time.time()
 
                 if self.target_hwnd is not None:
@@ -86,7 +101,7 @@ class VideoSendServerThread(QThread):
 
                 current_quality = self.bitrate_controller.quality
                 frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
-                send_frame(conn, frame_bytes)
+                send_frame(conn, frame_bytes, timestamp=frame_start)
 
                 new_quality = self.bitrate_controller.register_frame(len(frame_bytes))
 
@@ -115,9 +130,10 @@ class VideoSendServerThread(QThread):
 
 
 class VideoReceiveThread(QThread):
-    """Usado pelo Client: conecta no vídeo do Host e recebe os frames."""
+    """Usado pelo Client: conecta no vídeo do Host e recebe os frames, junto com a
+    latência calculada a partir do timestamp embutido em cada frame."""
 
-    frame_received = Signal(bytes)
+    frame_received = Signal(bytes, float)  # bytes do frame, latência em segundos
     connection_lost = Signal()
 
     def __init__(self, host_ip):
@@ -134,11 +150,12 @@ class VideoReceiveThread(QThread):
             return
 
         while self._running:
-            frame_bytes = receive_frame(client_socket)
+            frame_bytes, timestamp = receive_frame(client_socket)
             if frame_bytes is None:
                 self.connection_lost.emit()
                 break
-            self.frame_received.emit(frame_bytes)
+            latency = max(0.0, time.time() - timestamp)
+            self.frame_received.emit(frame_bytes, latency)
 
         client_socket.close()
 
