@@ -88,10 +88,6 @@ More information will be added as issues are discovered.
 - [ ] Support multiple viewers
 - [ ] Display connected users
 
-### V1.0 - Optimization
-- [ ] Reduce latency
-- [ ] Optimize network bandwidth
-
 ---
 
 ## 📋 License
