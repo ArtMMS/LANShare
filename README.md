@@ -58,8 +58,8 @@ More information will be added as issues are discovered.
 ### V0.3 — Screen Capture
 
 - [x] Capture the Host's entire screen
-- [ ] Compress frames
-- [ ] Send frames to the Client
+- [x] Compress frames
+- [x] Send frames to the Client
 - [ ] Display the screen on the Client
 - [ ] Target approximately 30 FPS
 
