@@ -4,28 +4,42 @@ import numpy as np
 
 DEFAULT_JPEG_QUALITY = 70
 
-RESOLUTION_SCALES = {"100%": 1.0, "75%": 0.75, "50%": 0.5}
+# Resolução-alvo pela altura (em pixels), no estilo "qualidade de vídeo" (YouTube etc.)
+RESOLUTION_PRESETS = {
+    "720p (HD)": 720,
+    "1080p (Full HD)": 1080,
+    "1440p (Quad HD)": 1440,
+    "2160p (4K)": 2160,
+}
+
+FPS_PRESETS = {
+    "15 FPS": 15,
+    "30 FPS": 30,
+    "60 FPS": 60,
+}
+
 BITRATE_PRESETS = {"Baixo (~1500 kbps)": 1500, "Médio (~4000 kbps)": 4000, "Alto (~8000 kbps)": 8000}
 
 
 def list_monitors():
-    """Retorna [(index, monitor_dict), ...] só dos monitores reais (ignora o índice 0)."""
     with mss.mss() as sct:
         return [(i, m) for i, m in enumerate(sct.monitors) if i != 0]
 
 
 def capture_monitor_preview(monitor):
-    """Tira um print rápido do monitor via mss, para exibir como miniatura na interface.
-    Retorna um array numpy BGR."""
     with mss.mss() as sct:
         shot = sct.grab(monitor)
         return np.ascontiguousarray(np.array(shot, dtype=np.uint8)[:, :, :3])
 
 
-def resize_frame(frame, scale):
-    if scale >= 1.0:
-        return frame
+def resize_frame(frame, target_height):
+    """Redimensiona o frame para a altura-alvo, mantendo a proporção original.
+    Nunca faz upscale: se o monitor já é menor que o alvo (ex: monitor 1080p
+    com meta de 4K), mantém o tamanho nativo em vez de "esticar" a imagem."""
     height, width = frame.shape[:2]
+    if target_height >= height:
+        return frame
+    scale = target_height / height
     new_width = max(2, int(width * scale) // 2 * 2)
     new_height = max(2, int(height * scale) // 2 * 2)
     return cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_AREA)

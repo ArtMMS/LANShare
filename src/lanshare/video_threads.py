@@ -10,15 +10,12 @@ from bitrate_controller import BitrateController
 from window_selector import get_window_region, get_current_monitor_index
 
 STREAM_PORT = 5556
-TARGET_FPS = 30
-FRAME_INTERVAL = 1 / TARGET_FPS
 
 
 class VideoSendServerThread(QThread):
     """Usado pelo Host: transmite continuamente assim que iniciado, mesmo sem
-    nenhum Client conectado. Aceita e perde clientes a qualquer momento, sem
-    interromper a captura. Também emite os próprios frames via frame_captured,
-    para o Host poder ver a prévia da própria transmissão."""
+    nenhum Client conectado. FPS e resolução-alvo agora são configuráveis
+    por instância, escolhidos nos dialogs de configuração."""
 
     client_connected = Signal()
     client_disconnected = Signal()
@@ -29,14 +26,15 @@ class VideoSendServerThread(QThread):
     error_occurred = Signal(str)
 
     def __init__(self, monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-                 resolution_scale=1.0, target_bitrate_kbps=4000):
+                 target_height=1080, target_fps=30, target_bitrate_kbps=4000):
         super().__init__()
         self.monitor_index = monitor_index
         self.monitor = monitor
         self.target_hwnd = target_hwnd
         self.monitor_mapping = monitor_mapping
         self.mss_monitors = mss_monitors
-        self.resolution_scale = resolution_scale
+        self.target_height = target_height
+        self.frame_interval = 1 / target_fps
         self.bitrate_controller = BitrateController(target_bitrate_kbps)
         self.streaming_enabled = True
         self._running = True
@@ -104,11 +102,11 @@ class VideoSendServerThread(QThread):
                     time.sleep(0.001)
                     continue
 
-                frame = resize_frame(frame, self.resolution_scale)
+                frame = resize_frame(frame, self.target_height)
                 current_quality = self.bitrate_controller.quality
                 frame_bytes = compress_frame(frame, quality=current_quality, verbose=False)
 
-                self.frame_captured.emit(frame_bytes)  # alimenta a prévia do próprio Host
+                self.frame_captured.emit(frame_bytes)
 
                 if self._clients:
                     still_connected = []
@@ -136,7 +134,7 @@ class VideoSendServerThread(QThread):
                     last_report_time = now
 
                 elapsed = time.time() - frame_start
-                sleep_time = FRAME_INTERVAL - elapsed
+                sleep_time = self.frame_interval - elapsed
                 if sleep_time > 0:
                     time.sleep(sleep_time)
 

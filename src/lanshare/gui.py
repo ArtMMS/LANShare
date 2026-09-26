@@ -12,7 +12,9 @@ from PySide6.QtWidgets import (
 
 from chat_threads import ChatServerThread, ChatClientThread
 from video_threads import VideoSendServerThread, VideoReceiveThread
-from screen_capture import list_monitors, capture_monitor_preview, RESOLUTION_SCALES, BITRATE_PRESETS
+from screen_capture import (
+    list_monitors, capture_monitor_preview, RESOLUTION_PRESETS, FPS_PRESETS, BITRATE_PRESETS
+)
 from window_selector import windows_in_monitor
 from monitor_mapping import auto_map_monitors
 
@@ -162,20 +164,35 @@ class StreamSettingsDialog(QDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Configurações da transmissão")
-        self.resize(380, 260)
+        self.resize(380, 320)
 
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel("Resolução:"))
+        layout.addWidget(QLabel("Resolução da transmissão:"))
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(list(RESOLUTION_SCALES.keys()))
+        self.resolution_combo.addItems(list(RESOLUTION_PRESETS.keys()))
+        self.resolution_combo.setCurrentIndex(1)  # 1080p por padrão
         layout.addWidget(self.resolution_combo)
+
+        layout.addWidget(QLabel("Taxa de quadros (FPS):"))
+        self.fps_combo = QComboBox()
+        self.fps_combo.addItems(list(FPS_PRESETS.keys()))
+        self.fps_combo.setCurrentIndex(1)  # 30 FPS por padrão
+        layout.addWidget(self.fps_combo)
 
         layout.addWidget(QLabel("Meta de bitrate:"))
         self.bitrate_combo = QComboBox()
         self.bitrate_combo.addItems(list(BITRATE_PRESETS.keys()))
         self.bitrate_combo.setCurrentIndex(1)
         layout.addWidget(self.bitrate_combo)
+
+        note = QLabel(
+            "Nota: 60 FPS e resoluções acima de 1080p exigem mais do hardware "
+            "e podem não ser totalmente atingidos sem aceleração por GPU."
+        )
+        note.setObjectName("dimText")
+        note.setWordWrap(True)
+        layout.addWidget(note)
 
         layout.addStretch()
 
@@ -186,9 +203,10 @@ class StreamSettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def get_settings(self):
-        scale = RESOLUTION_SCALES[self.resolution_combo.currentText()]
-        bitrate = BITRATE_PRESETS[self.bitrate_combo.currentText()]
-        return scale, bitrate
+        target_height = RESOLUTION_PRESETS[self.resolution_combo.currentText()]
+        target_fps = FPS_PRESETS[self.fps_combo.currentText()]
+        target_bitrate = BITRATE_PRESETS[self.bitrate_combo.currentText()]
+        return target_height, target_fps, target_bitrate
 
 
 class JoinStreamDialog(QDialog):
@@ -611,7 +629,7 @@ class HostWindow(QMainWindow):
         settings_dialog = StreamSettingsDialog()
         if settings_dialog.exec() != QDialog.Accepted:
             return
-        resolution_scale, target_bitrate = settings_dialog.get_settings()
+        target_height, target_fps, target_bitrate = settings_dialog.get_settings()
 
         with mss.mss() as sct:
             mss_monitors = sct.monitors
@@ -619,7 +637,7 @@ class HostWindow(QMainWindow):
 
         self.video_thread = VideoSendServerThread(
             monitor_index, monitor, target_hwnd, monitor_mapping, mss_monitors,
-            resolution_scale=resolution_scale, target_bitrate_kbps=target_bitrate
+            target_height=target_height, target_fps=target_fps, target_bitrate_kbps=target_bitrate
         )
         self.video_thread.client_connected.connect(self._on_client_connected)
         self.video_thread.client_disconnected.connect(self._on_client_disconnected)
