@@ -7,3 +7,7 @@ python -m pip install mss
 # Image processing
 Pillow>=11.0.0
 python -m pip install Pillow
+
+# GUI
+PySide6>=6.9.0
+python -m pip install PySide6
