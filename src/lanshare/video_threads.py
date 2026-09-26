@@ -16,10 +16,7 @@ RECONNECT_RETRY_INTERVAL = 2.0
 class VideoSendServerThread(QThread):
     """Usado pelo Host: transmite vídeo H.264 continuamente, acelerado por GPU
     quando disponível (Nvidia/AMD/Intel), com fallback automático para
-    software. Usa o modo de captura contínua do dxcam (video_mode=True),
-    que roda em thread própria e entrega frames de forma mais consistente
-    que chamadas avulsas de grab() — essencial para manter FPS estável
-    mesmo com a tela parada."""
+    software. Usa o modo de captura contínua do dxcam (video_mode=True)."""
 
     client_connected = Signal()
     client_disconnected = Signal()
@@ -57,7 +54,7 @@ class VideoSendServerThread(QThread):
         self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_socket.bind(("0.0.0.0", STREAM_PORT))
         self._server_socket.listen(5)
-        self._server_socket.settimeout(0.01)
+        self._server_socket.setblocking(False)
 
         try:
             camera = dxcam.create(output_idx=self.monitor_mapping[self.monitor_index], output_color="BGR")
@@ -99,6 +96,8 @@ class VideoSendServerThread(QThread):
         frames_since_report = 0
         bytes_since_report = 0
         encode_time_total = 0.0
+        capture_time_total = 0.0
+        emit_time_total = 0.0
         last_report_time = time.time()
         pending_frame = first_frame
 
@@ -106,10 +105,10 @@ class VideoSendServerThread(QThread):
             while self._running:
                 try:
                     conn, addr = self._server_socket.accept()
-                    conn.settimeout(None)
+                    conn.setblocking(True)
                     self._clients.append(conn)
                     self.client_connected.emit()
-                except socket.timeout:
+                except BlockingIOError:
                     pass
                 except OSError:
                     pass
@@ -119,7 +118,10 @@ class VideoSendServerThread(QThread):
                 if pending_frame is not None:
                     frame = pending_frame
                     pending_frame = None
+                    t_capture = 0.0
                 else:
+                    t_capture_start = time.time()
+
                     if self.target_hwnd is not None:
                         current_index = get_current_monitor_index(self.target_hwnd, self.mss_monitors)
                         if (current_index is not None and current_index != self.monitor_index
@@ -142,8 +144,6 @@ class VideoSendServerThread(QThread):
                                 time.sleep(0.01)
                                 continue
                             if new_region != current_region:
-                                # a janela moveu/redimensionou dentro do mesmo monitor;
-                                # reinicia a captura contínua com a nova região
                                 current_region = new_region
                                 camera.stop()
                                 try:
@@ -157,8 +157,11 @@ class VideoSendServerThread(QThread):
                         time.sleep(0.001)
                         continue
                     frame = resize_frame(raw, self.target_height)
+                    t_capture = time.time() - t_capture_start
 
+                t_emit_start = time.time()
                 self.frame_captured.emit(frame)
+                t_emit = time.time() - t_emit_start
 
                 t_encode_start = time.time()
                 try:
@@ -167,7 +170,11 @@ class VideoSendServerThread(QThread):
                     self.error_occurred.emit(f"Erro ao codificar frame: {e}")
                     time.sleep(0.01)
                     continue
-                encode_time_total += (time.time() - t_encode_start)
+                t_encode = time.time() - t_encode_start
+
+                encode_time_total += t_encode
+                capture_time_total += t_capture
+                emit_time_total += t_emit
 
                 for packet in packets:
                     packet_bytes = bytes(packet)
@@ -194,12 +201,19 @@ class VideoSendServerThread(QThread):
                     fps = frames_since_report / elapsed
                     kbps = (bytes_since_report * 8 / 1024) / elapsed
                     avg_encode_ms = (encode_time_total * 1000) / frames_since_report
-                    print(f"[STREAM] FPS: {fps:.1f} | kbps: {kbps:.0f} | encode médio: {avg_encode_ms:.1f}ms")
+                    avg_capture_ms = (capture_time_total * 1000) / frames_since_report
+                    avg_emit_ms = (emit_time_total * 1000) / frames_since_report
+                    total_loop_ms = 1000 / fps if fps > 0 else 0
+                    print(f"[STREAM] FPS: {fps:.1f} | loop total: {total_loop_ms:.1f}ms | "
+                          f"captura: {avg_capture_ms:.1f}ms | emit preview: {avg_emit_ms:.1f}ms | "
+                          f"encode: {avg_encode_ms:.1f}ms | kbps: {kbps:.0f}")
                     self.fps_updated.emit(fps)
                     self.stats_updated.emit(kbps)
                     frames_since_report = 0
                     bytes_since_report = 0
                     encode_time_total = 0.0
+                    capture_time_total = 0.0
+                    emit_time_total = 0.0
                     last_report_time = now
 
         except Exception as e:
