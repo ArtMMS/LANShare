@@ -5,3 +5,4 @@ dxcam
 opencv-python
 numpy
 PySide6
+pywin32

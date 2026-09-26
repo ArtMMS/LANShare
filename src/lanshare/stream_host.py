@@ -6,6 +6,7 @@ import mss
 
 from streaming import send_frame
 from screen_capture import choose_monitor, compress_frame
+from window_selector import choose_window, get_window_region
 
 STREAM_PORT = 5556
 TARGET_FPS = 30
@@ -25,8 +26,8 @@ def start_stream_host():
     with mss.mss() as sct:
         monitor_index, monitor = choose_monitor(sct)
 
-    # dxcam usa índice começando em 0 para o monitor primário;
-    # o mss usa 1 para o primeiro monitor real (0 é "todos juntos") — por isso o -1
+    target_hwnd = choose_window(monitor)  # None = monitor inteiro; ou o hwnd de uma janela específica
+
     camera = dxcam.create(output_idx=monitor_index - 1, output_color="BGR")
 
     frames_since_report = 0
@@ -36,9 +37,23 @@ def start_stream_host():
         while True:
             frame_start = time.time()
 
-            frame = camera.grab()
+            if target_hwnd is not None:
+                region = get_window_region(target_hwnd, monitor)
+                if region is None:
+                    # janela minimizada, fechada ou fora dos limites do monitor no momento;
+                    # pula esse frame em vez de derrubar a conexão
+                    time.sleep(0.01)
+                    continue
+                try:
+                    frame = camera.grab(region=region)
+                except Exception as e:
+                    print(f"[STREAM] Erro ao capturar região da janela: {e}")
+                    time.sleep(0.01)
+                    continue
+            else:
+                frame = camera.grab()
+
             if frame is None:
-                # ainda não há frame novo desde a última captura; espera um pouco e tenta de novo
                 time.sleep(0.001)
                 continue
 

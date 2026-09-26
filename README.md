@@ -30,6 +30,7 @@ The project is currently in early development, starting with the basic network c
 - **opencv-python 5.0.0** — Image and video processing
 - **numpy 2.5.3** — Numerical and array processing
 - **PySide6 6.9.0** — GUI
+- **pywin32-312** — Windows API and window management
 
 ---
 
@@ -68,8 +69,8 @@ More information will be added as issues are discovered.
 
 ### V0.4 — Streaming
 
-- [ ] Select which monitor to share
-- [ ] Select which application to share
+- [x] Select which monitor to share
+- [x] Select which application to share
 - [ ] Implement continuous streaming
 - [ ] Reduce latency
 - [ ] Control bitrate
