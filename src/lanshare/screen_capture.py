@@ -12,25 +12,20 @@ class POINT(ctypes.Structure):
 
 
 def get_cursor_position():
-    """Retorna a posição absoluta do cursor na tela (coordenadas globais do Windows)."""
     pt = POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     return pt.x, pt.y
 
 
 def draw_cursor(frame, monitor):
-    """Desenha um ponteiro de mouse sintético na posição atual do cursor, sobre o frame capturado."""
     cursor_x, cursor_y = get_cursor_position()
-
-    # converte de coordenada absoluta da tela para coordenada relativa a este monitor/frame
     x = cursor_x - monitor["left"]
     y = cursor_y - monitor["top"]
 
     height, width = frame.shape[:2]
     if not (0 <= x < width and 0 <= y < height):
-        return  # cursor está fora deste monitor, não desenha nada
+        return
 
-    # formato de seta simples (parecido com o cursor padrão do Windows)
     points = np.array([
         [x, y],
         [x, y + 16],
@@ -41,12 +36,13 @@ def draw_cursor(frame, monitor):
         [x + 11, y + 11],
     ], dtype=np.int32)
 
-    cv2.fillPoly(frame, [points], color=(255, 255, 255))  # preenchimento branco
-    cv2.polylines(frame, [points], isClosed=True, color=(0, 0, 0), thickness=1)  # contorno preto
+    cv2.fillPoly(frame, [points], color=(255, 255, 255))
+    cv2.polylines(frame, [points], isClosed=True, color=(0, 0, 0), thickness=1)
 
 
 def choose_monitor(sct):
-    monitors = sct.monitors  # índice 0 = todos os monitores juntos; 1, 2, 3... = monitores individuais
+    """Continua usando mss só para listar monitores e saber a posição (left/top) de cada um."""
+    monitors = sct.monitors
 
     print("\nMonitores disponíveis:")
     for i, monitor in enumerate(monitors):
@@ -59,19 +55,12 @@ def choose_monitor(sct):
     while True:
         escolha = input("\nDigite o número do monitor que deseja capturar: ").strip()
         if escolha.isdigit() and 1 <= int(escolha) < len(monitors):
-            return monitors[int(escolha)]
+            return int(escolha), monitors[int(escolha)]
         print("Opção inválida, tente novamente.")
 
 
-def capture_and_compress(monitor, sct, verbose=False):
-    screenshot = sct.grab(monitor)
-
-    # mss entrega em BGRA; convertendo para array numpy e descartando o canal alpha,
-    # já ficamos em BGR — formato nativo do OpenCV, sem nenhuma conversão de cor extra
-    frame = np.ascontiguousarray(np.array(screenshot, dtype=np.uint8)[:, :, :3])
-
-    draw_cursor(frame, monitor)
-
+def compress_frame(frame, verbose=False):
+    """Recebe um frame já capturado (array BGR) e devolve os bytes comprimidos em JPEG."""
     success, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     compressed_bytes = encoded.tobytes()
 
@@ -87,9 +76,13 @@ def capture_and_compress(monitor, sct, verbose=False):
 
 
 def capture_screen(output_path="screenshot.jpg"):
+    """Teste isolado de um único print — continua usando mss, simples o bastante para não precisar do dxcam aqui."""
     with mss.mss() as sct:
-        monitor = choose_monitor(sct)
-        compressed_bytes = capture_and_compress(monitor, sct, verbose=True)
+        _, monitor = choose_monitor(sct)
+        screenshot = sct.grab(monitor)
+        frame = np.ascontiguousarray(np.array(screenshot, dtype=np.uint8)[:, :, :3])
+        draw_cursor(frame, monitor)
+        compressed_bytes = compress_frame(frame, verbose=True)
 
         with open(output_path, "wb") as f:
             f.write(compressed_bytes)

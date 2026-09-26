@@ -3,7 +3,23 @@
 ## [0.3.0] - 2026-09-26
 
 ### Added
--
+
+* Full-screen capture on the Host, with monitor selection when multiple displays are available.
+* JPEG frame compression before transmission, significantly reducing the amount of data sent over the network.
+* Mouse cursor rendered manually on top of the frame, as it is not included in the original screen capture.
+* Continuous frame transmission from the Host to the Client through a dedicated socket (port `5556`), using a framing protocol (size prefix) to delimit frames over the TCP stream.
+* Real-time stream display in a PySide6 window on the Client, using a dedicated thread to receive frames without blocking the user interface.
+
+### Performance
+
+* Replaced Pillow with OpenCV for faster JPEG compression, eliminating unnecessary color conversion.
+* Replaced MSS with DXCam (DXGI Desktop Duplication) for screen capture, eliminating the main performance bottleneck identified through profiling.
+* ~30 FPS target achieved (~29.5 FPS average).
+
+### Technical
+
+* Added new external dependencies: `opencv-python`, `numpy`, `dxcam`, `PySide6`.
+* Removed `Pillow` dependency (replaced by OpenCV).
 
 ---
 
