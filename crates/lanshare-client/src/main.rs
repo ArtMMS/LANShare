@@ -36,10 +36,11 @@ async fn main() -> io::Result<()> {
         }
     };
 
-    if !handshake(&mut stream).await? {
+    // Se o Host recusou, o motivo já foi impresso dentro do handshake
+    let Some((client_id, display_name)) = handshake(&mut stream).await? else {
         std::process::exit(1);
-    }
-    println!("[client] Host aceitou a conexao. Ctrl+C para sair.");
+    };
+    println!("[client] Voce entrou como '{display_name}' (#{client_id}). Ctrl+C para sair.");
 
     // Ctrl+C vira um aviso de "encerrar" para o run_connection mandar o Bye
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -57,8 +58,9 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-/// Manda o Hello e lê a resposta. Devolve true se o Host aceitou.
-async fn handshake(stream: &mut TcpStream) -> io::Result<bool> {
+/// Manda o Hello e lê a resposta.
+/// Devolve o ID e o nome que o Host nos deu, ou None se fomos recusados.
+async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String)>> {
     let hello = Message::Hello {
         protocol_version: PROTOCOL_VERSION,
         device_name: device_name(),
@@ -66,17 +68,19 @@ async fn handshake(stream: &mut TcpStream) -> io::Result<bool> {
     write_message(stream, &hello).await?;
 
     match read_message(stream).await? {
-        Message::HelloAck { accepted: true, .. } => Ok(true),
-        Message::HelloAck {
-            accepted: false,
-            reason,
-        } => {
-            println!("[client] Host recusou: {}", reason.unwrap_or_default());
-            Ok(false)
+        Message::Welcome {
+            client_id,
+            display_name,
+        } => Ok(Some((client_id, display_name))),
+
+        Message::Rejected { reason } => {
+            println!("[client] Host recusou: {reason}");
+            Ok(None)
         }
+
         outra => {
             println!("[client] Resposta inesperada: {outra:?}");
-            Ok(false)
+            Ok(None)
         }
     }
 }

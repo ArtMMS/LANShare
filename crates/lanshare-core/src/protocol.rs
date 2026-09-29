@@ -1,19 +1,13 @@
-//! Protocolo de comunicação entre Host e Client.
-//!
-//! Cada mensagem trafega assim pela rede:
-//!
-//!   [ 4 bytes: tamanho N ] [ N bytes: mensagem em JSON ]
-//!
-//! O tamanho na frente é necessário porque o TCP é um fluxo contínuo de
-//! bytes e não avisa onde termina uma mensagem e começa a outra.
+//! Protocolo Host <-> Client.
+//! Formato na rede: [4 bytes: tamanho N][N bytes: mensagem em JSON]
 
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u16 = 1;
-/// Porta padrão onde o Host escuta.
+/// Aumente sempre que o formato das mensagens mudar de forma incompatível.
+pub const PROTOCOL_VERSION: u16 = 2;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -22,8 +16,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Sem receber nada por este tempo, o outro lado é considerado desconectado.
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
 
-/// Tamanho máximo aceito para uma mensagem (1 MiB).
-/// Protege contra alguém mandar um tamanho absurdo e travar o programa.
+/// Tamanho máximo de uma mensagem (1 MiB).
 const MAX_FRAME_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,11 +27,14 @@ pub enum Message {
         device_name: String,
     },
 
-    /// Host -> Client: aceitou ou recusou.
-    HelloAck {
-        accepted: bool,
-        reason: Option<String>,
+    /// Host -> Client: aceito. Diz ao Client quem ele é para o Host.
+    Welcome {
+        client_id: u64,
+        display_name: String,
     },
+
+    /// Host -> Client: recusado, com o motivo.
+    Rejected { reason: String },
 
     /// "Você está aí?" O outro lado responde com um Pong do mesmo id.
     Ping { id: u64 },
@@ -49,7 +45,6 @@ pub enum Message {
     /// Aviso de saída limpa.
     Bye,
 }
-
 
 pub async fn write_message<W>(writer: &mut W, message: &Message) -> io::Result<()>
 where
@@ -93,31 +88,33 @@ where
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-// Este bloco só é compilado quando rodamos "cargo test".
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Manda cada tipo de mensagem por um "cano" em memória e confere que chega igual.
     #[tokio::test]
-    async fn hello_chega_igual() {
+    async fn todas_as_mensagens_chegam_iguais() {
         let (mut a, mut b) = tokio::io::duplex(1024);
 
-        let enviada = Message::Hello {
-            protocol_version: PROTOCOL_VERSION,
-            device_name: "pc-de-teste".to_string(),
-        };
+        let mensagens = [
+            Message::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                device_name: "pc-de-teste".to_string(),
+            },
+            Message::Welcome {
+                client_id: 3,
+                display_name: "pc-de-teste (2)".to_string(),
+            },
+            Message::Rejected {
+                reason: "sala cheia".to_string(),
+            },
+            Message::Ping { id: 7 },
+            Message::Pong { id: 7 },
+            Message::Bye,
+        ];
 
-        write_message(&mut a, &enviada).await.unwrap();
-        let recebida = read_message(&mut b).await.unwrap();
-
-        assert_eq!(enviada, recebida);
-    }
-
-    #[tokio::test]
-    async fn ping_pong_e_bye_chegam_iguais() {
-        let (mut a, mut b) = tokio::io::duplex(1024);
-
-        for enviada in [Message::Ping { id: 7 }, Message::Pong { id: 7 }, Message::Bye] {
+        for enviada in mensagens {
             write_message(&mut a, &enviada).await.unwrap();
             let recebida = read_message(&mut b).await.unwrap();
             assert_eq!(enviada, recebida);

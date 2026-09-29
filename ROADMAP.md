@@ -16,7 +16,7 @@
 
 - [x] Support multiple clients
 - [x] Manage multiple connections
-- [] Identify connected users
+- [x] Identify connected users
 - [] Handle user connections and disconnections
 - [] Manage active sessions
 - [] Save the user name in a local settings file

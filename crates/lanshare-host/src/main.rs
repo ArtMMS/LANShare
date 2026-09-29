@@ -6,7 +6,7 @@ use lanshare_core::protocol::{
     read_message, write_message, Message, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use lanshare_net::run_connection;
-use registry::{ClientId, Registry};
+use registry::{ClientInfo, Registry};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -63,7 +63,7 @@ async fn handle_client(
     shutdown: watch::Receiver<bool>,
     registry: Registry,
 ) {
-    let (id, name) = match handshake(&mut stream, addr, &registry).await {
+    let client = match handshake(&mut stream, addr, &registry).await {
         Ok(Some(client)) => client,
         Ok(None) => return, // recusado; o motivo já foi impresso
         Err(erro) => {
@@ -71,6 +71,7 @@ async fn handle_client(
             return;
         }
     };
+    let (id, name) = (client.id, client.name);
 
     println!("[host] {name} (#{id}) entrou ({addr})");
     print_roster(&registry);
@@ -83,13 +84,12 @@ async fn handle_client(
     print_roster(&registry);
 }
 
-/// Espera o Hello, registra o Client e responde.
-/// Devolve o ID e o nome se ele foi aceito.
+/// Espera o Hello, registra o Client e responde com Welcome ou Rejected.
 async fn handshake(
     stream: &mut TcpStream,
     addr: SocketAddr,
     registry: &Registry,
-) -> io::Result<Option<(ClientId, String)>> {
+) -> io::Result<Option<ClientInfo>> {
     match read_message(stream).await? {
         Message::Hello {
             protocol_version,
@@ -102,21 +102,26 @@ async fn handshake(
             }
 
             // Tenta registrar; None = sala cheia
-            let Some(id) = registry.try_add(device_name.clone(), addr) else {
+            let Some(client) = registry.try_add(&device_name, addr) else {
                 return refuse(stream, &device_name, "sala cheia".to_string()).await;
             };
 
-            let resposta = Message::HelloAck {
-                accepted: true,
-                reason: None,
+            // O nome final pode ser diferente do pedido (limpeza ou repetido)
+            if client.name != device_name {
+                println!("[host] Nome '{device_name}' ajustado para '{}'", client.name);
+            }
+
+            let resposta = Message::Welcome {
+                client_id: client.id,
+                display_name: client.name.clone(),
             };
             // Se não deu para responder, desfaz o registro
             if let Err(erro) = write_message(stream, &resposta).await {
-                registry.remove(id);
+                registry.remove(client.id);
                 return Err(erro);
             }
 
-            Ok(Some((id, device_name)))
+            Ok(Some(client))
         }
 
         outra => {
@@ -131,13 +136,9 @@ async fn refuse(
     stream: &mut TcpStream,
     name: &str,
     reason: String,
-) -> io::Result<Option<(ClientId, String)>> {
+) -> io::Result<Option<ClientInfo>> {
     println!("[host] {name} recusado: {reason}");
-    let resposta = Message::HelloAck {
-        accepted: false,
-        reason: Some(reason),
-    };
-    write_message(stream, &resposta).await?;
+    write_message(stream, &Message::Rejected { reason }).await?;
     Ok(None)
 }
 
