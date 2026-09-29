@@ -3,4 +3,4 @@
 pub mod connection;
 
 // Atalhos, para usar "lanshare_net::run_connection" direto.
-pub use connection::{run_connection, DisconnectReason};
+pub use connection::{run_connection, ConnectionEvent, DisconnectReason};

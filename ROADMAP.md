@@ -17,7 +17,7 @@
 - [x] Support multiple clients
 - [x] Manage multiple connections
 - [x] Identify connected users
-- [] Handle user connections and disconnections
+- [x] Handle user connections and disconnections
 - [] Manage active sessions
 - [] Save the user name in a local settings file
 - [] Add optional Host password (challenge-response, never sent as plain text)

@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -19,6 +19,13 @@ pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
 /// Tamanho máximo de uma mensagem (1 MiB).
 const MAX_FRAME_SIZE: usize = 1024 * 1024;
 
+/// Um usuário conectado, como os Clients o enxergam.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserInfo {
+    pub id: u64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Message {
     /// Client -> Host: primeira mensagem.
@@ -27,14 +34,21 @@ pub enum Message {
         device_name: String,
     },
 
-    /// Host -> Client: aceito. Diz ao Client quem ele é para o Host.
+    /// Host -> Client: aceito. Diz quem o Client é e quem está na sala (inclui ele mesmo).
     Welcome {
         client_id: u64,
         display_name: String,
+        users: Vec<UserInfo>,
     },
 
     /// Host -> Client: recusado, com o motivo.
     Rejected { reason: String },
+
+    /// Host -> Clients: alguém entrou na sala.
+    UserJoined { user: UserInfo },
+
+    /// Host -> Clients: alguém saiu da sala.
+    UserLeft { user: UserInfo },
 
     /// "Você está aí?" O outro lado responde com um Pong do mesmo id.
     Ping { id: u64 },
@@ -95,7 +109,16 @@ mod tests {
     // Manda cada tipo de mensagem por um "cano" em memória e confere que chega igual.
     #[tokio::test]
     async fn todas_as_mensagens_chegam_iguais() {
-        let (mut a, mut b) = tokio::io::duplex(1024);
+        let (mut a, mut b) = tokio::io::duplex(4096);
+
+        let ana = UserInfo {
+            id: 1,
+            name: "Ana".to_string(),
+        };
+        let beto = UserInfo {
+            id: 2,
+            name: "Beto".to_string(),
+        };
 
         let mensagens = [
             Message::Hello {
@@ -103,12 +126,15 @@ mod tests {
                 device_name: "pc-de-teste".to_string(),
             },
             Message::Welcome {
-                client_id: 3,
-                display_name: "pc-de-teste (2)".to_string(),
+                client_id: 2,
+                display_name: "Beto".to_string(),
+                users: vec![ana.clone(), beto.clone()],
             },
             Message::Rejected {
                 reason: "sala cheia".to_string(),
             },
+            Message::UserJoined { user: beto.clone() },
+            Message::UserLeft { user: ana },
             Message::Ping { id: 7 },
             Message::Pong { id: 7 },
             Message::Bye,

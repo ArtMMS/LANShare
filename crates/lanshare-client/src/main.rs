@@ -1,13 +1,14 @@
-//! Programa do Client: conecta no Host e mantém a conexão.
+//! Programa do Client: conecta no Host, mantém a conexão e acompanha quem está na sala.
 
 use lanshare_core::protocol::{
-    read_message, write_message, Message, DEFAULT_PORT, PROTOCOL_VERSION,
+    read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
 };
-use lanshare_net::run_connection;
+use lanshare_net::{run_connection, ConnectionEvent};
+use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -37,10 +38,18 @@ async fn main() -> io::Result<()> {
     };
 
     // Se o Host recusou, o motivo já foi impresso dentro do handshake
-    let Some((client_id, display_name)) = handshake(&mut stream).await? else {
+    let Some((client_id, display_name, everyone)) = handshake(&mut stream).await? else {
         std::process::exit(1);
     };
     println!("[client] Voce entrou como '{display_name}' (#{client_id}). Ctrl+C para sair.");
+
+    // Tabela dos OUTROS usuários (sem nós mesmos), atualizada pelos avisos do Host
+    let mut users: HashMap<u64, String> = everyone
+        .into_iter()
+        .filter(|u| u.id != client_id)
+        .map(|u| (u.id, u.name))
+        .collect();
+    print_users(&users);
 
     // Ctrl+C vira um aviso de "encerrar" para o run_connection mandar o Bye
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -49,8 +58,20 @@ async fn main() -> io::Result<()> {
         let _ = shutdown_tx.send(true);
     });
 
-    let reason = run_connection(stream, shutdown_rx, |rtt| {
-        println!("[client] ping: {} ms", rtt.as_millis());
+    // Por enquanto o Client não envia nada além de Ping/Bye, mas a caixa de saída
+    // precisa existir (e o `_outgoing_tx` fica vivo até o fim da função).
+    let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel::<Message>();
+
+    let mut ping_count: u32 = 0;
+    let reason = run_connection(stream, shutdown_rx, outgoing_rx, |event| match event {
+        ConnectionEvent::Rtt(rtt) => {
+            // Um ping a cada 2 s seria barulho demais: mostra 1 a cada 10
+            if ping_count % 10 == 0 {
+                println!("[client] ping: {} ms", rtt.as_millis());
+            }
+            ping_count += 1;
+        }
+        ConnectionEvent::Message(message) => handle_message(message, client_id, &mut users),
     })
     .await;
 
@@ -59,8 +80,8 @@ async fn main() -> io::Result<()> {
 }
 
 /// Manda o Hello e lê a resposta.
-/// Devolve o ID e o nome que o Host nos deu, ou None se fomos recusados.
-async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String)>> {
+/// Devolve (nosso ID, nosso nome, todos na sala) ou None se fomos recusados.
+async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String, Vec<UserInfo>)>> {
     let hello = Message::Hello {
         protocol_version: PROTOCOL_VERSION,
         device_name: device_name(),
@@ -71,7 +92,8 @@ async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String)>> 
         Message::Welcome {
             client_id,
             display_name,
-        } => Ok(Some((client_id, display_name))),
+            users,
+        } => Ok(Some((client_id, display_name, users))),
 
         Message::Rejected { reason } => {
             println!("[client] Host recusou: {reason}");
@@ -82,6 +104,52 @@ async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String)>> 
             println!("[client] Resposta inesperada: {outra:?}");
             Ok(None)
         }
+    }
+}
+
+/// Trata as mensagens do Host sobre quem entra e sai.
+/// Só mostra "entrou"/"saiu" quando a tabela realmente mudou (evita repetição).
+fn handle_message(message: Message, my_id: u64, users: &mut HashMap<u64, String>) {
+    match message {
+        Message::UserJoined { user } => {
+            if user.id != my_id && users.insert(user.id, user.name.clone()).is_none() {
+                println!(
+                    "[client] {} (#{}) entrou - {} na sala",
+                    user.name,
+                    user.id,
+                    users.len() + 1
+                );
+            }
+        }
+
+        Message::UserLeft { user } => {
+            if users.remove(&user.id).is_some() {
+                println!(
+                    "[client] {} (#{}) saiu - {} na sala",
+                    user.name,
+                    user.id,
+                    users.len() + 1
+                );
+            }
+        }
+
+        outra => println!("[client] Mensagem inesperada: {outra:?}"),
+    }
+}
+
+/// Mostra os outros usuários conectados.
+fn print_users(users: &HashMap<u64, String>) {
+    if users.is_empty() {
+        println!("[client] Nenhum outro usuario conectado.");
+        return;
+    }
+
+    let mut list: Vec<_> = users.iter().collect();
+    list.sort_by_key(|(id, _)| **id);
+
+    println!("[client] Outros usuarios conectados ({}):", list.len());
+    for (id, name) in list {
+        println!("[client]   #{id} {name}");
     }
 }
 

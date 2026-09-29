@@ -3,7 +3,7 @@
 mod registry;
 
 use lanshare_core::protocol::{
-    read_message, write_message, Message, DEFAULT_PORT, PROTOCOL_VERSION,
+    read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use lanshare_net::run_connection;
 use registry::{ClientInfo, Registry};
@@ -11,6 +11,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::watch;
 
 /// Limite de Clients. None = sem limite; Some(8) = no máximo 8.
@@ -63,7 +64,10 @@ async fn handle_client(
     shutdown: watch::Receiver<bool>,
     registry: Registry,
 ) {
-    let client = match handshake(&mut stream, addr, &registry).await {
+    // Caixa de saída desta conexão: quem quiser falar com este Client põe aqui
+    let (out_tx, out_rx) = mpsc::unbounded_channel::<Message>();
+
+    let client = match handshake(&mut stream, addr, &registry, out_tx).await {
         Ok(Some(client)) => client,
         Ok(None) => return, // recusado; o motivo já foi impresso
         Err(erro) => {
@@ -74,12 +78,36 @@ async fn handle_client(
     let (id, name) = (client.id, client.name);
 
     println!("[host] {name} (#{id}) entrou ({addr})");
+
+    // Avisa os outros Clients que alguém entrou
+    let joined = Message::UserJoined {
+        user: UserInfo {
+            id,
+            name: name.clone(),
+        },
+    };
+    registry.broadcast(&joined, Some(id));
     print_roster(&registry);
 
+    // Guardamos uma cópia para saber, no fim, se o Host inteiro está encerrando
+    let shutdown_check = shutdown.clone();
+
     // O ping é medido, mas o Host não imprime (a GUI vai mostrar depois)
-    let reason = run_connection(stream, shutdown, |_rtt| {}).await;
+    let reason = run_connection(stream, shutdown, out_rx, |_event| {}).await;
 
     registry.remove(id);
+
+    // No encerramento do Host todo mundo sai junto; não vale avisar um a um
+    if !*shutdown_check.borrow() {
+        let left = Message::UserLeft {
+            user: UserInfo {
+                id,
+                name: name.clone(),
+            },
+        };
+        registry.broadcast(&left, None);
+    }
+
     println!("[host] {name} (#{id}) saiu ({addr}): {reason}");
     print_roster(&registry);
 }
@@ -89,6 +117,7 @@ async fn handshake(
     stream: &mut TcpStream,
     addr: SocketAddr,
     registry: &Registry,
+    out_tx: UnboundedSender<Message>,
 ) -> io::Result<Option<ClientInfo>> {
     match read_message(stream).await? {
         Message::Hello {
@@ -102,7 +131,7 @@ async fn handshake(
             }
 
             // Tenta registrar; None = sala cheia
-            let Some(client) = registry.try_add(&device_name, addr) else {
+            let Some(client) = registry.try_add(&device_name, addr, out_tx) else {
                 return refuse(stream, &device_name, "sala cheia".to_string()).await;
             };
 
@@ -114,6 +143,7 @@ async fn handshake(
             let resposta = Message::Welcome {
                 client_id: client.id,
                 display_name: client.name.clone(),
+                users: registry.users(),
             };
             // Se não deu para responder, desfaz o registro
             if let Err(erro) = write_message(stream, &resposta).await {

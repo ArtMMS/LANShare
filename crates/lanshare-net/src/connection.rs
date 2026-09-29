@@ -1,4 +1,4 @@
-//! Laço de uma conexão já aceita: Ping/Pong, Bye e detecção de desconexão.
+//! Laço de uma conexão já aceita: Ping/Pong, Bye, mensagens e detecção de desconexão.
 
 use lanshare_core::protocol::{
     read_message, write_message, Message, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT,
@@ -28,7 +28,15 @@ impl fmt::Display for DisconnectReason {
         match self {
             Self::PeerLeft => write!(f, "saiu normalmente (enviou Bye)"),
             Self::Timeout => write!(f, "parou de responder (timeout)"),
-            Self::ConnectionLost(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+            // Fim de arquivo ou reset (erro 10054 no Windows): o outro lado sumiu sem Bye
+            Self::ConnectionLost(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::UnexpectedEof
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                ) =>
+            {
                 write!(f, "conexao fechada sem aviso")
             }
             Self::ConnectionLost(e) => write!(f, "conexao perdida: {e}"),
@@ -37,16 +45,29 @@ impl fmt::Display for DisconnectReason {
     }
 }
 
+/// O que o run_connection avisa ao programa enquanto a conexão está viva.
+#[derive(Debug)]
+pub enum ConnectionEvent {
+    /// Ping medido (tempo de ida e volta).
+    Rtt(Duration),
+    /// Mensagem do outro lado (tudo que não é Ping, Pong ou Bye).
+    Message(Message),
+}
+
 /// Mantém a conexão viva até ela acabar e devolve o motivo.
+///
 /// - `shutdown`: quando vira `true`, mandamos Bye e saímos.
-/// - `on_rtt`: chamada a cada Pong recebido, com o ping medido.
+/// - `outgoing`: mensagens que o programa quer enviar ao outro lado.
+/// - `on_event`: chamada a cada ping medido e a cada mensagem recebida.
+///   Precisa ser rápida: ela roda dentro do laço da conexão.
 pub async fn run_connection<F>(
     stream: TcpStream,
     mut shutdown: watch::Receiver<bool>,
-    mut on_rtt: F,
+    mut outgoing: mpsc::UnboundedReceiver<Message>,
+    mut on_event: F,
 ) -> DisconnectReason
 where
-    F: FnMut(Duration),
+    F: FnMut(ConnectionEvent),
 {
     let (mut read_half, mut write_half) = stream.into_split();
 
@@ -66,9 +87,10 @@ where
     let mut last_received = Instant::now();
     let mut next_id: u64 = 0;
     let mut pending_ping: Option<(u64, Instant)> = None;
+    let mut outgoing_closed = false;
 
     let reason = loop {
-        // select! espera as três coisas abaixo e executa a que acontecer primeiro.
+        // select! espera as quatro coisas abaixo e executa a que acontecer primeiro.
         tokio::select! {
             // 1) Chegou algo do outro lado (ou a leitura falhou)
             incoming = rx.recv() => match incoming {
@@ -82,14 +104,17 @@ where
                     last_received = Instant::now();
                     if let Some((sent_id, sent_at)) = pending_ping {
                         if sent_id == id {
-                            on_rtt(sent_at.elapsed());
+                            on_event(ConnectionEvent::Rtt(sent_at.elapsed()));
                             pending_ping = None;
                         }
                     }
                 }
                 Some(Ok(Message::Bye)) => break DisconnectReason::PeerLeft,
-                // Outras mensagens: por enquanto só contam como "o outro lado está vivo"
-                Some(Ok(_)) => last_received = Instant::now(),
+                // Qualquer outra mensagem é entregue ao programa
+                Some(Ok(other)) => {
+                    last_received = Instant::now();
+                    on_event(ConnectionEvent::Message(other));
+                }
                 Some(Err(e)) => break DisconnectReason::ConnectionLost(e),
                 None => break DisconnectReason::ConnectionLost(io::ErrorKind::UnexpectedEof.into()),
             },
@@ -106,7 +131,18 @@ where
                 }
             },
 
-            // 3) O programa está sendo encerrado: avisa com Bye
+            // 3) O programa quer enviar uma mensagem ao outro lado
+            outgoing_msg = outgoing.recv(), if !outgoing_closed => match outgoing_msg {
+                Some(message) => {
+                    if let Err(e) = write_message(&mut write_half, &message).await {
+                        break DisconnectReason::ConnectionLost(e);
+                    }
+                }
+                // Ninguém mais pode enviar: desliga esta opção do select!
+                None => outgoing_closed = true,
+            },
+
+            // 4) O programa está sendo encerrado: avisa com Bye
             _ = shutdown.changed() => {
                 let _ = write_message(&mut write_half, &Message::Bye).await;
                 break DisconnectReason::LocalExit;
