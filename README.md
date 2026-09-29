@@ -23,6 +23,12 @@ The project is being developed with performance, stability, and ease of use in m
 
 ---
 
+## 🛠️ How to use
+
+> Will be added as the application develops.
+
+---
+
 ## ⚙️ Technologies
 
 - **Rust** — Core application, networking and system logic
@@ -33,14 +39,14 @@ The project is being developed with performance, stability, and ease of use in m
 
 ## 🐛 Known Issues
 
-- After switching to a non-blocking accept() socket to fix hidden per-frame latency, the Client gets stuck connecting to the stream indefinitely.
+*No known issues at the moment.*
 
 ---
 
 ## 🗺️ Roadmap
 
 ### V1.0
-- [ ] LAN connection
+- [x] LAN connection
 - [ ] 1080p / 30 FPS screen streaming
 - [ ] Multiple users
 - [ ] Host and Client GUI

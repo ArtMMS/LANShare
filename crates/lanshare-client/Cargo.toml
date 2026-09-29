@@ -7,4 +7,5 @@ publish = false
 
 [dependencies]
 lanshare-core = { workspace = true }
+lanshare-net = { workspace = true }
 tokio = { workspace = true }
