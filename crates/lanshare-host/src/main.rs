@@ -1,38 +1,52 @@
-//! Programa do Host: fica escutando e aceita Clients.
+//! Programa do Host: fica escutando e aceita vários Clients ao mesmo tempo.
+
+mod registry;
 
 use lanshare_core::protocol::{
     read_message, write_message, Message, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use lanshare_net::run_connection;
+use registry::{ClientId, Registry};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 
+/// Limite de Clients. None = sem limite; Some(8) = no máximo 8.
+/// (Vai virar uma opção do Host na GUI.)
+const MAX_CLIENTS: Option<usize> = None;
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let address = format!("0.0.0.0:{DEFAULT_PORT}");
     let listener = TcpListener::bind(&address).await?;
-    println!("[host] Escutando em {address}");
+
+    match MAX_CLIENTS {
+        Some(max) => println!("[host] Escutando em {address} (maximo {max} clients)"),
+        None => println!("[host] Escutando em {address} (sem limite de clients)"),
+    }
     print_local_addresses();
     println!("[host] Ctrl+C para encerrar.");
 
-    // Canal usado para mandar "encerrar" a todas as conexões de uma vez
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let registry = Registry::new(MAX_CLIENTS);
 
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let (stream, client_addr) = accepted?;
-                let shutdown = shutdown_rx.clone();
-                tokio::spawn(handle_client(stream, client_addr, shutdown));
+                tokio::spawn(handle_client(
+                    stream,
+                    client_addr,
+                    shutdown_rx.clone(),
+                    registry.clone(),
+                ));
             },
 
             _ = tokio::signal::ctrl_c() => {
                 println!("[host] Encerrando... avisando os clients.");
                 let _ = shutdown_tx.send(true);
-                // Dá um tempinho para os Bye saírem antes de fechar
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 break;
             },
@@ -43,9 +57,14 @@ async fn main() -> io::Result<()> {
 }
 
 /// Cuida de UM Client do começo ao fim.
-async fn handle_client(mut stream: TcpStream, addr: SocketAddr, shutdown: watch::Receiver<bool>) {
-    let name = match handshake(&mut stream).await {
-        Ok(Some(name)) => name,
+async fn handle_client(
+    mut stream: TcpStream,
+    addr: SocketAddr,
+    shutdown: watch::Receiver<bool>,
+    registry: Registry,
+) {
+    let (id, name) = match handshake(&mut stream, addr, &registry).await {
+        Ok(Some(client)) => client,
         Ok(None) => return, // recusado; o motivo já foi impresso
         Err(erro) => {
             println!("[host] Falha no handshake com {addr}: {erro}");
@@ -53,47 +72,92 @@ async fn handle_client(mut stream: TcpStream, addr: SocketAddr, shutdown: watch:
         }
     };
 
-    println!("[host] {name} entrou ({addr})");
+    println!("[host] {name} (#{id}) entrou ({addr})");
+    print_roster(&registry);
 
-    let reason = run_connection(stream, shutdown, |rtt| {
-        println!("[host] ping de {name}: {} ms", rtt.as_millis());
-    })
-    .await;
+    // O ping é medido, mas o Host não imprime (a GUI vai mostrar depois)
+    let reason = run_connection(stream, shutdown, |_rtt| {}).await;
 
-    println!("[host] {name} saiu ({addr}): {reason}");
+    registry.remove(id);
+    println!("[host] {name} (#{id}) saiu ({addr}): {reason}");
+    print_roster(&registry);
 }
 
-/// Espera o Hello e responde. Devolve o nome do Client se ele foi aceito.
-async fn handshake(stream: &mut TcpStream) -> io::Result<Option<String>> {
+/// Espera o Hello, registra o Client e responde.
+/// Devolve o ID e o nome se ele foi aceito.
+async fn handshake(
+    stream: &mut TcpStream,
+    addr: SocketAddr,
+    registry: &Registry,
+) -> io::Result<Option<(ClientId, String)>> {
     match read_message(stream).await? {
         Message::Hello {
             protocol_version,
             device_name,
         } => {
             if protocol_version != PROTOCOL_VERSION {
-                let resposta = Message::HelloAck {
-                    accepted: false,
-                    reason: Some(format!(
-                        "versao do protocolo incompativel (host usa v{PROTOCOL_VERSION})"
-                    )),
-                };
-                write_message(stream, &resposta).await?;
-                println!("[host] {device_name} recusado: versao incompativel");
-                return Ok(None);
+                let motivo =
+                    format!("versao do protocolo incompativel (host usa v{PROTOCOL_VERSION})");
+                return refuse(stream, &device_name, motivo).await;
             }
+
+            // Tenta registrar; None = sala cheia
+            let Some(id) = registry.try_add(device_name.clone(), addr) else {
+                return refuse(stream, &device_name, "sala cheia".to_string()).await;
+            };
 
             let resposta = Message::HelloAck {
                 accepted: true,
                 reason: None,
             };
-            write_message(stream, &resposta).await?;
-            Ok(Some(device_name))
+            // Se não deu para responder, desfaz o registro
+            if let Err(erro) = write_message(stream, &resposta).await {
+                registry.remove(id);
+                return Err(erro);
+            }
+
+            Ok(Some((id, device_name)))
         }
 
         outra => {
             println!("[host] Mensagem inesperada no inicio: {outra:?}");
             Ok(None)
         }
+    }
+}
+
+/// Responde "recusado" ao Client e avisa no log.
+async fn refuse(
+    stream: &mut TcpStream,
+    name: &str,
+    reason: String,
+) -> io::Result<Option<(ClientId, String)>> {
+    println!("[host] {name} recusado: {reason}");
+    let resposta = Message::HelloAck {
+        accepted: false,
+        reason: Some(reason),
+    };
+    write_message(stream, &resposta).await?;
+    Ok(None)
+}
+
+/// Mostra quem está conectado agora.
+fn print_roster(registry: &Registry) {
+    let clients = registry.list();
+    if clients.is_empty() {
+        println!("[host] Ninguem conectado.");
+        return;
+    }
+
+    println!("[host] Conectados agora ({}):", clients.len());
+    for c in clients {
+        println!(
+            "[host]   #{} {} - {} - ha {}s",
+            c.id,
+            c.name,
+            c.addr,
+            c.connected_at.elapsed().as_secs()
+        );
     }
 }
 

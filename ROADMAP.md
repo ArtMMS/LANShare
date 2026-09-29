@@ -14,8 +14,8 @@
 
 # V0.2 — Multi-User Support
 
-- [] Support multiple clients
-- [] Manage multiple connections
+- [x] Support multiple clients
+- [x] Manage multiple connections
 - [] Identify connected users
 - [] Handle user connections and disconnections
 - [] Manage active sessions
