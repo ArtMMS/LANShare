@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "crates/lanshare-core",
+    "crates/lanshare-host",
+    "crates/lanshare-client",
+]
+
+# Dados que todos os crates vão herdar, para não repetir em cada um.
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+lanshare-core = { path = "crates/lanshare-core" }
+
+# tokio: permite fazer várias coisas de rede ao mesmo tempo (assíncrono).
+tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros"] }
+
+# serde e serde_json: transformam nossas mensagens em JSON e de volta.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

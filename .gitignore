@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# C++
+/native/build/
+/native/out/
+*.obj
+*.pdb
+
+# C# / .NET
+bin/
+obj/
+.vs/
+*.user
+
+# Editores
+.idea/
+
+# Sistema operacional
+Thumbs.db
+.DS_Store

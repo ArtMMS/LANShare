@@ -3,35 +3,35 @@
 # V0.1 — Foundation
 
 - [x] Define project structure
-- [ ] Set up Rust environment
-- [ ] Set up C++ environment
-- [ ] Set up C# environment
-- [ ] Establish basic Host ↔ Client communication
-- [ ] Connect devices through LAN
-- [ ] Detect connection and disconnection
+- [x] Set up Rust environment
+- [] Set up C++ environment
+- [] Set up C# environment
+- [x] Establish basic Host ↔ Client communication
+- [] Connect devices through LAN
+- [] Detect connection and disconnection
 
 ---
 
 # V0.2 — Multi-User Support
 
-- [ ] Support multiple clients
-- [ ] Manage multiple connections
-- [ ] Identify connected users
-- [ ] Handle user connections and disconnections
-- [ ] Manage active sessions
+- [] Support multiple clients
+- [] Manage multiple connections
+- [] Identify connected users
+- [] Handle user connections and disconnections
+- [] Manage active sessions
 
 ---
 
 # V0.3 — Screen Streaming
 
-- [ ] Capture Host screen
-- [ ] Encode/compress frames
-- [ ] Transmit screen frames to Clients
-- [ ] Display the streamed screen on the Client
-- [ ] Support 1080p
-- [ ] Reach at least 30 FPS
-- [ ] Reduce streaming latency
-- [ ] Optimize bandwidth usage
+- [] Capture Host screen
+- [] Encode/compress frames
+- [] Transmit screen frames to Clients
+- [] Display the streamed screen on the Client
+- [] Support 1080p
+- [] Reach at least 30 FPS
+- [] Reduce streaming latency
+- [] Optimize bandwidth usage
 
 ---
 
