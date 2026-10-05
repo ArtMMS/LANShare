@@ -1,5 +1,6 @@
 //! Programa do Host: fica escutando e aceita vários Clients ao mesmo tempo.
 
+mod discovery;
 mod registry;
 
 use lanshare_core::protocol::{
@@ -50,6 +51,13 @@ async fn main() -> io::Result<()> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let registry = Registry::new(MAX_CLIENTS);
+
+    // Responde aos Clients que procuram salas na rede (UDP)
+    tokio::spawn(discovery::run_responder(
+        registry.clone(),
+        password.is_some(),
+        MAX_CLIENTS,
+    ));
 
     loop {
         tokio::select! {

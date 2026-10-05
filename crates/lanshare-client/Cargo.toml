@@ -10,3 +10,4 @@ lanshare-core = { workspace = true }
 lanshare-net = { workspace = true }
 tokio = { workspace = true }
 rpassword = { workspace = true }
+if-addrs = { workspace = true }

@@ -1,4 +1,6 @@
-//! Programa do Client: conecta no Host, mantém a conexão e acompanha quem está na sala.
+//! Programa do Client: acha uma sala, conecta no Host e acompanha quem está na sala.
+
+mod discovery;
 
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
@@ -6,7 +8,7 @@ use lanshare_core::protocol::{
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Write};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
@@ -19,9 +21,10 @@ async fn main() -> io::Result<()> {
     // Lê o nome do settings.json (ou pergunta na primeira vez e salva)
     let username = settings::get_or_ask_username();
 
+    // Atalho: um IP na linha de comando pula a pergunta
     let address = match std::env::args().nth(1) {
         Some(entrada) => normalize_address(&entrada),
-        None => format!("127.0.0.1:{DEFAULT_PORT}"),
+        None => choose_address().await?,
     };
 
     println!("[client] Conectando em {address}...");
@@ -82,6 +85,89 @@ async fn main() -> io::Result<()> {
 
     println!("[client] Desconectado do Host: {reason}");
     Ok(())
+}
+
+/// Procura salas na rede, mostra a lista e pergunta qual usar.
+/// Aceita o número de uma sala da lista ou um IP digitado; Enter procura de novo.
+async fn choose_address() -> io::Result<String> {
+    loop {
+        println!("[client] Procurando salas na rede...");
+        let rooms = match discovery::scan().await {
+            Ok(rooms) => rooms,
+            Err(erro) => {
+                println!("[client] Nao foi possivel procurar salas: {erro}");
+                Vec::new()
+            }
+        };
+        print_rooms(&rooms);
+
+        let what = if rooms.is_empty() {
+            "Digite o IP do Host"
+        } else {
+            "Numero da sala ou IP"
+        };
+        print!("[client] {what} (Enter para procurar de novo): ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "entrada fechada",
+            ));
+        }
+        let input = input.trim();
+
+        if input.is_empty() {
+            continue;
+        }
+
+        // Só dígitos = número da sala na lista
+        if let Ok(number) = input.parse::<usize>() {
+            if (1..=rooms.len()).contains(&number) {
+                return Ok(rooms[number - 1].address());
+            }
+            println!("[client] A sala {number} nao existe na lista.");
+            continue;
+        }
+
+        // Qualquer outra coisa = IP digitado
+        return Ok(normalize_address(input));
+    }
+}
+
+/// Mostra as salas encontradas.
+fn print_rooms(rooms: &[discovery::FoundRoom]) {
+    if rooms.is_empty() {
+        println!("[client] Nenhuma sala encontrada na rede.");
+        return;
+    }
+
+    println!("[client] Salas encontradas:");
+    for (index, room) in rooms.iter().enumerate() {
+        let info = &room.info;
+
+        let people = match info.max_users {
+            Some(max) => format!("{}/{}", info.users, max),
+            None => info.users.to_string(),
+        };
+        let lock = if info.has_password { " - com senha" } else { "" };
+        let version = if info.protocol_version != PROTOCOL_VERSION {
+            " - versao incompativel"
+        } else {
+            ""
+        };
+
+        println!(
+            "[client]   {}) {} - {} - {} na sala{}{}",
+            index + 1,
+            info.name,
+            room.address(),
+            people,
+            lock,
+            version
+        );
+    }
 }
 
 /// Manda o Hello (com o nome de usuário), responde ao pedido de senha (se houver)

@@ -21,7 +21,7 @@
 - [x] Save the user name in a local settings file
 - [x] Add optional Host password
 - [] Kick a connected client
-- [] Automatic room discovery on the LAN (UDP broadcast)
+- [x] Automatic room discovery on the LAN (UDP broadcast)
 - [] Keep manual connection by IP as a fallback
 
 ---
@@ -60,6 +60,7 @@ Show the stream resolution and FPS in the room information
 
 # V0.5 — Graphical User Interface
 
+- [ ] Create single .exe
 - [ ] Create Host GUI
 - [ ] Create Client GUI
 - [ ] Display application version
