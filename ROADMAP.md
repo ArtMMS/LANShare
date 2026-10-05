@@ -18,8 +18,7 @@
 - [x] Manage multiple connections
 - [x] Identify connected users
 - [x] Handle user connections and disconnections
-- [] Manage active sessions
-- [] Save the user name in a local settings file
+- [x] Save the user name in a local settings file
 - [] Add optional Host password (challenge-response, never sent as plain text)
 - [] Kick a connected client
 - [] Automatic room discovery on the LAN (UDP broadcast)

@@ -3,6 +3,7 @@
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
 };
+use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
 use std::collections::HashMap;
 use std::io;
@@ -15,6 +16,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    // Lê o nome do settings.json (ou pergunta na primeira vez e salva)
+    let username = settings::get_or_ask_username();
+
     let address = match std::env::args().nth(1) {
         Some(entrada) => normalize_address(&entrada),
         None => format!("127.0.0.1:{DEFAULT_PORT}"),
@@ -38,7 +42,8 @@ async fn main() -> io::Result<()> {
     };
 
     // Se o Host recusou, o motivo já foi impresso dentro do handshake
-    let Some((client_id, display_name, everyone)) = handshake(&mut stream).await? else {
+    let Some((client_id, display_name, everyone)) = handshake(&mut stream, &username).await?
+    else {
         std::process::exit(1);
     };
     println!("[client] Voce entrou como '{display_name}' (#{client_id}). Ctrl+C para sair.");
@@ -79,12 +84,16 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-/// Manda o Hello e lê a resposta.
+/// Manda o Hello (com o nome de usuário) e lê a resposta.
 /// Devolve (nosso ID, nosso nome, todos na sala) ou None se fomos recusados.
-async fn handshake(stream: &mut TcpStream) -> io::Result<Option<(u64, String, Vec<UserInfo>)>> {
+async fn handshake(
+    stream: &mut TcpStream,
+    username: &str,
+) -> io::Result<Option<(u64, String, Vec<UserInfo>)>> {
+    // O campo do protocolo ainda se chama device_name, mas agora leva o nome de usuário
     let hello = Message::Hello {
         protocol_version: PROTOCOL_VERSION,
-        device_name: device_name(),
+        device_name: username.to_string(),
     };
     write_message(stream, &hello).await?;
 
@@ -160,9 +169,4 @@ fn normalize_address(entrada: &str) -> String {
     } else {
         format!("{entrada}:{DEFAULT_PORT}")
     }
-}
-
-/// Nome deste computador (no Windows fica em COMPUTERNAME).
-fn device_name() -> String {
-    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "dispositivo-desconhecido".to_string())
 }
