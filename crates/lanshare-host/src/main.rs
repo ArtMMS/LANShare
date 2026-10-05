@@ -9,6 +9,7 @@ use lanshare_net::run_connection;
 use registry::{ClientInfo, Registry};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -18,14 +19,31 @@ use tokio::sync::watch;
 /// (Vai virar uma opção do Host na GUI.)
 const MAX_CLIENTS: Option<usize> = None;
 
+/// Tentativas de senha por conexão.
+const MAX_PASSWORD_ATTEMPTS: u32 = 3;
+
+/// Tempo que o Client tem para responder com a senha.
+const PASSWORD_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Pausa depois de uma senha errada (atrapalha tentativas em sequência).
+const WRONG_PASSWORD_DELAY: Duration = Duration::from_secs(1);
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    // Pergunta a senha antes de abrir a sala (Enter vazio = sem senha)
+    let password = ask_room_password()?;
+
     let address = format!("0.0.0.0:{DEFAULT_PORT}");
     let listener = TcpListener::bind(&address).await?;
 
     match MAX_CLIENTS {
         Some(max) => println!("[host] Escutando em {address} (maximo {max} clients)"),
         None => println!("[host] Escutando em {address} (sem limite de clients)"),
+    }
+    if password.is_some() {
+        println!("[host] Sala protegida por senha.");
+    } else {
+        println!("[host] Sala sem senha.");
     }
     print_local_addresses();
     println!("[host] Ctrl+C para encerrar.");
@@ -42,6 +60,7 @@ async fn main() -> io::Result<()> {
                     client_addr,
                     shutdown_rx.clone(),
                     registry.clone(),
+                    password.clone(),
                 ));
             },
 
@@ -57,17 +76,30 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
+/// Pergunta a senha da sala sem mostrar o que é digitado.
+/// Vazio (ou só espaços) = sala sem senha. A senha fica só na memória.
+fn ask_room_password() -> io::Result<Option<Arc<String>>> {
+    let typed = rpassword::prompt_password("[host] Senha da sala (Enter para sem senha): ")?;
+
+    if typed.trim().is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(Arc::new(typed)))
+    }
+}
+
 /// Cuida de UM Client do começo ao fim.
 async fn handle_client(
     mut stream: TcpStream,
     addr: SocketAddr,
     shutdown: watch::Receiver<bool>,
     registry: Registry,
+    password: Option<Arc<String>>,
 ) {
     // Caixa de saída desta conexão: quem quiser falar com este Client põe aqui
     let (out_tx, out_rx) = mpsc::unbounded_channel::<Message>();
 
-    let client = match handshake(&mut stream, addr, &registry, out_tx).await {
+    let client = match handshake(&mut stream, addr, &registry, &password, out_tx).await {
         Ok(Some(client)) => client,
         Ok(None) => return, // recusado; o motivo já foi impresso
         Err(erro) => {
@@ -112,11 +144,13 @@ async fn handle_client(
     print_roster(&registry);
 }
 
-/// Espera o Hello, registra o Client e responde com Welcome ou Rejected.
+/// Espera o Hello, confere a senha (se houver), registra o Client
+/// e responde com Welcome ou Rejected.
 async fn handshake(
     stream: &mut TcpStream,
     addr: SocketAddr,
     registry: &Registry,
+    password: &Option<Arc<String>>,
     out_tx: UnboundedSender<Message>,
 ) -> io::Result<Option<ClientInfo>> {
     match read_message(stream).await? {
@@ -128,6 +162,11 @@ async fn handshake(
                 let motivo =
                     format!("versao do protocolo incompativel (host usa v{PROTOCOL_VERSION})");
                 return refuse(stream, &device_name, motivo).await;
+            }
+
+            // Senha primeiro: quem não passa nunca chega a ser registrado
+            if !check_password(stream, addr, &device_name, password).await? {
+                return Ok(None);
             }
 
             // Tenta registrar; None = sala cheia
@@ -159,6 +198,50 @@ async fn handshake(
             Ok(None)
         }
     }
+}
+
+/// Se a sala tem senha, pede ao Client (até MAX_PASSWORD_ATTEMPTS vezes).
+/// Devolve true se pode entrar; false se foi recusado (a recusa já foi enviada).
+async fn check_password(
+    stream: &mut TcpStream,
+    addr: SocketAddr,
+    name: &str,
+    password: &Option<Arc<String>>,
+) -> io::Result<bool> {
+    let Some(expected) = password else {
+        return Ok(true); // sala sem senha
+    };
+
+    for attempt in 1..=MAX_PASSWORD_ATTEMPTS {
+        write_message(stream, &Message::PasswordRequired).await?;
+
+        let reply = match tokio::time::timeout(PASSWORD_TIMEOUT, read_message(stream)).await {
+            Ok(reply) => reply?,
+            Err(_) => {
+                refuse(stream, name, "tempo esgotado esperando a senha".to_string()).await?;
+                return Ok(false);
+            }
+        };
+
+        match reply {
+            Message::Password { password } if password == **expected => return Ok(true),
+
+            Message::Password { .. } => {
+                println!(
+                    "[host] {name} ({addr}) errou a senha (tentativa {attempt}/{MAX_PASSWORD_ATTEMPTS})"
+                );
+                tokio::time::sleep(WRONG_PASSWORD_DELAY).await;
+            }
+
+            outra => {
+                println!("[host] Mensagem inesperada ao pedir a senha: {outra:?}");
+                return Ok(false);
+            }
+        }
+    }
+
+    refuse(stream, name, "senha incorreta".to_string()).await?;
+    Ok(false)
 }
 
 /// Responde "recusado" ao Client e avisa no log.

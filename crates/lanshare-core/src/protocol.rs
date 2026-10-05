@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -33,6 +33,12 @@ pub enum Message {
         protocol_version: u16,
         device_name: String,
     },
+
+    /// Host -> Client: esta sala tem senha; envie um Password.
+    PasswordRequired,
+
+    /// Client -> Host: a senha digitada pelo usuário.
+    Password { password: String },
 
     /// Host -> Client: aceito. Diz quem o Client é e quem está na sala (inclui ele mesmo).
     Welcome {
@@ -124,6 +130,10 @@ mod tests {
             Message::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 device_name: "pc-de-teste".to_string(),
+            },
+            Message::PasswordRequired,
+            Message::Password {
+                password: "segredo".to_string(),
             },
             Message::Welcome {
                 client_id: 2,

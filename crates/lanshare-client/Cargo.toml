@@ -9,3 +9,4 @@ publish = false
 lanshare-core = { workspace = true }
 lanshare-net = { workspace = true }
 tokio = { workspace = true }
+rpassword = { workspace = true }

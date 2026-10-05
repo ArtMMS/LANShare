@@ -19,7 +19,7 @@
 - [x] Identify connected users
 - [x] Handle user connections and disconnections
 - [x] Save the user name in a local settings file
-- [] Add optional Host password (challenge-response, never sent as plain text)
+- [x] Add optional Host password
 - [] Kick a connected client
 - [] Automatic room discovery on the LAN (UDP broadcast)
 - [] Keep manual connection by IP as a fallback

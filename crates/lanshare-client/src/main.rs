@@ -84,7 +84,8 @@ async fn main() -> io::Result<()> {
     Ok(())
 }
 
-/// Manda o Hello (com o nome de usuário) e lê a resposta.
+/// Manda o Hello (com o nome de usuário), responde ao pedido de senha (se houver)
+/// e lê a resposta final.
 /// Devolve (nosso ID, nosso nome, todos na sala) ou None se fomos recusados.
 async fn handshake(
     stream: &mut TcpStream,
@@ -97,23 +98,46 @@ async fn handshake(
     };
     write_message(stream, &hello).await?;
 
-    match read_message(stream).await? {
-        Message::Welcome {
-            client_id,
-            display_name,
-            users,
-        } => Ok(Some((client_id, display_name, users))),
+    let mut asked_before = false;
 
-        Message::Rejected { reason } => {
-            println!("[client] Host recusou: {reason}");
-            Ok(None)
-        }
+    loop {
+        match read_message(stream).await? {
+            Message::Welcome {
+                client_id,
+                display_name,
+                users,
+            } => return Ok(Some((client_id, display_name, users))),
 
-        outra => {
-            println!("[client] Resposta inesperada: {outra:?}");
-            Ok(None)
+            Message::PasswordRequired => {
+                if asked_before {
+                    println!("[client] Senha incorreta. Tente novamente.");
+                } else {
+                    println!("[client] Esta sala tem senha.");
+                }
+                asked_before = true;
+
+                let password = ask_password().await?;
+                write_message(stream, &Message::Password { password }).await?;
+            }
+
+            Message::Rejected { reason } => {
+                println!("[client] Host recusou: {reason}");
+                return Ok(None);
+            }
+
+            outra => {
+                println!("[client] Resposta inesperada: {outra:?}");
+                return Ok(None);
+            }
         }
     }
+}
+
+/// Lê a senha sem mostrar o que é digitado (fora da thread principal do tokio).
+async fn ask_password() -> io::Result<String> {
+    tokio::task::spawn_blocking(|| rpassword::prompt_password("[client] Senha da sala: "))
+        .await
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
 }
 
 /// Trata as mensagens do Host sobre quem entra e sai.
