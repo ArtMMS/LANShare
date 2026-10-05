@@ -22,7 +22,7 @@
 - [x] Add optional Host password
 - [x] Kick a connected client
 - [x] Automatic room discovery on the LAN (UDP broadcast)
-- [] Keep manual connection by IP as a fallback
+- [x] Keep manual connection by IP as a fallback
 
 ---
 
@@ -92,26 +92,6 @@ Add option to show the Host cursor
 - [ ] Download the new version
 - [ ] Install the update
 - [ ] Restart the application after updating
-
----
-
-# V0.7 — Stabilization
-
- Test Host ↔ Client communication
- Test multiple users
- Test multiple monitors
- Test specific window streaming
- Test following a window (move, resize, monitor change)
- Test 1080p / 30 FPS streaming
- Test resolution and FPS options
- Test room discovery and manual connection by IP
- Test password and kick client
- Improve error handling
- Improve connection stability
- Optimize CPU usage
- Optimize memory usage
- Perform final testing
- Prepare the first stable release
 
 ---
 
