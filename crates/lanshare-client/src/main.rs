@@ -226,8 +226,8 @@ async fn ask_password() -> io::Result<String> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
 }
 
-/// Trata as mensagens do Host sobre quem entra e sai.
-/// Só mostra "entrou"/"saiu" quando a tabela realmente mudou (evita repetição).
+/// Trata as mensagens do Host sobre quem entra, sai ou é removido.
+/// Só mostra o aviso quando a tabela realmente mudou (evita repetição).
 fn handle_message(message: Message, my_id: u64, users: &mut HashMap<u64, String>) {
     match message {
         Message::UserJoined { user } => {
@@ -251,6 +251,21 @@ fn handle_message(message: Message, my_id: u64, users: &mut HashMap<u64, String>
                 );
             }
         }
+
+        // Outro usuário foi removido pelo Host
+        Message::UserKicked { user } => {
+            if users.remove(&user.id).is_some() {
+                println!(
+                    "[client] {} (#{}) foi removido pelo Host - {} na sala",
+                    user.name,
+                    user.id,
+                    users.len() + 1
+                );
+            }
+        }
+
+        // Fomos nós: a conexão será encerrada em seguida pelo Host
+        Message::Kicked { reason } => println!("[client] {reason}."),
 
         outra => println!("[client] Mensagem inesperada: {outra:?}"),
     }

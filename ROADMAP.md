@@ -20,7 +20,7 @@
 - [x] Handle user connections and disconnections
 - [x] Save the user name in a local settings file
 - [x] Add optional Host password
-- [] Kick a connected client
+- [x] Kick a connected client
 - [x] Automatic room discovery on the LAN (UDP broadcast)
 - [] Keep manual connection by IP as a fallback
 

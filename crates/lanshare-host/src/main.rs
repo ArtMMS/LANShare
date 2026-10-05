@@ -1,8 +1,10 @@
 //! Programa do Host: fica escutando e aceita vários Clients ao mesmo tempo.
 
 mod discovery;
+mod kick;
 mod registry;
 
+use kick::Kicker;
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
 };
@@ -13,8 +15,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::watch;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::{oneshot, watch};
 
 /// Limite de Clients. None = sem limite; Some(8) = no máximo 8.
 /// (Vai virar uma opção do Host na GUI.)
@@ -51,6 +53,7 @@ async fn main() -> io::Result<()> {
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let registry = Registry::new(MAX_CLIENTS);
+    let kicker = Kicker::new();
 
     // Responde aos Clients que procuram salas na rede (UDP)
     tokio::spawn(discovery::run_responder(
@@ -58,6 +61,10 @@ async fn main() -> io::Result<()> {
         password.is_some(),
         MAX_CLIENTS,
     ));
+
+    // Comandos digitados no terminal do Host
+    let mut commands = spawn_command_reader();
+    println!("[host] Comandos: list | kick <id> | help");
 
     loop {
         tokio::select! {
@@ -69,7 +76,12 @@ async fn main() -> io::Result<()> {
                     shutdown_rx.clone(),
                     registry.clone(),
                     password.clone(),
+                    kicker.clone(),
                 ));
+            },
+
+            Some(line) = commands.recv() => {
+                handle_command(&line, &registry, &kicker);
             },
 
             _ = tokio::signal::ctrl_c() => {
@@ -96,6 +108,80 @@ fn ask_room_password() -> io::Result<Option<Arc<String>>> {
     }
 }
 
+/// Lê o que o Host digita no terminal (numa thread própria, porque ler o teclado bloqueia).
+fn spawn_command_reader() -> UnboundedReceiver<String> {
+    let (tx, rx) = mpsc::unbounded_channel();
+
+    std::thread::spawn(move || {
+        for line in io::stdin().lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    rx
+}
+
+/// Executa um comando digitado pelo Host.
+fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
+    let mut parts = line.split_whitespace();
+
+    match parts.next() {
+        Some("list") => print_roster(registry),
+
+        Some("kick") => {
+            // Aceita "kick 3" e "kick #3"
+            let id = parts
+                .next()
+                .and_then(|text| text.trim_start_matches('#').parse::<u64>().ok());
+
+            match id {
+                Some(id) => kick_client(id, registry, kicker),
+                None => println!("[host] Uso: kick <id>   (veja os ids com 'list')"),
+            }
+        }
+
+        Some("help") => print_help(),
+
+        Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
+
+        None => {}
+    }
+}
+
+/// Remove um Client: avisa ele, avisa os outros e encerra a conexão dele.
+fn kick_client(id: u64, registry: &Registry, kicker: &Kicker) {
+    let Some(target) = registry.list().into_iter().find(|c| c.id == id) else {
+        println!("[host] Nao existe client com id #{id}. Use 'list'.");
+        return;
+    };
+
+    if !kicker.kick(id, "Voce foi removido pelo Host") {
+        println!("[host] {} (#{id}) ja esta saindo.", target.name);
+        return;
+    }
+
+    println!("[host] Removendo {} (#{id})...", target.name);
+
+    // Avisa todos os outros (o expulso já recebeu o aviso dele)
+    let notice = Message::UserKicked {
+        user: UserInfo {
+            id,
+            name: target.name.clone(),
+        },
+    };
+    registry.broadcast(&notice, Some(id));
+}
+
+fn print_help() {
+    println!("[host] Comandos:");
+    println!("[host]   list        mostra quem esta conectado");
+    println!("[host]   kick <id>   remove o client com esse id (veja o id em 'list')");
+    println!("[host]   help        mostra esta ajuda");
+}
+
 /// Cuida de UM Client do começo ao fim.
 async fn handle_client(
     mut stream: TcpStream,
@@ -103,9 +189,11 @@ async fn handle_client(
     shutdown: watch::Receiver<bool>,
     registry: Registry,
     password: Option<Arc<String>>,
+    kicker: Kicker,
 ) {
     // Caixa de saída desta conexão: quem quiser falar com este Client põe aqui
     let (out_tx, out_rx) = mpsc::unbounded_channel::<Message>();
+    let kick_out_tx = out_tx.clone();
 
     let client = match handshake(&mut stream, addr, &registry, &password, out_tx).await {
         Ok(Some(client)) => client,
@@ -118,6 +206,22 @@ async fn handle_client(
     let (id, name) = (client.id, client.name);
 
     println!("[host] {name} (#{id}) entrou ({addr})");
+
+    // Permite ao Host expulsar este Client (comando kick)
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    kicker.register(id, kick_out_tx, stop_tx);
+
+    // Sinal de encerramento SÓ desta conexão: dispara no kick ou no encerramento do Host
+    let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(false);
+    let mut global_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = global_shutdown.changed() => {},
+            _ = stop_rx => {},
+            _ = conn_shutdown_tx.closed() => return, // a conexão já acabou sozinha
+        }
+        let _ = conn_shutdown_tx.send(true);
+    });
 
     // Avisa os outros Clients que alguém entrou
     let joined = Message::UserJoined {
@@ -133,12 +237,13 @@ async fn handle_client(
     let shutdown_check = shutdown.clone();
 
     // O ping é medido, mas o Host não imprime (a GUI vai mostrar depois)
-    let reason = run_connection(stream, shutdown, out_rx, |_event| {}).await;
+    let reason = run_connection(stream, conn_shutdown_rx, out_rx, |_event| {}).await;
 
     registry.remove(id);
+    let was_kicked = kicker.finish(id);
 
-    // No encerramento do Host todo mundo sai junto; não vale avisar um a um
-    if !*shutdown_check.borrow() {
+    // No encerramento do Host todo mundo sai junto; e quem foi expulso já foi anunciado
+    if !*shutdown_check.borrow() && !was_kicked {
         let left = Message::UserLeft {
             user: UserInfo {
                 id,
@@ -148,7 +253,11 @@ async fn handle_client(
         registry.broadcast(&left, None);
     }
 
-    println!("[host] {name} (#{id}) saiu ({addr}): {reason}");
+    if was_kicked {
+        println!("[host] {name} (#{id}) foi removido ({addr})");
+    } else {
+        println!("[host] {name} (#{id}) saiu ({addr}): {reason}");
+    }
     print_roster(&registry);
 }
 
