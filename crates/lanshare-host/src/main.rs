@@ -1,5 +1,6 @@
 //! Programa do Host: fica escutando e aceita vários Clients ao mesmo tempo.
 
+mod capture;
 mod discovery;
 mod kick;
 mod registry;
@@ -64,7 +65,7 @@ async fn main() -> io::Result<()> {
 
     // Comandos digitados no terminal do Host
     let mut commands = spawn_command_reader();
-    println!("[host] Comandos: list | kick <id> | help");
+    println!("[host] Comandos: list | kick <id> | capture [segundos] | help");
 
     loop {
         tokio::select! {
@@ -143,12 +144,34 @@ fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
             }
         }
 
+        Some("capture") => {
+            // "capture" = 5 segundos; "capture 10" = 10 segundos
+            let seconds = parts
+                .next()
+                .and_then(|text| text.parse::<u64>().ok())
+                .filter(|&s| s > 0)
+                .unwrap_or(5);
+            start_capture_test(seconds);
+        }
+
         Some("help") => print_help(),
 
         Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
 
         None => {}
     }
+}
+
+/// Teste temporário da captura de tela.
+/// Roda numa thread própria para não travar o Host enquanto captura.
+fn start_capture_test(seconds: u64) {
+    println!("[host] Capturando a tela por {seconds}s...");
+
+    std::thread::spawn(move || {
+        if let Err(erro) = capture::test_capture(seconds) {
+            println!("[host] Falha na captura: {erro}");
+        }
+    });
 }
 
 /// Remove um Client: avisa ele, avisa os outros e encerra a conexão dele.
@@ -177,9 +200,10 @@ fn kick_client(id: u64, registry: &Registry, kicker: &Kicker) {
 
 fn print_help() {
     println!("[host] Comandos:");
-    println!("[host]   list        mostra quem esta conectado");
-    println!("[host]   kick <id>   remove o client com esse id (veja o id em 'list')");
-    println!("[host]   help        mostra esta ajuda");
+    println!("[host]   list              mostra quem esta conectado");
+    println!("[host]   kick <id>         remove o client com esse id (veja o id em 'list')");
+    println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
+    println!("[host]   help              mostra esta ajuda");
 }
 
 /// Cuida de UM Client do começo ao fim.
