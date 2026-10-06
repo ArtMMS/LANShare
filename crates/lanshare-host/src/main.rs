@@ -2,6 +2,7 @@
 
 mod capture;
 mod discovery;
+mod encoder;
 mod kick;
 mod registry;
 
@@ -65,7 +66,7 @@ async fn main() -> io::Result<()> {
 
     // Comandos digitados no terminal do Host
     let mut commands = spawn_command_reader();
-    println!("[host] Comandos: list | kick <id> | capture [segundos] | help");
+    println!("[host] Comandos: list | kick <id> | capture [segundos] | encode [segundos] | help");
 
     loop {
         tokio::select! {
@@ -125,6 +126,13 @@ fn spawn_command_reader() -> UnboundedReceiver<String> {
     rx
 }
 
+/// Lê o número de segundos de um comando (padrão: 5).
+fn parse_seconds(text: Option<&str>) -> u64 {
+    text.and_then(|t| t.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .unwrap_or(5)
+}
+
 /// Executa um comando digitado pelo Host.
 fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
     let mut parts = line.split_whitespace();
@@ -144,15 +152,9 @@ fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
             }
         }
 
-        Some("capture") => {
-            // "capture" = 5 segundos; "capture 10" = 10 segundos
-            let seconds = parts
-                .next()
-                .and_then(|text| text.parse::<u64>().ok())
-                .filter(|&s| s > 0)
-                .unwrap_or(5);
-            start_capture_test(seconds);
-        }
+        Some("capture") => start_capture_test(parse_seconds(parts.next())),
+
+        Some("encode") => start_encode_test(parse_seconds(parts.next())),
 
         Some("help") => print_help(),
 
@@ -170,6 +172,17 @@ fn start_capture_test(seconds: u64) {
     std::thread::spawn(move || {
         if let Err(erro) = capture::test_capture(seconds) {
             println!("[host] Falha na captura: {erro}");
+        }
+    });
+}
+
+/// Teste temporário da compressão (captura + H.264).
+fn start_encode_test(seconds: u64) {
+    println!("[host] Capturando e comprimindo a tela por {seconds}s...");
+
+    std::thread::spawn(move || {
+        if let Err(erro) = encoder::test_encode(seconds) {
+            println!("[host] Falha na compressao: {erro}");
         }
     });
 }
@@ -203,6 +216,7 @@ fn print_help() {
     println!("[host]   list              mostra quem esta conectado");
     println!("[host]   kick <id>         remove o client com esse id (veja o id em 'list')");
     println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
+    println!("[host]   encode [segs]     teste de captura + compressao H.264 (padrao: 5 segundos)");
     println!("[host]   help              mostra esta ajuda");
 }
 

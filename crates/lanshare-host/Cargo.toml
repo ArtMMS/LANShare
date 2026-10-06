@@ -12,3 +12,4 @@ tokio = { workspace = true }
 if-addrs = { workspace = true }
 rpassword = { workspace = true }
 windows-capture = "2.0.1"
+openh264 = "0.9"

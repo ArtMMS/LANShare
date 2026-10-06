@@ -29,14 +29,14 @@
 # V0.3 — Screen Streaming
 
 - [x] Capture Host screen
-- [] Encode/compress frames
+- [x] Encode/compress frames
 - [] Transmit screen frames to Clients
 - [] Display the streamed screen on the Client
 - [] Support 1080p
 - [] Reach at least 30 FPS
 - [] Reduce streaming latency
 - [] Optimize bandwidth usage
-- [] Selectable resolution (720p / 1080p) and FPS (30)
+- [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
 - [] Option to show or hide the Host cursor in the stream
 - [] Measure FPS and bitrate in real time
 
