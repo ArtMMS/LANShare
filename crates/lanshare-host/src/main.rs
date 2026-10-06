@@ -6,6 +6,7 @@ mod encoder;
 mod hw_encoder;
 mod kick;
 mod registry;
+mod stream;
 
 use kick::Kicker;
 use lanshare_core::protocol::{
@@ -17,6 +18,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
+use stream::StreamHandle;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, watch};
@@ -58,6 +60,9 @@ async fn main() -> io::Result<()> {
     let registry = Registry::new(MAX_CLIENTS);
     let kicker = Kicker::new();
 
+    // A transmissão da tela (None = não está transmitindo)
+    let mut streaming: Option<StreamHandle> = None;
+
     // Responde aos Clients que procuram salas na rede (UDP)
     tokio::spawn(discovery::run_responder(
         registry.clone(),
@@ -67,14 +72,14 @@ async fn main() -> io::Result<()> {
 
     // Comandos digitados no terminal do Host
     let mut commands = spawn_command_reader();
-    println!(
-        "[host] Comandos: list | kick <id> | capture [s] | encode [s] | hwencode [s] | help"
-    );
+    println!("[host] Comandos: list | kick <id> | share | stop | help");
 
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let (stream, client_addr) = accepted?;
+                // Sem isso o TCP junta pacotes pequenos e atrasa o vídeo
+                let _ = stream.set_nodelay(true);
                 tokio::spawn(handle_client(
                     stream,
                     client_addr,
@@ -86,11 +91,14 @@ async fn main() -> io::Result<()> {
             },
 
             Some(line) = commands.recv() => {
-                handle_command(&line, &registry, &kicker);
+                handle_command(&line, &registry, &kicker, &mut streaming);
             },
 
             _ = tokio::signal::ctrl_c() => {
                 println!("[host] Encerrando... avisando os clients.");
+                if let Some(running) = streaming.take() {
+                    running.stop();
+                }
                 let _ = shutdown_tx.send(true);
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 break;
@@ -137,7 +145,12 @@ fn parse_seconds(text: Option<&str>) -> u64 {
 }
 
 /// Executa um comando digitado pelo Host.
-fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
+fn handle_command(
+    line: &str,
+    registry: &Registry,
+    kicker: &Kicker,
+    streaming: &mut Option<StreamHandle>,
+) {
     let mut parts = line.split_whitespace();
 
     match parts.next() {
@@ -155,6 +168,10 @@ fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
             }
         }
 
+        Some("share") => start_sharing(registry, streaming),
+
+        Some("stop") => stop_sharing(streaming),
+
         Some("capture") => start_capture_test(parse_seconds(parts.next())),
 
         Some("encode") => start_encode_test(parse_seconds(parts.next())),
@@ -166,6 +183,28 @@ fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
         Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
 
         None => {}
+    }
+}
+
+/// Começa a transmitir a tela para os Clients.
+fn start_sharing(registry: &Registry, streaming: &mut Option<StreamHandle>) {
+    if streaming.as_ref().is_some_and(|s| s.is_running()) {
+        println!("[host] A tela ja esta sendo compartilhada. Use 'stop' para parar.");
+        return;
+    }
+
+    println!("[host] Compartilhando a tela (a GPU so e usada quando ha clients conectados)...");
+    *streaming = Some(StreamHandle::start(registry.clone()));
+}
+
+/// Para a transmissão da tela.
+fn stop_sharing(streaming: &mut Option<StreamHandle>) {
+    match streaming.take() {
+        Some(running) => {
+            running.stop();
+            println!("[host] Compartilhamento parado.");
+        }
+        None => println!("[host] A tela nao esta sendo compartilhada."),
     }
 }
 
@@ -231,6 +270,8 @@ fn print_help() {
     println!("[host] Comandos:");
     println!("[host]   list              mostra quem esta conectado");
     println!("[host]   kick <id>         remove o client com esse id (veja o id em 'list')");
+    println!("[host]   share             comeca a transmitir a tela para os clients");
+    println!("[host]   stop              para a transmissao da tela");
     println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
     println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");
     println!("[host]   hwencode [segs]   teste de captura + compressao H.264 na GPU");

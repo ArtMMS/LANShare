@@ -1,9 +1,9 @@
 //! Registro das conexões ativas do Host.
 
-use lanshare_core::protocol::{Message, UserInfo};
+use lanshare_core::protocol::{Message, UserInfo, VideoFrame};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
@@ -12,6 +12,10 @@ pub type ClientId = u64;
 
 /// Tamanho máximo do nome de um usuário (em caracteres).
 const MAX_NAME_LEN: usize = 32;
+
+/// Quantos frames de vídeo podem esperar na fila de um Client.
+/// Passou disso, ele está atrasado: descartamos frames dele (ver broadcast_video).
+const MAX_QUEUED_VIDEO_FRAMES: usize = 8;
 
 /// Dados de um Client conectado.
 #[derive(Debug, Clone)]
@@ -22,16 +26,26 @@ pub struct ClientInfo {
     pub connected_at: Instant,
 }
 
+/// Situação do vídeo para um Client.
+struct VideoState {
+    /// Quantos frames de vídeo estão esperando na fila deste Client.
+    queued: Arc<AtomicUsize>,
+    /// true = não manda nada até o próximo keyframe (acabou de entrar ou ficou para trás).
+    waiting_keyframe: bool,
+}
+
 /// Um Client na lista: os dados dele + a caixa de saída para mandar mensagens.
 struct Entry {
     info: ClientInfo,
     tx: UnboundedSender<Message>,
+    video: VideoState,
 }
 
 struct Inner {
     next_id: AtomicU64,           // contador de IDs, seguro entre tarefas
     max_clients: Option<usize>,   // None = sem limite
     clients: Mutex<HashMap<ClientId, Entry>>,
+    keyframe_requested: AtomicBool, // alguém precisa de um keyframe novo
 }
 
 /// Clonar um Registry NÃO copia a lista: todos os clones compartilham a mesma.
@@ -47,6 +61,7 @@ impl Registry {
                 next_id: AtomicU64::new(1),
                 max_clients,
                 clients: Mutex::new(HashMap::new()),
+                keyframe_requested: AtomicBool::new(false),
             }),
         }
     }
@@ -80,8 +95,16 @@ impl Registry {
             Entry {
                 info: info.clone(),
                 tx,
+                video: VideoState {
+                    queued: Arc::new(AtomicUsize::new(0)),
+                    waiting_keyframe: true,
+                },
             },
         );
+
+        // Quem entra só consegue assistir a partir de um keyframe
+        self.inner.keyframe_requested.store(true, Ordering::Relaxed);
+
         Some(info)
     }
 
@@ -102,6 +125,11 @@ impl Registry {
             .collect();
         list.sort_by_key(|c| c.id);
         list
+    }
+
+    /// true se não há ninguém conectado.
+    pub fn is_empty(&self) -> bool {
+        self.inner.clients.lock().unwrap().is_empty()
     }
 
     /// A lista no formato que os Clients recebem (ID + nome).
@@ -125,6 +153,42 @@ impl Registry {
             // Erro = a conexão dele já terminou; não tem problema
             let _ = entry.tx.send(message.clone());
         }
+    }
+
+    /// Envia um pacote de vídeo a todos os Clients.
+    ///
+    /// - Quem acabou de entrar (ou ficou para trás) só recebe a partir de um keyframe.
+    /// - Quem está com a fila cheia está atrasado: este frame é descartado para ele,
+    ///   e pedimos um keyframe novo para ele voltar a acompanhar.
+    pub fn broadcast_video(&self, keyframe: bool, timestamp_us: u64, data: Arc<Vec<u8>>) {
+        let mut clients = self.inner.clients.lock().unwrap();
+
+        for entry in clients.values_mut() {
+            if entry.video.waiting_keyframe {
+                if !keyframe {
+                    continue;
+                }
+                entry.video.waiting_keyframe = false;
+            }
+
+            if entry.video.queued.load(Ordering::Relaxed) >= MAX_QUEUED_VIDEO_FRAMES {
+                entry.video.waiting_keyframe = true;
+                self.inner.keyframe_requested.store(true, Ordering::Relaxed);
+                continue;
+            }
+
+            entry.video.queued.fetch_add(1, Ordering::Relaxed);
+            let frame = VideoFrame::new(keyframe, timestamp_us, data.clone())
+                .with_queue_counter(entry.video.queued.clone());
+
+            // Erro = a conexão já terminou; o frame é descartado e o contador desce sozinho
+            let _ = entry.tx.send(Message::Video(frame));
+        }
+    }
+
+    /// Alguém precisa de um keyframe novo? (Lê e zera o pedido.)
+    pub fn take_keyframe_request(&self) -> bool {
+        self.inner.keyframe_requested.swap(false, Ordering::Relaxed)
     }
 }
 

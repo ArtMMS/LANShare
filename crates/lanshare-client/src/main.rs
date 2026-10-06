@@ -3,18 +3,21 @@
 mod discovery;
 
 use lanshare_core::protocol::{
-    read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
+    read_message, write_message, Message, UserInfo, VideoFrame, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// De quanto em quanto tempo o Client mostra o resumo do vídeo recebido.
+const VIDEO_REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -44,6 +47,9 @@ async fn main() -> io::Result<()> {
         }
     };
 
+    // Sem isso o TCP junta pacotes pequenos e atrasa o vídeo
+    let _ = stream.set_nodelay(true);
+
     // Se o Host recusou, o motivo já foi impresso dentro do handshake
     let Some((client_id, display_name, everyone)) = handshake(&mut stream, &username).await?
     else {
@@ -71,6 +77,7 @@ async fn main() -> io::Result<()> {
     let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel::<Message>();
 
     let mut ping_count: u32 = 0;
+    let mut video_stats = VideoStats::new();
     let reason = run_connection(stream, shutdown_rx, outgoing_rx, |event| match event {
         ConnectionEvent::Rtt(rtt) => {
             // Um ping a cada 2 s seria barulho demais: mostra 1 a cada 10
@@ -79,12 +86,67 @@ async fn main() -> io::Result<()> {
             }
             ping_count += 1;
         }
-        ConnectionEvent::Message(message) => handle_message(message, client_id, &mut users),
+        ConnectionEvent::Message(message) => {
+            handle_message(message, client_id, &mut users, &mut video_stats)
+        }
     })
     .await;
 
     println!("[client] Desconectado do Host: {reason}");
     Ok(())
+}
+
+/// Conta o vídeo que chega e mostra um resumo de tempos em tempos.
+/// (Mostrar a imagem de verdade é o próximo passo.)
+struct VideoStats {
+    receiving: bool,
+    since: Instant,
+    frames: u32,
+    keyframes: u32,
+    bytes: u64,
+}
+
+impl VideoStats {
+    fn new() -> Self {
+        Self {
+            receiving: false,
+            since: Instant::now(),
+            frames: 0,
+            keyframes: 0,
+            bytes: 0,
+        }
+    }
+
+    fn record(&mut self, frame: &VideoFrame) {
+        if !self.receiving {
+            self.receiving = true;
+            self.since = Instant::now();
+            println!("[client] Recebendo video do Host.");
+        }
+
+        self.frames += 1;
+        self.bytes += frame.data.len() as u64;
+        if frame.keyframe {
+            self.keyframes += 1;
+        }
+
+        let elapsed = self.since.elapsed();
+        if elapsed >= VIDEO_REPORT_INTERVAL {
+            let secs = elapsed.as_secs_f64();
+            println!(
+                "[client] Video: {:.1} FPS, {:.2} Mbps, {} keyframe(s) em {:.0}s",
+                self.frames as f64 / secs,
+                self.bytes as f64 * 8.0 / secs / 1_000_000.0,
+                self.keyframes,
+                secs
+            );
+
+            self.since = Instant::now();
+            self.frames = 0;
+            self.keyframes = 0;
+            self.bytes = 0;
+        }
+    }
 }
 
 /// Procura salas na rede, mostra a lista e pergunta qual usar.
@@ -226,10 +288,18 @@ async fn ask_password() -> io::Result<String> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
 }
 
-/// Trata as mensagens do Host sobre quem entra, sai ou é removido.
+/// Trata as mensagens do Host: vídeo, e quem entra, sai ou é removido.
 /// Só mostra o aviso quando a tabela realmente mudou (evita repetição).
-fn handle_message(message: Message, my_id: u64, users: &mut HashMap<u64, String>) {
+fn handle_message(
+    message: Message,
+    my_id: u64,
+    users: &mut HashMap<u64, String>,
+    video: &mut VideoStats,
+) {
     match message {
+        // Pacote de vídeo (por enquanto só contamos; a exibição é o próximo passo)
+        Message::Video(frame) => video.record(&frame),
+
         Message::UserJoined { user } => {
             if user.id != my_id && users.insert(user.id, user.name.clone()).is_none() {
                 println!(
