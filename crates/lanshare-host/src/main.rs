@@ -3,6 +3,7 @@
 mod capture;
 mod discovery;
 mod encoder;
+mod hw_encoder;
 mod kick;
 mod registry;
 
@@ -66,7 +67,9 @@ async fn main() -> io::Result<()> {
 
     // Comandos digitados no terminal do Host
     let mut commands = spawn_command_reader();
-    println!("[host] Comandos: list | kick <id> | capture [segundos] | encode [segundos] | help");
+    println!(
+        "[host] Comandos: list | kick <id> | capture [s] | encode [s] | hwencode [s] | help"
+    );
 
     loop {
         tokio::select! {
@@ -156,6 +159,8 @@ fn handle_command(line: &str, registry: &Registry, kicker: &Kicker) {
 
         Some("encode") => start_encode_test(parse_seconds(parts.next())),
 
+        Some("hwencode") => start_hw_encode_test(parse_seconds(parts.next())),
+
         Some("help") => print_help(),
 
         Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
@@ -176,13 +181,24 @@ fn start_capture_test(seconds: u64) {
     });
 }
 
-/// Teste temporário da compressão (captura + H.264).
+/// Teste temporário da compressão por software (captura + H.264 na CPU).
 fn start_encode_test(seconds: u64) {
-    println!("[host] Capturando e comprimindo a tela por {seconds}s...");
+    println!("[host] Capturando e comprimindo (CPU) a tela por {seconds}s...");
 
     std::thread::spawn(move || {
         if let Err(erro) = encoder::test_encode(seconds) {
             println!("[host] Falha na compressao: {erro}");
+        }
+    });
+}
+
+/// Teste temporário da compressão por hardware (captura + H.264 na GPU).
+fn start_hw_encode_test(seconds: u64) {
+    println!("[host] Capturando e comprimindo (GPU) a tela por {seconds}s...");
+
+    std::thread::spawn(move || {
+        if let Err(erro) = hw_encoder::test_hw_encode(seconds) {
+            println!("[host] Falha na compressao por GPU: {erro}");
         }
     });
 }
@@ -216,7 +232,8 @@ fn print_help() {
     println!("[host]   list              mostra quem esta conectado");
     println!("[host]   kick <id>         remove o client com esse id (veja o id em 'list')");
     println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
-    println!("[host]   encode [segs]     teste de captura + compressao H.264 (padrao: 5 segundos)");
+    println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");
+    println!("[host]   hwencode [segs]   teste de captura + compressao H.264 na GPU");
     println!("[host]   help              mostra esta ajuda");
 }
 

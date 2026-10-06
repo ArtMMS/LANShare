@@ -34,7 +34,7 @@
 - [] Display the streamed screen on the Client
 - [] Support 1080p
 - [] Reach at least 30 FPS
-- [] Reduce streaming latency
+- [x] Reduce streaming latency
 - [] Optimize bandwidth usage
 - [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
 - [] Option to show or hide the Host cursor in the stream

@@ -150,8 +150,10 @@ dependencies = [
  "lanshare-core",
  "lanshare-net",
  "openh264",
+ "rayon",
  "rpassword",
  "tokio",
+ "windows",
  "windows-capture",
 ]
 
