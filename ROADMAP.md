@@ -93,36 +93,45 @@ Add option to show the Host cursor
 
 ---
 
-# V1.0 — First Stable Release
+# Distribution & Release
 
-- [ ] LAN connection
-- [ ] 1080p / 30 FPS screen streaming
-- [ ] Multiple users
-- [ ] Host GUI
-- [ ] Client GUI
-- [ ] Application version display
-- [ ] Multi-monitor selection
-- [ ] Monitor preview
-- [ ] Specific window streaming
- Follow the shared window
-Selectable resolution and FPS
- Performance monitor (FPS, bitrate, ping)
- User name saved on first launch
- Host password and kick client
- Automatic room discovery
- Fullscreen mode and Host cursor option
-- [ ] Automatic update detection
-- [ ] Update installation through the application
+## Windows
+
+- [ ] Create Windows Installer (`LANShare-Setup.exe`)
+- [ ] Create portable version (`LANShare-win-x64.zip`)
+- [ ] Test clean installation on Windows
+- [ ] Test portable version on a clean Windows installation
+- [ ] Configure application metadata and version information
+- [ ] Create Start Menu shortcut
+- [ ] Add application uninstaller
+- [ ] Code-sign the application
+- [ ] Code-sign the installer
+- [ ] Verify Windows SmartScreen reputation
+
+## Website
+
+- [ ] Create LANShare download website
+- [ ] Add Windows Installer download
+- [ ] Add Portable version download
+- [ ] Display current version
+- [ ] Add system requirements
+- [ ] Add installation instructions
+- [ ] Add changelog / release notes
+- [ ] Add GitHub repository link
+- [ ] Add discreet advertising
+
+## Releases
+
+- [ ] Define release process
+- [ ] Create versioned releases on GitHub
+- [ ] Upload installer to GitHub Releases
+- [ ] Upload portable version to GitHub Releases
+- [ ] Update website download links
+- [ ] Publish release notes
 
 ---
 
 # Future Plans
-
-## Distribution
- Create a download website with discreet ads
- Sign the application to avoid Windows SmartScreen warnings
-
----
 
 ## Audio Streaming
 
@@ -144,13 +153,3 @@ Selectable resolution and FPS
  Improve streaming quality
  Further reduce latency
  Optimize bandwidth usage
-
----
-
-# Long-Term Goals
-
-- [ ] Improve overall performance
-- [ ] Improve streaming stability
-- [ ] Improve user experience
-- [ ] Expand streaming configuration options
-- [ ] Continue improving the application beyond V1.0
