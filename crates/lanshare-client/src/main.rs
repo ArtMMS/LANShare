@@ -1,6 +1,8 @@
-//! Programa do Client: acha uma sala, conecta no Host e acompanha quem está na sala.
+//! Programa do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
 
+mod decoder;
 mod discovery;
+mod viewer;
 
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, VideoFrame, DEFAULT_PORT, PROTOCOL_VERSION,
@@ -9,10 +11,12 @@ use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
+use viewer::Viewer;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -65,11 +69,21 @@ async fn main() -> io::Result<()> {
         .collect();
     print_users(&users);
 
-    // Ctrl+C vira um aviso de "encerrar" para o run_connection mandar o Bye
+    // Ctrl+C (ou fechar a janela de vídeo) vira um aviso de "encerrar" para o run_connection mandar o Bye
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_tx = Arc::new(shutdown_tx);
+
+    let ctrl_c_tx = shutdown_tx.clone();
     tokio::spawn(async move {
         let _ = tokio::signal::ctrl_c().await;
-        let _ = shutdown_tx.send(true);
+        let _ = ctrl_c_tx.send(true);
+    });
+
+    // Janela provisória do vídeo (a janela só abre quando chegar a primeira imagem)
+    let close_tx = shutdown_tx.clone();
+    let viewer = Viewer::start(move || {
+        println!("[client] Janela de video fechada.");
+        let _ = close_tx.send(true);
     });
 
     // Por enquanto o Client não envia nada além de Ping/Bye, mas a caixa de saída
@@ -87,17 +101,19 @@ async fn main() -> io::Result<()> {
             ping_count += 1;
         }
         ConnectionEvent::Message(message) => {
-            handle_message(message, client_id, &mut users, &mut video_stats)
+            handle_message(message, client_id, &mut users, &mut video_stats, &viewer)
         }
     })
     .await;
+
+    // Fecha a janela e espera a thread do vídeo terminar
+    viewer.stop();
 
     println!("[client] Desconectado do Host: {reason}");
     Ok(())
 }
 
 /// Conta o vídeo que chega e mostra um resumo de tempos em tempos.
-/// (Mostrar a imagem de verdade é o próximo passo.)
 struct VideoStats {
     receiving: bool,
     since: Instant,
@@ -295,10 +311,14 @@ fn handle_message(
     my_id: u64,
     users: &mut HashMap<u64, String>,
     video: &mut VideoStats,
+    viewer: &Viewer,
 ) {
     match message {
-        // Pacote de vídeo (por enquanto só contamos; a exibição é o próximo passo)
-        Message::Video(frame) => video.record(&frame),
+        // Pacote de vídeo: conta nas estatísticas e entrega à janela
+        Message::Video(frame) => {
+            video.record(&frame);
+            viewer.push(frame);
+        }
 
         Message::UserJoined { user } => {
             if user.id != my_id && users.insert(user.id, user.name.clone()).is_none() {

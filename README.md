@@ -48,7 +48,7 @@ The project is being developed with performance, stability, and ease of use in m
 ### V1.0
 - [x] LAN connection
 - [ ] 1080p / 30 FPS screen streaming
-- [ ] Multiple users
+- [x] Multiple users
 - [ ] Host and Client GUI
 - [ ] Multi-monitor selection with preview
 - [ ] Specific window streaming

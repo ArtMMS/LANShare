@@ -31,7 +31,7 @@
 - [x] Capture Host screen
 - [x] Encode/compress frames
 - [x] Transmit screen frames to Clients
-- [] Display the streamed screen on the Client
+- [x] Display the streamed screen on the Client
 - [x] Reduce streaming latency
 - [] Optimize bandwidth usage
 - [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
