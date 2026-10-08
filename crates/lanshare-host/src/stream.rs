@@ -69,6 +69,11 @@ fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
     let mut report_start = Instant::now();
     let mut packets: u32 = 0;
     let mut bytes: u64 = 0;
+    let mut skipped: u32 = 0;
+
+    // Limite de FPS: a agenda diz quando o próximo frame pode entrar
+    let frame_interval = Duration::from_secs_f64(1.0 / TARGET_FPS as f64);
+    let mut next_frame_at = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
         let frame = match capture.frames.recv_timeout(Duration::from_millis(100)) {
@@ -84,6 +89,18 @@ fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
         if registry.is_empty() {
             continue;
         }
+
+        // Chegou antes da hora: descarta (folga de 1/4 de intervalo para o jitter)
+        let now = Instant::now();
+        if now + frame_interval / 4 < next_frame_at {
+            skipped += 1;
+            continue;
+        }
+        next_frame_at = if now > next_frame_at + frame_interval {
+            now + frame_interval // ficou muito para trás: recomeça a agenda daqui
+        } else {
+            next_frame_at + frame_interval
+        };
 
         // O encoder nasce no primeiro frame, quando já sabemos a resolução
         if encoder.is_none() {
@@ -120,14 +137,16 @@ fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
         if report_start.elapsed() >= REPORT_INTERVAL {
             let secs = report_start.elapsed().as_secs_f64();
             println!(
-                "[host] Transmitindo: {:.1} pacotes/s, {:.2} Mbps (por client), {} client(s)",
+                "[host] Transmitindo: {:.1} pacotes/s, {:.2} Mbps (por client), {} client(s), {} frame(s) pulado(s)",
                 packets as f64 / secs,
                 bytes as f64 * 8.0 / secs / 1_000_000.0,
-                registry.list().len()
+                registry.list().len(),
+                skipped
             );
             report_start = Instant::now();
             packets = 0;
             bytes = 0;
+            skipped = 0;
         }
     }
 

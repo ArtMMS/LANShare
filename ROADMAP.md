@@ -35,7 +35,6 @@
 - [x] Reduce streaming latency
 - [] Optimize bandwidth usage
 - [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
-- [] Option to show or hide the Host cursor in the stream
 - [] Measure FPS and bitrate in real time
 
 ---
@@ -59,8 +58,7 @@ Show the stream resolution and FPS in the room information
 # V0.5 — Graphical User Interface
 
 - [ ] Create single .exe
-- [ ] Create Host GUI
-- [ ] Create Client GUI
+- [ ] Create Host and Client GUI
 - [ ] Display application version
 - [ ] Display connection status
 - [ ] Display connected users
@@ -86,7 +84,7 @@ Add option to show the Host cursor
 - [ ] Compare installed version with the latest version
 - [ ] Detect available updates automatically
 - [ ] Notify the user when an update is available
-- [ ] Add an update/install button
+- [ ] Add an update/install notification
 - [ ] Download the new version
 - [ ] Install the update
 - [ ] Restart the application after updating
@@ -150,6 +148,7 @@ Add option to show the Host cursor
  Support 4K
  Reach 60 FPS
  Stream multiple monitors at the same time as one large screen
+ Display the webcam feed of all connected users
  Improve streaming quality
  Further reduce latency
  Optimize bandwidth usage
