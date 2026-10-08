@@ -5,6 +5,7 @@
 use crate::decoder::{Decoder, Picture};
 use lanshare_core::protocol::VideoFrame;
 use minifb::{Key, ScaleMode, Window, WindowOptions};
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::Arc;
@@ -124,6 +125,11 @@ fn run(rx: Receiver<VideoFrame>, gap: Arc<AtomicBool>, on_close: impl FnOnce()) 
 
     let mut window: Option<Window> = None;
     let mut rgb: Vec<u32> = Vec::new();
+    // Imagem já reduzida para o tamanho da janela
+    let mut scaled: Vec<u32> = Vec::new();
+    // Tamanho da última imagem guardada em `rgb` e da janela no último desenho
+    let mut pic_size = (0usize, 0usize);
+    let mut drawn_size = (0usize, 0usize);
 
     loop {
         // Espera um pacote (pouco tempo, para a janela continuar respondendo)
@@ -145,6 +151,7 @@ fn run(rx: Receiver<VideoFrame>, gap: Arc<AtomicBool>, on_close: impl FnOnce()) 
 
         if let Some(picture) = newest {
             picture.to_rgb(&mut rgb);
+            pic_size = (picture.width, picture.height);
 
             // A janela nasce na primeira imagem, quando já sabemos o tamanho
             if window.is_none() {
@@ -158,13 +165,23 @@ fn run(rx: Receiver<VideoFrame>, gap: Arc<AtomicBool>, on_close: impl FnOnce()) 
             }
 
             if let Some(window) = window.as_mut() {
-                if let Err(erro) = window.update_with_buffer(&rgb, picture.width, picture.height) {
+                if let Err(erro) = draw(window, &rgb, pic_size, &mut scaled) {
                     println!("[client] Erro ao desenhar o video: {erro}");
                     break;
                 }
+                drawn_size = window.get_size();
             }
         } else if let Some(window) = window.as_mut() {
-            window.update();
+            // Sem imagem nova: se a janela mudou de tamanho, redesenha a última imagem nítida
+            if pic_size.0 > 0 && window.get_size() != drawn_size {
+                if let Err(erro) = draw(window, &rgb, pic_size, &mut scaled) {
+                    println!("[client] Erro ao desenhar o video: {erro}");
+                    break;
+                }
+                drawn_size = window.get_size();
+            } else {
+                window.update();
+            }
         }
 
         if let Some(window) = window.as_ref() {
@@ -193,6 +210,75 @@ fn open_window(width: usize, height: usize) -> Result<Window, minifb::Error> {
             ..WindowOptions::default()
         },
     )
+}
+
+/// Desenha a imagem na janela. Se a janela for menor que a imagem, reduz com filtro antes.
+fn draw(
+    window: &mut Window,
+    rgb: &[u32],
+    (pic_w, pic_h): (usize, usize),
+    scaled: &mut Vec<u32>,
+) -> Result<(), minifb::Error> {
+    let (win_w, win_h) = window.get_size();
+
+    if win_w == 0 || win_h == 0 {
+        // Janela minimizada
+        window.update();
+        Ok(())
+    } else if win_w >= pic_w && win_h >= pic_h {
+        // Janela igual ou maior: manda a imagem como está
+        window.update_with_buffer(rgb, pic_w, pic_h)
+    } else {
+        fit_to_window(rgb, pic_w, pic_h, win_w, win_h, scaled);
+        window.update_with_buffer(scaled, win_w, win_h)
+    }
+}
+
+/// Reduz a imagem (0x00RRGGBB) para caber na janela, mantendo a proporção.
+/// Cada pixel novo é a média dos pixels originais que ele cobre; as sobras ficam pretas.
+fn fit_to_window(
+    src: &[u32],
+    src_w: usize,
+    src_h: usize,
+    win_w: usize,
+    win_h: usize,
+    out: &mut Vec<u32>,
+) {
+    out.clear();
+    out.resize(win_w * win_h, 0);
+
+    let scale = (win_w as f32 / src_w as f32).min(win_h as f32 / src_h as f32);
+    let fit_w = ((src_w as f32 * scale) as usize).clamp(1, win_w);
+    let fit_h = ((src_h as f32 * scale) as usize).clamp(1, win_h);
+    let x0 = (win_w - fit_w) / 2;
+    let y0 = (win_h - fit_h) / 2;
+
+    // Cada tarefa cuida de uma linha da imagem reduzida
+    out.par_chunks_mut(win_w)
+        .skip(y0)
+        .take(fit_h)
+        .enumerate()
+        .for_each(|(dy, row)| {
+            let sy0 = dy * src_h / fit_h;
+            let sy1 = ((dy + 1) * src_h / fit_h).max(sy0 + 1).min(src_h);
+
+            for dx in 0..fit_w {
+                let sx0 = dx * src_w / fit_w;
+                let sx1 = ((dx + 1) * src_w / fit_w).max(sx0 + 1).min(src_w);
+
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for sy in sy0..sy1 {
+                    for &p in &src[sy * src_w + sx0..sy * src_w + sx1] {
+                        r += (p >> 16) & 0xFF;
+                        g += (p >> 8) & 0xFF;
+                        b += p & 0xFF;
+                    }
+                }
+
+                let n = ((sy1 - sy0) * (sx1 - sx0)) as u32;
+                row[x0 + dx] = ((r / n) << 16) | ((g / n) << 8) | (b / n);
+            }
+        });
 }
 
 /// O pacote H.264 (Annex B) tem um bloco SPS (tipo 7)?
