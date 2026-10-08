@@ -9,7 +9,8 @@ use rayon::prelude::*;
 use windows::core::{Interface, GUID};
 use windows::Win32::Foundation::{VARIANT_BOOL, VARIANT_TRUE};
 use windows::Win32::Media::MediaFoundation::{
-    eAVEncCommonRateControlMode_CBR, eAVEncH264VProfile_High, CODECAPI_AVEncCommonMeanBitRate,
+    eAVEncCommonRateControlMode_CBR, eAVEncCommonRateControlMode_PeakConstrainedVBR,
+    eAVEncH264VProfile_High, CODECAPI_AVEncCommonMaxBitRate, CODECAPI_AVEncCommonMeanBitRate,
     CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVGOPSize,
     CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate,
     IMFMediaEvent, IMFMediaEventGenerator, IMFSample, IMFTransform, METransformHaveOutput,
@@ -35,7 +36,7 @@ type BoxError = Box<dyn Error + Send + Sync>;
 
 /// Valores provisórios; depois viram opções (resolução/FPS selecionáveis).
 pub const TARGET_FPS: u32 = 30;
-pub const TARGET_BITRATE_BPS: u32 = 6_000_000; // 6 Mbps
+pub const TARGET_BITRATE_BPS: u32 = 6_000_000; // 6 Mbps (média alvo)
 
 /// Unidade de tempo do Media Foundation: 100 nanossegundos.
 const HNS_PER_SEC: i64 = 10_000_000;
@@ -188,22 +189,53 @@ impl HwEncoder {
         self.set_codec(&CODECAPI_AVEncVideoForceKeyFrame, variant_u32(1));
     }
 
+    /// Teto do bitrate no modo VBR: 1,5x a média alvo.
+    fn max_bitrate(&self) -> u32 {
+        self.bitrate / 2 * 3
+    }
+
     fn configure_codec(&self) {
         // Baixa latência: sem B-frames nem fila interna
         self.set_codec(&CODECAPI_AVLowLatencyMode, variant_bool(true));
-        self.set_codec(
+
+        // VBR com teto: gasta menos em cena simples e tem fôlego em movimento.
+        // Se o driver recusar, volta para CBR (taxa constante).
+        let vbr_ok = self.set_codec(
             &CODECAPI_AVEncCommonRateControlMode,
-            variant_u32(eAVEncCommonRateControlMode_CBR.0 as u32),
+            variant_u32(eAVEncCommonRateControlMode_PeakConstrainedVBR.0 as u32),
         );
+        if vbr_ok {
+            self.set_codec(&CODECAPI_AVEncCommonMaxBitRate, variant_u32(self.max_bitrate()));
+            println!(
+                "[hw] Controle de taxa: VBR (media {:.1} Mbps, teto {:.1} Mbps)",
+                self.bitrate as f64 / 1_000_000.0,
+                self.max_bitrate() as f64 / 1_000_000.0
+            );
+        } else {
+            self.set_codec(
+                &CODECAPI_AVEncCommonRateControlMode,
+                variant_u32(eAVEncCommonRateControlMode_CBR.0 as u32),
+            );
+            println!(
+                "[hw] Controle de taxa: CBR de {:.1} Mbps (o encoder recusou o VBR)",
+                self.bitrate as f64 / 1_000_000.0
+            );
+        }
+
         self.set_codec(&CODECAPI_AVEncCommonMeanBitRate, variant_u32(self.bitrate));
         // Um keyframe a cada 2 segundos
         self.set_codec(&CODECAPI_AVEncMPVGOPSize, variant_u32(self.fps * 2));
     }
 
-    // Esses ajustes são sugestões: se o driver recusar, seguimos mesmo assim
-    fn set_codec(&self, api: *const GUID, value: VARIANT) {
-        if let Err(erro) = unsafe { self.codec_api.SetValue(api, &value) } {
-            println!("[hw] Aviso: o encoder recusou um ajuste ({erro})");
+    // Esses ajustes são sugestões: se o driver recusar, seguimos mesmo assim.
+    // Devolve true se o encoder aceitou o ajuste.
+    fn set_codec(&self, api: *const GUID, value: VARIANT) -> bool {
+        match unsafe { self.codec_api.SetValue(api, &value) } {
+            Ok(()) => true,
+            Err(erro) => {
+                println!("[hw] Aviso: o encoder recusou um ajuste ({erro})");
+                false
+            }
         }
     }
 

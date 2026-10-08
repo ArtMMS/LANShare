@@ -33,7 +33,7 @@
 - [x] Transmit screen frames to Clients
 - [x] Display the streamed screen on the Client
 - [x] Reduce streaming latency
-- [] Optimize bandwidth usage
+- [x] Optimize bandwidth usage
 - [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
 - [] Measure FPS and bitrate in real time
 
