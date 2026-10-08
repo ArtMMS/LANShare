@@ -1,7 +1,7 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
 
 use crate::capture::ScreenCapture;
-use crate::hw_encoder::{HwEncoder, TARGET_BITRATE_BPS, TARGET_FPS};
+use crate::hw_encoder::{bitrate_for, HwEncoder};
 use crate::registry::Registry;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,6 +15,15 @@ type BoxError = Box<dyn Error + Send + Sync>;
 /// De quanto em quanto tempo o Host mostra o resumo da transmissão.
 const REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Opções escolhidas pelo Host antes de transmitir.
+#[derive(Debug, Clone, Copy)]
+pub struct StreamSettings {
+    /// Altura da imagem transmitida, em pixels (720 ou 1080).
+    pub height: u32,
+    /// Quadros por segundo (15 ou 30).
+    pub fps: u32,
+}
+
 /// A transmissão em andamento (roda numa thread própria).
 pub struct StreamHandle {
     stop: Arc<AtomicBool>,
@@ -23,13 +32,13 @@ pub struct StreamHandle {
 
 impl StreamHandle {
     /// Começa a capturar, comprimir e enviar a tela aos Clients.
-    pub fn start(registry: Registry) -> Self {
+    pub fn start(registry: Registry, settings: StreamSettings) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
-            if let Err(erro) = run(registry, thread_stop) {
+            if let Err(erro) = run(registry, thread_stop, settings) {
                 println!("[host] A transmissao parou: {erro}");
                 println!("[host] Digite 'share' para tentar de novo.");
             }
@@ -61,7 +70,7 @@ impl Drop for StreamHandle {
     }
 }
 
-fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
+fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> Result<(), BoxError> {
     let capture = ScreenCapture::start()?;
     let mut encoder: Option<HwEncoder> = None;
 
@@ -72,7 +81,7 @@ fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
     let mut skipped: u32 = 0;
 
     // Limite de FPS: a agenda diz quando o próximo frame pode entrar
-    let frame_interval = Duration::from_secs_f64(1.0 / TARGET_FPS as f64);
+    let frame_interval = Duration::from_secs_f64(1.0 / settings.fps as f64);
     let mut next_frame_at = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
@@ -102,18 +111,21 @@ fn run(registry: Registry, stop: Arc<AtomicBool>) -> Result<(), BoxError> {
             next_frame_at + frame_interval
         };
 
-        // O encoder nasce no primeiro frame, quando já sabemos a resolução
+        // O encoder nasce no primeiro frame, quando já sabemos a resolução da tela
         if encoder.is_none() {
-            encoder = Some(HwEncoder::new(
+            let created = HwEncoder::new(
                 frame.width,
                 frame.height,
-                TARGET_FPS,
-                TARGET_BITRATE_BPS,
-            )?);
+                settings.height,
+                settings.fps,
+                bitrate_for(settings.height, settings.fps),
+            )?;
+            let (out_w, out_h) = created.frame_size();
             println!(
-                "[host] Transmitindo a tela ({}x{}). Digite 'stop' para parar.",
-                frame.width, frame.height
+                "[host] Transmitindo a tela ({}x{} -> {out_w}x{out_h}, {} FPS). Digite 'stop' para parar.",
+                frame.width, frame.height, settings.fps
             );
+            encoder = Some(created);
         }
         let Some(encoder) = encoder.as_mut() else {
             continue;

@@ -18,7 +18,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use stream::StreamHandle;
+use stream::{StreamHandle, StreamSettings};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, watch};
@@ -35,6 +35,17 @@ const PASSWORD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Pausa depois de uma senha errada (atrapalha tentativas em sequência).
 const WRONG_PASSWORD_DELAY: Duration = Duration::from_secs(1);
+
+/// Pergunta que o Host está respondendo no terminal (depois do comando `share`).
+#[derive(Clone, Copy)]
+enum Prompt {
+    /// Nenhuma pergunta aberta: o que for digitado é um comando.
+    None,
+    /// Esperando a resolução (720 ou 1080).
+    Resolution,
+    /// Esperando o FPS (15 ou 30), com a resolução já escolhida.
+    Fps { height: u32 },
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -62,6 +73,9 @@ async fn main() -> io::Result<()> {
 
     // A transmissão da tela (None = não está transmitindo)
     let mut streaming: Option<StreamHandle> = None;
+
+    // Pergunta aberta no terminal (resolução/FPS do `share`)
+    let mut prompt = Prompt::None;
 
     // Responde aos Clients que procuram salas na rede (UDP)
     tokio::spawn(discovery::run_responder(
@@ -91,7 +105,7 @@ async fn main() -> io::Result<()> {
             },
 
             Some(line) = commands.recv() => {
-                handle_command(&line, &registry, &kicker, &mut streaming);
+                handle_input(&line, &mut prompt, &registry, &kicker, &mut streaming);
             },
 
             _ = tokio::signal::ctrl_c() => {
@@ -144,9 +158,57 @@ fn parse_seconds(text: Option<&str>) -> u64 {
         .unwrap_or(5)
 }
 
+/// Resolução digitada: 720 ou 1080 (aceita também "720p" e "1080p").
+fn parse_resolution(text: &str) -> Option<u32> {
+    match text.trim().to_lowercase().trim_end_matches('p') {
+        "720" => Some(720),
+        "1080" => Some(1080),
+        _ => None,
+    }
+}
+
+/// FPS digitado: 15 ou 30.
+fn parse_fps(text: &str) -> Option<u32> {
+    match text.trim() {
+        "15" => Some(15),
+        "30" => Some(30),
+        _ => None,
+    }
+}
+
+/// Decide o que fazer com uma linha digitada: resposta de uma pergunta aberta ou comando.
+fn handle_input(
+    line: &str,
+    prompt: &mut Prompt,
+    registry: &Registry,
+    kicker: &Kicker,
+    streaming: &mut Option<StreamHandle>,
+) {
+    match *prompt {
+        Prompt::None => handle_command(line, prompt, registry, kicker, streaming),
+
+        // Resposta inválida (outro número, Enter vazio...): não faz nada e continua esperando
+        Prompt::Resolution => {
+            if let Some(height) = parse_resolution(line) {
+                println!("[host] Resolucao escolhida: {height}p");
+                println!("[host] FPS da transmissao (digite 15 ou 30):");
+                *prompt = Prompt::Fps { height };
+            }
+        }
+
+        Prompt::Fps { height } => {
+            if let Some(fps) = parse_fps(line) {
+                *prompt = Prompt::None;
+                start_sharing(registry, streaming, StreamSettings { height, fps });
+            }
+        }
+    }
+}
+
 /// Executa um comando digitado pelo Host.
 fn handle_command(
     line: &str,
+    prompt: &mut Prompt,
     registry: &Registry,
     kicker: &Kicker,
     streaming: &mut Option<StreamHandle>,
@@ -168,7 +230,7 @@ fn handle_command(
             }
         }
 
-        Some("share") => start_sharing(registry, streaming),
+        Some("share") => begin_share(streaming, prompt),
 
         Some("stop") => stop_sharing(streaming),
 
@@ -186,15 +248,33 @@ fn handle_command(
     }
 }
 
-/// Começa a transmitir a tela para os Clients.
-fn start_sharing(registry: &Registry, streaming: &mut Option<StreamHandle>) {
+/// Começa o `share`: se a tela ainda não está sendo compartilhada, abre a pergunta da resolução.
+fn begin_share(streaming: &Option<StreamHandle>, prompt: &mut Prompt) {
     if streaming.as_ref().is_some_and(|s| s.is_running()) {
         println!("[host] A tela ja esta sendo compartilhada. Use 'stop' para parar.");
         return;
     }
 
-    println!("[host] Compartilhando a tela (a GPU so e usada quando ha clients conectados)...");
-    *streaming = Some(StreamHandle::start(registry.clone()));
+    println!("[host] Resolucao da transmissao (digite 720 ou 1080):");
+    *prompt = Prompt::Resolution;
+}
+
+/// Começa a transmitir a tela para os Clients, com as opções escolhidas.
+fn start_sharing(
+    registry: &Registry,
+    streaming: &mut Option<StreamHandle>,
+    settings: StreamSettings,
+) {
+    if streaming.as_ref().is_some_and(|s| s.is_running()) {
+        println!("[host] A tela ja esta sendo compartilhada. Use 'stop' para parar.");
+        return;
+    }
+
+    println!(
+        "[host] Compartilhando a tela em {}p a {} FPS (a GPU so e usada quando ha clients conectados)...",
+        settings.height, settings.fps
+    );
+    *streaming = Some(StreamHandle::start(registry.clone(), settings));
 }
 
 /// Para a transmissão da tela.
@@ -270,7 +350,7 @@ fn print_help() {
     println!("[host] Comandos:");
     println!("[host]   list              mostra quem esta conectado");
     println!("[host]   kick <id>         remove o client com esse id (veja o id em 'list')");
-    println!("[host]   share             comeca a transmitir a tela para os clients");
+    println!("[host]   share             comeca a transmitir a tela (pergunta resolucao e FPS)");
     println!("[host]   stop              para a transmissao da tela");
     println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
     println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");

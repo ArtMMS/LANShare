@@ -34,9 +34,19 @@ use crate::capture::{CapturedFrame, ScreenCapture};
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
-/// Valores provisórios; depois viram opções (resolução/FPS selecionáveis).
+/// Valores do teste `hwencode` (1080p a 30 FPS); na transmissão valem as opções do `share`.
 pub const TARGET_FPS: u32 = 30;
 pub const TARGET_BITRATE_BPS: u32 = 6_000_000; // 6 Mbps (média alvo)
+
+/// Média alvo de bitrate para cada combinação de resolução e FPS escolhida no `share`.
+pub fn bitrate_for(height: u32, fps: u32) -> u32 {
+    match (height, fps) {
+        (720, 15) => 2_000_000,
+        (720, _) => 3_000_000,
+        (_, 15) => 4_500_000,
+        _ => TARGET_BITRATE_BPS,
+    }
+}
 
 /// Unidade de tempo do Media Foundation: 100 nanossegundos.
 const HNS_PER_SEC: i64 = 10_000_000;
@@ -48,6 +58,19 @@ fn mf(what: &str, erro: windows::core::Error) -> BoxError {
 /// Dois números de 32 bits num só de 64 (formato que o Media Foundation usa).
 fn pack_2x32(high: u32, low: u32) -> u64 {
     ((high as u64) << 32) | low as u64
+}
+
+/// Tamanho da imagem transmitida: a altura pedida, com a largura na mesma proporção da tela.
+/// Os dois valores saem pares (o encoder exige). Nunca amplia: se a tela já é menor
+/// que a altura pedida, mantém o tamanho dela.
+fn scaled_size(src_width: u32, src_height: u32, target_height: u32) -> (u32, u32) {
+    if src_height <= target_height {
+        return (src_width & !1, src_height & !1);
+    }
+
+    let height = target_height & !1;
+    let width = ((src_width as u64 * height as u64 / src_height as u64) as u32) & !1;
+    (width, height)
 }
 
 /// Liga o COM e o Media Foundation enquanto existir; desliga ao sair.
@@ -82,6 +105,10 @@ pub struct HwEncoder {
     transform: IMFTransform,
     events: IMFMediaEventGenerator,
     codec_api: ICodecAPI,
+    /// Tamanho da tela capturada (os frames que chegam têm sempre este tamanho).
+    src_width: u32,
+    src_height: u32,
+    /// Tamanho da imagem transmitida (já reduzida, se for o caso).
     width: u32,
     height: u32,
     fps: u32,
@@ -90,15 +117,26 @@ pub struct HwEncoder {
     provides_samples: bool,
     output_size: u32,
     sample_index: i64,
-    /// Quanto tempo a última conversão RGBA -> NV12 levou (para o teste).
+    /// Buffer reaproveitado para a imagem reduzida (RGBA).
+    scratch: Vec<u8>,
+    /// Quanto tempo a última redução + conversão RGBA -> NV12 levou (para o teste).
     pub last_convert: Duration,
     _runtime: MfRuntime, // por último: precisa ser liberado depois do encoder
 }
 
 impl HwEncoder {
-    pub fn new(width: u32, height: u32, fps: u32, bitrate: u32) -> Result<Self, BoxError> {
-        if width % 2 != 0 || height % 2 != 0 {
-            return Err(format!("resolucao {width}x{height} nao suportada (precisa ser par)").into());
+    /// `src_width` x `src_height` é o tamanho da tela capturada; `target_height` é a altura
+    /// pedida para a transmissão (a imagem é reduzida se a tela for maior).
+    pub fn new(
+        src_width: u32,
+        src_height: u32,
+        target_height: u32,
+        fps: u32,
+        bitrate: u32,
+    ) -> Result<Self, BoxError> {
+        let (width, height) = scaled_size(src_width, src_height, target_height);
+        if width < 2 || height < 2 {
+            return Err(format!("resolucao {src_width}x{src_height} nao suportada").into());
         }
 
         let runtime = MfRuntime::new()?;
@@ -120,6 +158,8 @@ impl HwEncoder {
             transform,
             events,
             codec_api,
+            src_width,
+            src_height,
             width,
             height,
             fps,
@@ -128,6 +168,7 @@ impl HwEncoder {
             provides_samples: false,
             output_size: 0,
             sample_index: 0,
+            scratch: Vec::new(),
             last_convert: Duration::ZERO,
             _runtime: runtime,
         };
@@ -151,10 +192,15 @@ impl HwEncoder {
         Ok(encoder)
     }
 
+    /// Tamanho (largura, altura) da imagem que sai do encoder.
+    pub fn frame_size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+
     /// Comprime um frame RGBA. Devolve 0 ou mais pacotes H.264
     /// (o encoder de hardware pode entregar a saída um pouco depois da entrada).
     pub fn encode(&mut self, frame: &CapturedFrame) -> Result<Vec<Vec<u8>>, BoxError> {
-        if frame.width != self.width || frame.height != self.height {
+        if frame.width != self.src_width || frame.height != self.src_height {
             return Err("a resolucao mudou no meio da captura (ainda nao suportado)".into());
         }
 
@@ -311,7 +357,7 @@ impl HwEncoder {
         Ok(())
     }
 
-    /// Converte o frame para NV12 direto dentro do buffer do Media Foundation.
+    /// Reduz o frame (se preciso) e converte para NV12 direto dentro do buffer do Media Foundation.
     fn build_sample(&mut self, frame: &CapturedFrame) -> Result<IMFSample, BoxError> {
         let (w, h) = (self.width as usize, self.height as usize);
         let len = w * h * 3 / 2;
@@ -323,9 +369,25 @@ impl HwEncoder {
         unsafe { buffer.Lock(&mut data, None, None) }.map_err(|e| mf("Lock", e))?;
 
         let started = Instant::now();
+
+        // Se a resolução pedida é menor que a da tela, reduz a imagem antes de converter
+        let rgba: &[u8] = if frame.width != self.width || frame.height != self.height {
+            scale_rgba(
+                &frame.data,
+                frame.width as usize,
+                frame.height as usize,
+                w,
+                h,
+                &mut self.scratch,
+            );
+            &self.scratch
+        } else {
+            &frame.data
+        };
+
         // SAFETY: o buffer tem `len` bytes e fica travado até o Unlock abaixo
         let nv12 = unsafe { std::slice::from_raw_parts_mut(data, len) };
-        rgba_to_nv12(&frame.data, w, h, nv12);
+        rgba_to_nv12(rgba, w, h, nv12);
         self.last_convert = started.elapsed();
 
         unsafe {
@@ -478,6 +540,48 @@ fn sample_to_bytes(sample: &IMFSample) -> Result<Vec<u8>, BoxError> {
     Ok(bytes)
 }
 
+/// Reduz uma imagem RGBA (4 bytes por pixel) para dst_w x dst_h.
+/// Cada pixel novo é a média dos pixels originais que ele cobre; usa todos os núcleos da CPU.
+fn scale_rgba(
+    src: &[u8],
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+    out: &mut Vec<u8>,
+) {
+    out.resize(dst_w * dst_h * 4, 0);
+
+    // Cada tarefa cuida de uma linha da imagem reduzida
+    out.par_chunks_mut(dst_w * 4)
+        .enumerate()
+        .for_each(|(dy, row)| {
+            let sy0 = dy * src_h / dst_h;
+            let sy1 = ((dy + 1) * src_h / dst_h).max(sy0 + 1).min(src_h);
+
+            for dx in 0..dst_w {
+                let sx0 = dx * src_w / dst_w;
+                let sx1 = ((dx + 1) * src_w / dst_w).max(sx0 + 1).min(src_w);
+
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for sy in sy0..sy1 {
+                    for px in src[(sy * src_w + sx0) * 4..(sy * src_w + sx1) * 4].chunks_exact(4) {
+                        r += px[0] as u32;
+                        g += px[1] as u32;
+                        b += px[2] as u32;
+                    }
+                }
+
+                let n = ((sy1 - sy0) * (sx1 - sx0)) as u32;
+                let o = dx * 4;
+                row[o] = (r / n) as u8;
+                row[o + 1] = (g / n) as u8;
+                row[o + 2] = (b / n) as u8;
+                row[o + 3] = 255;
+            }
+        });
+}
+
 /// RGBA -> NV12 (BT.709, faixa limitada), usando todos os núcleos da CPU.
 /// NV12 = plano Y (brilho) seguido de um plano UV (cor) com metade da resolução.
 fn rgba_to_nv12(rgba: &[u8], width: usize, height: usize, out: &mut [u8]) {
@@ -559,7 +663,14 @@ pub fn test_hw_encode(seconds: u64) -> Result<(), BoxError> {
         // O encoder nasce no primeiro frame, quando já sabemos a resolução
         if encoder.is_none() {
             size = (frame.width, frame.height);
-            encoder = Some(HwEncoder::new(frame.width, frame.height, TARGET_FPS, TARGET_BITRATE_BPS)?);
+            // Altura pedida = altura da tela: o teste roda na resolução nativa, sem redução
+            encoder = Some(HwEncoder::new(
+                frame.width,
+                frame.height,
+                frame.height,
+                TARGET_FPS,
+                TARGET_BITRATE_BPS,
+            )?);
             println!("[hw] Encoder de hardware iniciado ({}x{}).", frame.width, frame.height);
         }
         let Some(encoder) = encoder.as_mut() else { continue };
