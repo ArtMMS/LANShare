@@ -41,8 +41,8 @@ Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ## 🛠️ How to use
 
-    Prerequisites:
-    The host and client PCs must be connected to the same LAN (Local Area Network) for LANShare to work. If the PCs are on different networks, you can use a VPN application such as Hamachi, Radmin VPN, or another alternative to create a virtual LAN.
+**Prerequisites:**
+> The host and client PCs must be connected to the same LAN (Local Area Network) for LANShare to work. If the PCs are on different networks, you can use a VPN application such as Hamachi, Radmin VPN, or another alternative to create a virtual LAN.
 
 ### Host (Screen Sharing)
 
