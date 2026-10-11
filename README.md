@@ -19,7 +19,23 @@ The project is being developed with performance, stability, and ease of use in m
 
 ## 📦 Instalation Guide
 
-> Will be added as the application develops.
+<p align="center"> <a href="https://github.com/ArtMMS/LANShare/releases/download/v0.4.0/LANShare-v0.4.0.rar"> <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v0.4.0-0078D4?style=for-the-badge" alt="Download LANShare v0.4.0"> </a> </p>
+
+- **Version:** v0.4.0
+- **Release:** Early Development Build
+- **Platform:** Windows
+
+---
+
+### How to Install and Run
+
+1. Download the .rar archive using the link above.
+2. Extract the archive to a folder of your choice.
+3. Run lanshare.exe.
+
+*Note: LANShare is currently in early development. Features, performance, and compatibility may change between releases. The graphical interface is not yet available.*
+
+Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ---
 
@@ -34,6 +50,7 @@ The project is being developed with performance, stability, and ease of use in m
 - **Rust** — Core application, networking and system logic
 - **C++** — Native Windows, DirectX and multimedia components
 - **C#** — Desktop graphical user interface
+- **Avalonia UI** — Cross-platform desktop user interface framework
 
 ---
 
