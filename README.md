@@ -13,7 +13,7 @@ LANShare is a local network application designed to share a computer's screen wi
 The project is being developed with performance, stability, and ease of use in mind, with future plans to include synchronized audio streaming and support for higher resolutions and frame rates.
 
 
-> Screenshot will be added as the application develops.
+![gif](assets/demo_gif_0_4.gif)
 
 ---
 
@@ -41,14 +41,32 @@ Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ## 🛠️ How to use
 
-> Will be added as the application develops.
+    Prerequisites:
+    The host and client PCs must be connected to the same LAN (Local Area Network) for LANShare to work. If the PCs are on different networks, you can use a VPN application such as Hamachi, Radmin VPN, or another alternative to create a virtual LAN.
+
+### Host (Screen Sharing)
+
+1. Run lanshare.exe
+2. In the terminal, type "*h*" to start LANShare in Host mode.
+3. Set a password for the room, or press **Enter** to create a room without a password.
+4. LANShare will display the available network addresses. Find the IP address belonging to the LAN shared with the client PC and send it to the client.
+5. Type **help** in the host terminal to see the available commands.
+6. Type **share** to start screen sharing.
+7. Type **stop** to stop screen sharing.
+
+### Client (Receiving the Screen)
+
+1. Run lanshare.exe
+2. In the terminal, type "*c*" to start LANShare in Client mode.
+3. LANShare will search for available rooms on the network. If the host is reachable on the same LAN or virtual LAN, its room should be discoverable.
+4. Enter the host's IP address when prompted and enter the room password if one was set by the host.
+5. Once connected, the client can receive the host's screen when the host starts sharing.
 
 ---
 
 ## ⚙️ Technologies
 
 - **Rust** — Core application, networking and system logic
-- **C++** — Native Windows, DirectX and multimedia components
 - **C#** — Desktop graphical user interface
 - **Avalonia UI** — Cross-platform desktop user interface framework
 
@@ -56,24 +74,7 @@ Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ## 🐛 Known Issues
 
-*No known issues at the moment.*
-
----
-
-## 🗺️ Roadmap
-
-### V1.0
-- [x] LAN connection
-- [ ] 1080p / 30 FPS screen streaming
-- [x] Multiple users
-- [ ] Host and Client GUI
-- [ ] Multi-monitor selection with preview
-- [ ] Specific window streaming
-- [ ] Automatic updates
-
-### Future Plans
-- Audio streaming
-- 4K / 60 FPS
+- If the host starts streaming its screen to a client, stops the stream, and then starts streaming again, the application crashes.
 
 ---
 
