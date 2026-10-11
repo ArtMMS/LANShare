@@ -1,0 +1,13 @@
+[package]
+name = "lanshare-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# cdylib = biblioteca dinâmica (lanshare_ffi.dll no Windows) que o C# carrega.
+[lib]
+name = "lanshare_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]

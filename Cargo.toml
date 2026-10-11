@@ -7,6 +7,7 @@ members = [
     "crates/lanshare-host",
     "crates/lanshare-client",
     "crates/lanshare-app",
+    "crates/lanshare-ffi",
 ]
 
 # Dados que todos os crates vão herdar, para não repetir em cada um.

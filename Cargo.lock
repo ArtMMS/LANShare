@@ -315,6 +315,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanshare-ffi"
+version = "0.1.0"
+
+[[package]]
 name = "lanshare-host"
 version = "0.1.0"
 dependencies = [
