@@ -1,4 +1,5 @@
-//! Programa do Host: fica escutando e aceita vários Clients ao mesmo tempo.
+//! Biblioteca do Host: fica escutando e aceita vários Clients ao mesmo tempo.
+//! O executável único (`lanshare-app`) chama `run()` para iniciar o Host.
 
 mod capture;
 mod discovery;
@@ -47,8 +48,8 @@ enum Prompt {
     Fps { height: u32 },
 }
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
+/// Ponto de entrada do Host (chamado pelo executável único).
+pub async fn run() -> io::Result<()> {
     // Pergunta a senha antes de abrir a sala (Enter vazio = sem senha)
     let password = ask_room_password()?;
 

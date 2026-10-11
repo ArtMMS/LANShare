@@ -1,4 +1,5 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
+//! (VERSAO DE DIAGNOSTICO: as linhas "[diag]" sao temporarias.)
 
 use crate::capture::ScreenCapture;
 use crate::hw_encoder::{bitrate_for, HwEncoder};
@@ -57,10 +58,12 @@ impl StreamHandle {
 
     /// Para a transmissão e espera a thread terminar.
     pub fn stop(mut self) {
+        println!("[diag] stop: pedindo para a thread parar");
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+        println!("[diag] stop: a thread terminou");
     }
 }
 
@@ -71,7 +74,9 @@ impl Drop for StreamHandle {
 }
 
 fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> Result<(), BoxError> {
+    println!("[diag] run: iniciando a captura");
     let capture = ScreenCapture::start()?;
+    println!("[diag] run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
 
     let started = Instant::now();
@@ -79,6 +84,8 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
     let mut packets: u32 = 0;
     let mut bytes: u64 = 0;
     let mut skipped: u32 = 0;
+    let mut first_frame_logged = false;
+    let mut first_packet_logged = false;
 
     // Limite de FPS: a agenda diz quando o próximo frame pode entrar
     let frame_interval = Duration::from_secs_f64(1.0 / settings.fps as f64);
@@ -92,6 +99,11 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
                 return Err("a captura de tela foi encerrada".into());
             }
         };
+
+        if !first_frame_logged {
+            first_frame_logged = true;
+            println!("[diag] run: primeiro frame recebido da captura");
+        }
 
         // Sem ninguém assistindo, não gasta a GPU
         // (quem entrar depois pede um keyframe sozinho)
@@ -113,6 +125,7 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
 
         // O encoder nasce no primeiro frame, quando já sabemos a resolução da tela
         if encoder.is_none() {
+            println!("[diag] run: criando o encoder");
             let created = HwEncoder::new(
                 frame.width,
                 frame.height,
@@ -120,6 +133,7 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
                 settings.fps,
                 bitrate_for(settings.height, settings.fps),
             )?;
+            println!("[diag] run: encoder criado");
             let (out_w, out_h) = created.frame_size();
             println!(
                 "[host] Transmitindo a tela ({}x{} -> {out_w}x{out_h}, {} FPS). Digite 'stop' para parar.",
@@ -137,6 +151,11 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
         }
 
         for packet in encoder.encode(&frame)? {
+            if !first_packet_logged {
+                first_packet_logged = true;
+                println!("[diag] run: primeiro pacote codificado ({} bytes)", packet.len());
+            }
+
             let keyframe = is_keyframe(&packet);
             let timestamp_us = started.elapsed().as_micros() as u64;
 
@@ -162,7 +181,11 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
         }
     }
 
+    println!("[diag] run: o laco terminou, parando a captura");
     capture.stop()?;
+    println!("[diag] run: captura parada, liberando o encoder");
+    drop(encoder);
+    println!("[diag] run: encoder liberado");
     Ok(())
 }
 

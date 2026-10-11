@@ -34,51 +34,40 @@
 - [x] Display the streamed screen on the Client
 - [x] Reduce streaming latency
 - [x] Optimize bandwidth usage
-- [] Selectable resolution (720p / 1080p) and FPS (15 / 30)
-- [] Measure FPS and bitrate in real time
+- [x] Selectable resolution (720p / 1080p) and FPS (15 / 30)
 
 ---
 
-# V0.4 — Screen Selection
+# V0.4 — Graphical User Interface & Screen Selection
 
-- [ ] Add screen sharing button
-- [ ] Detect multiple monitors
-- [ ] Select which monitor to share
-- [ ] Display monitor names and previews
-- [ ] Stream the selected monitor
-- [ ] Detect available windows
- Show window names, application icons and previews
-- [ ] Select a specific window
-- [ ] Stream a specific window
-Follow the shared window when it moves, resizes or changes monitor
-Show the stream resolution and FPS in the room information
-
----
-
-# V0.5 — Graphical User Interface
-
-- [ ] Create single .exe
-- [ ] Create Host and Client GUI
+- [x] Create a single `.exe`
+- [ ] Create Host and Client GUIs
 - [ ] Display application version
 - [ ] Display connection status
 - [ ] Display connected users
-- [ ] Add screen sharing controls
-- [ ] Add monitor selection interface
-- [ ] Add window selection interface
-- [ ] Add start/stop streaming controls
-Ask for a user name on first launch and keep it saved
-Add resolution and FPS selectors to the monitor/window selection screen
-Add room list with name, IP, resolution/FPS and number of users
-Ask for the password when joining a protected room
-Add Host options: kick client and set password
-Add Host performance monitor (FPS, bitrate, ping)
-Show ping on the Client
-Add fullscreen mode (F11)
-Add option to show the Host cursor
+- [ ] Ask for a user name on first launch and save it
+- [ ] Add a room list with name, IP, resolution/FPS and number of users
+- [ ] Ask for the password when joining a protected room
+- [ ] Add Host options: kick clients and set a password
+- [ ] Add a screen sharing button
+- [ ] Detect multiple monitors
+- [ ] Display monitor names and previews
+- [ ] Select and stream a specific monitor
+- [ ] Detect available windows
+- [ ] Display window names, application icons and previews
+- [ ] Select and stream a specific window
+- [ ] Follow the shared window when it moves, resizes or changes monitor
+- [ ] Add screen sharing controls and start/stop buttons
+- [ ] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
+- [ ] Display stream resolution and FPS in the room information
+- [ ] Add a Host performance monitor (FPS, bitrate and ping)
+- [ ] Display ping on the Client
+- [ ] Add fullscreen mode (F11)
+- [ ] Add an option to show or hide the Host cursor
 
 ---
 
-# V0.6 — Automatic Updates
+# V0.5 — Automatic Updates
 
 - [ ] Check for new versions on GitHub
 - [ ] Compare installed version with the latest version

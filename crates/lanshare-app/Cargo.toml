@@ -1,0 +1,16 @@
+[package]
+name = "lanshare-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# O único executável do projeto: target/release/lanshare.exe
+[[bin]]
+name = "lanshare"
+path = "src/main.rs"
+
+[dependencies]
+lanshare-host = { workspace = true }
+lanshare-client = { workspace = true }
+tokio = { workspace = true }

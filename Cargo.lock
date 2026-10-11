@@ -283,6 +283,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanshare-app"
+version = "0.1.0"
+dependencies = [
+ "lanshare-client",
+ "lanshare-host",
+ "tokio",
+]
+
+[[package]]
 name = "lanshare-client"
 version = "0.1.0"
 dependencies = [

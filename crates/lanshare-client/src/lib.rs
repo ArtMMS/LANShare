@@ -1,4 +1,5 @@
-//! Programa do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
+//! Biblioteca do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
+//! O executável único (`lanshare-app`) chama `run()` para iniciar o Client.
 
 mod decoder;
 mod discovery;
@@ -23,13 +24,14 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// De quanto em quanto tempo o Client mostra o resumo do vídeo recebido.
 const VIDEO_REPORT_INTERVAL: Duration = Duration::from_secs(5);
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
+/// Ponto de entrada do Client (chamado pelo executável único).
+/// `address_arg`: um IP já conhecido (pula a busca de salas). None = procurar salas na rede.
+pub async fn run(address_arg: Option<String>) -> io::Result<()> {
     // Lê o nome do settings.json (ou pergunta na primeira vez e salva)
     let username = settings::get_or_ask_username();
 
-    // Atalho: um IP na linha de comando pula a pergunta
-    let address = match std::env::args().nth(1) {
+    // Atalho: um IP informado pula a pergunta
+    let address = match address_arg {
         Some(entrada) => normalize_address(&entrada),
         None => choose_address().await?,
     };

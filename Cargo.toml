@@ -6,6 +6,7 @@ members = [
     "crates/lanshare-net",
     "crates/lanshare-host",
     "crates/lanshare-client",
+    "crates/lanshare-app",
 ]
 
 # Dados que todos os crates vão herdar, para não repetir em cada um.
@@ -17,6 +18,8 @@ license = "MIT"
 [workspace.dependencies]
 lanshare-core = { path = "crates/lanshare-core" }
 lanshare-net = { path = "crates/lanshare-net" }
+lanshare-host = { path = "crates/lanshare-host" }
+lanshare-client = { path = "crates/lanshare-client" }
 
 # tokio: permite fazer várias coisas de rede ao mesmo tempo (assíncrono).
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "time", "sync", "signal"] }
