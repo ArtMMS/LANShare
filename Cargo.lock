@@ -317,6 +317,10 @@ dependencies = [
 [[package]]
 name = "lanshare-ffi"
 version = "0.1.0"
+dependencies = [
+ "lanshare-host",
+ "serde_json",
+]
 
 [[package]]
 name = "lanshare-host"
@@ -328,6 +332,7 @@ dependencies = [
  "openh264",
  "rayon",
  "rpassword",
+ "serde",
  "tokio",
  "windows",
  "windows-capture",

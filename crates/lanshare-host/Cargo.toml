@@ -9,6 +9,7 @@ publish = false
 lanshare-core = { workspace = true }
 lanshare-net = { workspace = true }
 tokio = { workspace = true }
+serde = { workspace = true }
 if-addrs = { workspace = true }
 rpassword = { workspace = true }
 windows-capture = "2.0.1"

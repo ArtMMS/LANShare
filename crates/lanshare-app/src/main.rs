@@ -15,8 +15,7 @@ enum Mode {
     Client,
 }
 
-#[tokio::main]
-async fn main() -> io::Result<()> {
+fn main() -> io::Result<()> {
     let mut args = std::env::args().skip(1);
 
     let mode = match args.next() {
@@ -32,8 +31,12 @@ async fn main() -> io::Result<()> {
     };
 
     match mode {
-        Mode::Host => lanshare_host::run().await,
-        Mode::Client => lanshare_client::run(args.next()).await,
+        // O Host tem o seu próprio runtime do tokio dentro do motor
+        Mode::Host => lanshare_host::run_cli(),
+        Mode::Client => {
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(lanshare_client::run(args.next()))
+        }
     }
 }
 

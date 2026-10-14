@@ -42,14 +42,15 @@
 
 - [x] Create a single `.exe`
 - [ ] Create Host and Client GUIs
-- [ ] Display application version
-- [ ] Display connection status
-- [ ] Display connected users
+- [x] Display application version
+- [x] Display connection status
+- [x] Display connected users
+- [ ] Broadcast preview for the host
 - [ ] Ask for a user name on first launch and save it
 - [ ] Add a room list with name, IP, resolution/FPS and number of users
 - [ ] Ask for the password when joining a protected room
-- [ ] Add Host options: kick clients and set a password
-- [ ] Add a screen sharing button
+- [x] Add Host options: kick clients and set a password
+- [x] Add a screen sharing button
 - [ ] Detect multiple monitors
 - [ ] Display monitor names and previews
 - [ ] Select and stream a specific monitor
@@ -57,13 +58,12 @@
 - [ ] Display window names, application icons and previews
 - [ ] Select and stream a specific window
 - [ ] Follow the shared window when it moves, resizes or changes monitor
-- [ ] Add screen sharing controls and start/stop buttons
-- [ ] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
+- [x] Add screen sharing controls and start/stop buttons
+- [x] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
 - [ ] Display stream resolution and FPS in the room information
 - [ ] Add a Host performance monitor (FPS, bitrate and ping)
 - [ ] Display ping on the Client
 - [ ] Add fullscreen mode (F11)
-- [ ] Add an option to show or hide the Host cursor
 
 ---
 

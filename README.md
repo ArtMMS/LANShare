@@ -23,7 +23,7 @@ The project is being developed with performance, stability, and ease of use in m
 
 - **Version:** v0.4.0
 - **Release:** Early Development Build
-- **Platform:** Windows
+- **Platform:** Windows 11
 
 ---
 

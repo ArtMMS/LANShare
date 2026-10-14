@@ -1,7 +1,8 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
-//! (VERSAO DE DIAGNOSTICO: as linhas "[diag]" sao temporarias.)
+//! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
 
 use crate::capture::ScreenCapture;
+use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
 use crate::registry::Registry;
 use std::error::Error;
@@ -13,8 +14,8 @@ use std::time::{Duration, Instant};
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
-/// De quanto em quanto tempo o Host mostra o resumo da transmissão.
-const REPORT_INTERVAL: Duration = Duration::from_secs(5);
+/// De quanto em quanto tempo o Host emite o resumo da transmissão.
+const REPORT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Opções escolhidas pelo Host antes de transmitir.
 #[derive(Debug, Clone, Copy)]
@@ -29,25 +30,28 @@ pub struct StreamSettings {
 pub struct StreamHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    events: EventSender,
 }
 
 impl StreamHandle {
     /// Começa a capturar, comprimir e enviar a tela aos Clients.
-    pub fn start(registry: Registry, settings: StreamSettings) -> Self {
+    pub fn start(registry: Registry, settings: StreamSettings, events: EventSender) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
+        let thread_events = events.clone();
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
-            if let Err(erro) = run(registry, thread_stop, settings) {
-                println!("[host] A transmissao parou: {erro}");
-                println!("[host] Digite 'share' para tentar de novo.");
-            }
+            let result = run(registry, thread_stop, settings, &thread_events);
+            thread_events.emit(HostEvent::StreamStopped {
+                error: result.err().map(|erro| erro.to_string()),
+            });
         });
 
         Self {
             stop,
             thread: Some(thread),
+            events,
         }
     }
 
@@ -58,12 +62,12 @@ impl StreamHandle {
 
     /// Para a transmissão e espera a thread terminar.
     pub fn stop(mut self) {
-        println!("[diag] stop: pedindo para a thread parar");
+        self.events.debug("stop: pedindo para a thread parar");
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        println!("[diag] stop: a thread terminou");
+        self.events.debug("stop: a thread terminou");
     }
 }
 
@@ -73,10 +77,15 @@ impl Drop for StreamHandle {
     }
 }
 
-fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> Result<(), BoxError> {
-    println!("[diag] run: iniciando a captura");
+fn run(
+    registry: Registry,
+    stop: Arc<AtomicBool>,
+    settings: StreamSettings,
+    events: &EventSender,
+) -> Result<(), BoxError> {
+    events.debug("run: iniciando a captura");
     let capture = ScreenCapture::start()?;
-    println!("[diag] run: captura iniciada");
+    events.debug("run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
 
     let started = Instant::now();
@@ -102,7 +111,7 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
 
         if !first_frame_logged {
             first_frame_logged = true;
-            println!("[diag] run: primeiro frame recebido da captura");
+            events.debug("run: primeiro frame recebido da captura");
         }
 
         // Sem ninguém assistindo, não gasta a GPU
@@ -125,7 +134,7 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
 
         // O encoder nasce no primeiro frame, quando já sabemos a resolução da tela
         if encoder.is_none() {
-            println!("[diag] run: criando o encoder");
+            events.debug("run: criando o encoder");
             let created = HwEncoder::new(
                 frame.width,
                 frame.height,
@@ -133,12 +142,15 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
                 settings.fps,
                 bitrate_for(settings.height, settings.fps),
             )?;
-            println!("[diag] run: encoder criado");
+            events.debug("run: encoder criado");
             let (out_w, out_h) = created.frame_size();
-            println!(
-                "[host] Transmitindo a tela ({}x{} -> {out_w}x{out_h}, {} FPS). Digite 'stop' para parar.",
-                frame.width, frame.height, settings.fps
-            );
+            events.emit(HostEvent::StreamStarted {
+                source_width: frame.width as u32,
+                source_height: frame.height as u32,
+                width: out_w as u32,
+                height: out_h as u32,
+                fps: settings.fps,
+            });
             encoder = Some(created);
         }
         let Some(encoder) = encoder.as_mut() else {
@@ -153,7 +165,10 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
         for packet in encoder.encode(&frame)? {
             if !first_packet_logged {
                 first_packet_logged = true;
-                println!("[diag] run: primeiro pacote codificado ({} bytes)", packet.len());
+                events.debug(format!(
+                    "run: primeiro pacote codificado ({} bytes)",
+                    packet.len()
+                ));
             }
 
             let keyframe = is_keyframe(&packet);
@@ -167,13 +182,12 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
 
         if report_start.elapsed() >= REPORT_INTERVAL {
             let secs = report_start.elapsed().as_secs_f64();
-            println!(
-                "[host] Transmitindo: {:.1} pacotes/s, {:.2} Mbps (por client), {} client(s), {} frame(s) pulado(s)",
-                packets as f64 / secs,
-                bytes as f64 * 8.0 / secs / 1_000_000.0,
-                registry.list().len(),
-                skipped
-            );
+            events.emit(HostEvent::StreamStats {
+                packets_per_sec: packets as f64 / secs,
+                mbps: bytes as f64 * 8.0 / secs / 1_000_000.0,
+                clients: registry.list().len(),
+                skipped_frames: skipped,
+            });
             report_start = Instant::now();
             packets = 0;
             bytes = 0;
@@ -181,11 +195,11 @@ fn run(registry: Registry, stop: Arc<AtomicBool>, settings: StreamSettings) -> R
         }
     }
 
-    println!("[diag] run: o laco terminou, parando a captura");
+    events.debug("run: o laco terminou, parando a captura");
     capture.stop()?;
-    println!("[diag] run: captura parada, liberando o encoder");
+    events.debug("run: captura parada, liberando o encoder");
     drop(encoder);
-    println!("[diag] run: encoder liberado");
+    events.debug("run: encoder liberado");
     Ok(())
 }
 

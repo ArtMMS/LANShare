@@ -11,3 +11,5 @@ name = "lanshare_ffi"
 crate-type = ["cdylib"]
 
 [dependencies]
+lanshare-host = { workspace = true }
+serde_json = { workspace = true }
