@@ -4,7 +4,7 @@
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![Version](https://img.shields.io/badge/version-v0.4-orange)
-![Progress](https://img.shields.io/badge/progress-39%25-yellowgreen)
+![Progress](https://img.shields.io/badge/progress-55%25-orange)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
