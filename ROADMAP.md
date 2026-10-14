@@ -45,7 +45,7 @@
 - [x] Display application version
 - [x] Display connection status
 - [x] Display connected users
-- [ ] Broadcast preview for the host
+- [x] Broadcast preview for the host
 - [ ] Ask for a user name on first launch and save it
 - [ ] Add a room list with name, IP, resolution/FPS and number of users
 - [ ] Ask for the password when joining a protected room

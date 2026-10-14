@@ -17,7 +17,7 @@ public partial class MainWindow : Window
     private readonly ComboBox _resolutionBox, _fpsBox;
     private readonly StackPanel _usersPanel;
     private readonly Image _previewImage;
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
 
     // Buffer reaproveitado para receber a miniatura do Rust
     private readonly byte[] _previewBuffer = new byte[NativeMethods.PreviewBufferSize];
@@ -118,7 +118,7 @@ public partial class MainWindow : Window
         UpdateUi();
     }
 
-    /// A cada 100 ms: lê os eventos do Rust e atualiza o preview.
+    /// A cada ~16 ms (60x por segundo): lê os eventos do Rust e atualiza o preview.
     private void OnTick()
     {
         try

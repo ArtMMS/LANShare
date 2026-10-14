@@ -120,7 +120,7 @@ pub extern "C" fn lanshare_host_is_streaming() -> i32 {
 }
 
 /// Copia a miniatura (preview) da transmissão para `buffer` (BGRA, 4 bytes por pixel).
-/// `capacity` = tamanho do buffer em bytes (use 960*540*4). Preenche `width` e `height`.
+/// `capacity` = tamanho do buffer em bytes (use 2560*1440*4). Preenche `width` e `height`.
 /// Retorna 1 se copiou, 0 se não há miniatura (ou o buffer é pequeno).
 ///
 /// # Safety

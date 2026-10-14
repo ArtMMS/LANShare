@@ -4,7 +4,7 @@
 use crate::capture::ScreenCapture;
 use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
-use crate::preview::{PreviewSlot, PREVIEW_INTERVAL};
+use crate::preview::PreviewSlot;
 use crate::registry::Registry;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -124,15 +124,17 @@ fn run(
             events.debug("run: primeiro frame recebido da captura");
         }
 
-        // Preview do Host: atualiza a miniatura mesmo que ninguém esteja assistindo
-        if last_preview.map_or(true, |t| t.elapsed() >= PREVIEW_INTERVAL) {
-            preview.publish(&frame);
-            last_preview = Some(Instant::now());
-        }
+        // Preview do Host: no mesmo FPS da transmissão (com folga de 1/4 para o jitter)
+        let want_preview =
+            last_preview.map_or(true, |t| t.elapsed() + frame_interval / 4 >= frame_interval);
 
         // Sem ninguém assistindo, não gasta a GPU
         // (quem entrar depois pede um keyframe sozinho)
         if registry.is_empty() {
+            if want_preview {
+                preview.store(frame, settings.height);
+                last_preview = Some(Instant::now());
+            }
             continue;
         }
 
@@ -194,6 +196,12 @@ fn run(
             bytes += packet.len() as u64;
 
             registry.broadcast_video(keyframe, timestamp_us, Arc::new(packet));
+        }
+
+        // O encoder já terminou de usar o frame: entrega ao preview
+        if want_preview {
+            preview.store(frame, settings.height);
+            last_preview = Some(Instant::now());
         }
 
         if report_start.elapsed() >= REPORT_INTERVAL {
