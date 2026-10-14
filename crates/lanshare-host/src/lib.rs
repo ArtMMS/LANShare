@@ -12,11 +12,13 @@ mod engine;
 mod events;
 mod hw_encoder;
 mod kick;
+mod preview;
 mod registry;
 mod stream;
 
 pub use engine::{HostConfig, HostEngine};
 pub use events::{HostEvent, LocalAddress, LogLevel, UserEntry};
+pub use preview::{PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH};
 pub use stream::StreamSettings;
 
 /// Roda o Host no terminal até o Ctrl+C (chamado pelo executável único).

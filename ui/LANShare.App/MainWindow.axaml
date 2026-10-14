@@ -53,16 +53,24 @@
             </DockPanel>
         </Border>
 
-        <!-- Área do vídeo / log -->
+        <!-- Área do vídeo: preview da transmissão + barra de informações -->
         <Border Grid.Column="1" Background="#111418">
-            <TextBlock x:Name="StatusText"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       TextAlignment="Center"
-                       TextWrapping="Wrap"
-                       Margin="32"
-                       Opacity="0.7"
-                       Text="" />
+            <Grid RowDefinitions="*,Auto">
+                <Image x:Name="PreviewImage" Grid.Row="0" Stretch="Uniform"
+                       Margin="16" IsVisible="False" />
+                <TextBlock x:Name="PlaceholderText" Grid.Row="0"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Margin="32"
+                           Opacity="0.7"
+                           Text="" />
+                <TextBlock x:Name="InfoText" Grid.Row="1"
+                           Margin="16,0,16,12"
+                           Opacity="0.8"
+                           Text="" />
+            </Grid>
         </Border>
 
     </Grid>

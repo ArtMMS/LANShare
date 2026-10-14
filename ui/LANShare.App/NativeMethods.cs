@@ -33,6 +33,9 @@ internal static class NativeMethods
     private static extern int lanshare_host_stop_stream();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_host_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void lanshare_host_stop();
 
     /// Versão do motor Rust. O texto vem de memória estática do Rust, então não se libera.
@@ -86,6 +89,20 @@ internal static class NativeMethods
         ParseReply(lanshare_host_start_stream(height, fps));
 
     public static bool HostStopStream() => lanshare_host_stop_stream() != 0;
+
+    /// Tamanho máximo da miniatura do preview (960x540, 4 bytes por pixel BGRA).
+    public const int PreviewMaxWidth = 960;
+    public const int PreviewMaxHeight = 540;
+    public const int PreviewBufferSize = PreviewMaxWidth * PreviewMaxHeight * 4;
+
+    /// Copia a miniatura da transmissão para `buffer`. False se ainda não há imagem.
+    public static bool HostPreview(byte[] buffer, out int width, out int height)
+    {
+        var ok = lanshare_host_preview(buffer, (UIntPtr)buffer.Length, out var w, out var h) != 0;
+        width = (int)w;
+        height = (int)h;
+        return ok;
+    }
 
     public static void HostStop() => lanshare_host_stop();
 }

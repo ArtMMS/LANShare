@@ -6,6 +6,7 @@
 use crate::discovery::{self, RoomSettings};
 use crate::events::{EventSender, HostEvent, LocalAddress, UserEntry};
 use crate::kick::Kicker;
+use crate::preview::PreviewSlot;
 use crate::registry::{ClientInfo, Registry};
 use crate::stream::{StreamHandle, StreamSettings};
 use lanshare_core::protocol::{
@@ -69,6 +70,8 @@ pub struct HostEngine {
     shutdown_tx: watch::Sender<bool>,
     /// A transmissão da tela (None = não está transmitindo).
     streaming: Mutex<Option<StreamHandle>>,
+    /// Miniatura do que está sendo transmitido (preview do Host).
+    preview: PreviewSlot,
 }
 
 impl HostEngine {
@@ -130,6 +133,7 @@ impl HostEngine {
             event_rx: Mutex::new(event_rx),
             shutdown_tx,
             streaming: Mutex::new(None),
+            preview: PreviewSlot::default(),
         })
     }
 
@@ -196,6 +200,7 @@ impl HostEngine {
             self.registry.clone(),
             settings,
             self.events.clone(),
+            self.preview.clone(),
         ));
         Ok(())
     }
@@ -212,6 +217,12 @@ impl HostEngine {
             }
             None => false,
         }
+    }
+
+    /// Copia a miniatura da transmissão (BGRA, 4 bytes por pixel) para `out`.
+    /// Devolve (largura, altura), ou None se não há miniatura ou `out` é pequeno.
+    pub fn preview_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.preview.read_into(out)
     }
 
     /// A tela está sendo transmitida? (false também se a transmissão caiu por erro)

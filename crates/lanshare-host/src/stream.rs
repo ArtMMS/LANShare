@@ -4,6 +4,7 @@
 use crate::capture::ScreenCapture;
 use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
+use crate::preview::{PreviewSlot, PREVIEW_INTERVAL};
 use crate::registry::Registry;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,14 +36,21 @@ pub struct StreamHandle {
 
 impl StreamHandle {
     /// Começa a capturar, comprimir e enviar a tela aos Clients.
-    pub fn start(registry: Registry, settings: StreamSettings, events: EventSender) -> Self {
+    pub fn start(
+        registry: Registry,
+        settings: StreamSettings,
+        events: EventSender,
+        preview: PreviewSlot,
+    ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread_events = events.clone();
+        let thread_preview = preview.clone();
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
-            let result = run(registry, thread_stop, settings, &thread_events);
+            let result = run(registry, thread_stop, settings, &thread_events, &preview);
+            thread_preview.clear(); // a miniatura some junto com a transmissão
             thread_events.emit(HostEvent::StreamStopped {
                 error: result.err().map(|erro| erro.to_string()),
             });
@@ -82,6 +90,7 @@ fn run(
     stop: Arc<AtomicBool>,
     settings: StreamSettings,
     events: &EventSender,
+    preview: &PreviewSlot,
 ) -> Result<(), BoxError> {
     events.debug("run: iniciando a captura");
     let capture = ScreenCapture::start()?;
@@ -95,6 +104,7 @@ fn run(
     let mut skipped: u32 = 0;
     let mut first_frame_logged = false;
     let mut first_packet_logged = false;
+    let mut last_preview: Option<Instant> = None;
 
     // Limite de FPS: a agenda diz quando o próximo frame pode entrar
     let frame_interval = Duration::from_secs_f64(1.0 / settings.fps as f64);
@@ -112,6 +122,12 @@ fn run(
         if !first_frame_logged {
             first_frame_logged = true;
             events.debug("run: primeiro frame recebido da captura");
+        }
+
+        // Preview do Host: atualiza a miniatura mesmo que ninguém esteja assistindo
+        if last_preview.map_or(true, |t| t.elapsed() >= PREVIEW_INTERVAL) {
+            preview.publish(&frame);
+            last_preview = Some(Instant::now());
         }
 
         // Sem ninguém assistindo, não gasta a GPU

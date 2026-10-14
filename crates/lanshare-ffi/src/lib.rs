@@ -72,7 +72,10 @@ pub extern "C" fn lanshare_host_poll_event() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn lanshare_host_users() -> *mut c_char {
     let host = HOST.lock().unwrap();
-    let users = host.as_ref().map(|engine| engine.users()).unwrap_or_default();
+    let users = host
+        .as_ref()
+        .map(|engine| engine.users())
+        .unwrap_or_default();
     to_c(serde_json::to_string(&users).unwrap_or_else(|_| "[]".into()))
 }
 
@@ -114,6 +117,38 @@ pub extern "C" fn lanshare_host_stop_stream() -> i32 {
 pub extern "C" fn lanshare_host_is_streaming() -> i32 {
     let host = HOST.lock().unwrap();
     host.as_ref().map(|e| e.is_streaming()).unwrap_or(false) as i32
+}
+
+/// Copia a miniatura (preview) da transmissão para `buffer` (BGRA, 4 bytes por pixel).
+/// `capacity` = tamanho do buffer em bytes (use 960*540*4). Preenche `width` e `height`.
+/// Retorna 1 se copiou, 0 se não há miniatura (ou o buffer é pequeno).
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_preview(
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let host = HOST.lock().unwrap();
+    let Some(engine) = host.as_ref() else {
+        return 0;
+    };
+
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    match engine.preview_into(out) {
+        Some((w, h)) => {
+            *width = w;
+            *height = h;
+            1
+        }
+        None => 0,
+    }
 }
 
 /// Fecha a sala (para a transmissão e desconecta todos).

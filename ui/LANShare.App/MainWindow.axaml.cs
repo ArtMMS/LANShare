@@ -1,18 +1,27 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 
 namespace LANShare.App;
 
 public partial class MainWindow : Window
 {
-    private readonly TextBlock _versionText, _statusText, _statusLabel, _addressLabel;
+    private readonly TextBlock _versionText, _placeholderText, _infoText, _statusLabel, _addressLabel;
     private readonly TextBox _roomNameBox, _passwordBox;
     private readonly Button _roomButton, _startStreamButton, _stopStreamButton;
     private readonly ComboBox _resolutionBox, _fpsBox;
     private readonly StackPanel _usersPanel;
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly Image _previewImage;
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+
+    // Buffer reaproveitado para receber a miniatura do Rust
+    private readonly byte[] _previewBuffer = new byte[NativeMethods.PreviewBufferSize];
+    private WriteableBitmap? _previewBitmap;
 
     private bool _roomOpen;
     private bool _streaming;
@@ -23,7 +32,8 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _versionText = this.FindControl<TextBlock>("VersionText")!;
-        _statusText = this.FindControl<TextBlock>("StatusText")!;
+        _placeholderText = this.FindControl<TextBlock>("PlaceholderText")!;
+        _infoText = this.FindControl<TextBlock>("InfoText")!;
         _statusLabel = this.FindControl<TextBlock>("StatusLabel")!;
         _addressLabel = this.FindControl<TextBlock>("AddressLabel")!;
         _roomNameBox = this.FindControl<TextBox>("RoomNameBox")!;
@@ -34,11 +44,12 @@ public partial class MainWindow : Window
         _resolutionBox = this.FindControl<ComboBox>("ResolutionBox")!;
         _fpsBox = this.FindControl<ComboBox>("FpsBox")!;
         _usersPanel = this.FindControl<StackPanel>("UsersPanel")!;
+        _previewImage = this.FindControl<Image>("PreviewImage")!;
 
         _roomButton.Click += (_, _) => ToggleRoom();
         _startStreamButton.Click += (_, _) => StartStream();
         _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
-        _timer.Tick += (_, _) => PollEvents();
+        _timer.Tick += (_, _) => OnTick();
 
         ShowCoreStatus();
         Closing += (_, _) => { if (_coreOk) NativeMethods.HostStop(); };
@@ -52,13 +63,13 @@ public partial class MainWindow : Window
         try
         {
             _versionText.Text = $"Motor Rust v{NativeMethods.GetVersion()}";
-            _statusText.Text = "Abra a sala para começar.";
+            _placeholderText.Text = "Abra a sala para começar.";
             _coreOk = true;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
             _versionText.Text = "Motor Rust indisponível";
-            _statusText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
+            _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
             _roomButton.IsEnabled = false;
         }
     }
@@ -73,7 +84,8 @@ public partial class MainWindow : Window
             _streaming = false;
             _usersPanel.Children.Clear();
             _addressLabel.Text = "";
-            _statusText.Text = "Sala fechada.";
+            _infoText.Text = "";
+            HidePreview("Sala fechada.");
             UpdateUi();
             return;
         }
@@ -81,7 +93,7 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.HostStart(_passwordBox.Text, null, _roomNameBox.Text);
         if (!ok)
         {
-            _statusText.Text = error ?? "Erro ao abrir a sala.";
+            _placeholderText.Text = error ?? "Erro ao abrir a sala.";
             return;
         }
 
@@ -95,10 +107,31 @@ public partial class MainWindow : Window
         var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
         var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
         var (ok, error) = NativeMethods.HostStartStream(height, fps);
-        if (!ok) _statusText.Text = error ?? "Erro ao iniciar a transmissão.";
+        if (!ok)
+        {
+            _infoText.Text = error ?? "Erro ao iniciar a transmissão.";
+            return;
+        }
+
+        _streaming = true;
+        _infoText.Text = "Capturando a tela. A imagem é enviada quando um usuário entrar.";
+        UpdateUi();
     }
 
-    /// Lê os eventos que o Rust acumulou e atualiza a tela.
+    /// A cada 100 ms: lê os eventos do Rust e atualiza o preview.
+    private void OnTick()
+    {
+        try
+        {
+            PollEvents();
+            if (_roomOpen && _streaming) UpdatePreview();
+        }
+        catch (Exception ex)
+        {
+            _infoText.Text = "Erro: " + ex.Message;
+        }
+    }
+
     private void PollEvents()
     {
         var changedUsers = false;
@@ -111,7 +144,7 @@ public partial class MainWindow : Window
                 {
                     case "started":
                         _addressLabel.Text = "Endereço: " + e.GetProperty("address").GetString();
-                        _statusText.Text = "Sala aberta. Aguardando usuários.";
+                        _placeholderText.Text = "Sala aberta. Clique em Iniciar transmissão.";
                         break;
                     case "user_joined":
                     case "user_left":
@@ -119,22 +152,21 @@ public partial class MainWindow : Window
                         changedUsers = true;
                         break;
                     case "stream_started":
-                        _streaming = true;
-                        _statusText.Text =
+                        _infoText.Text =
                             $"Transmitindo {e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()} " +
                             $"@ {e.GetProperty("fps").GetInt32()} FPS";
-                        UpdateUi();
                         break;
                     case "stream_stats":
-                        _statusText.Text =
+                        _infoText.Text =
                             $"Transmitindo — {e.GetProperty("mbps").GetDouble():F1} Mbps, " +
                             $"{e.GetProperty("clients").GetInt32()} usuário(s)";
                         break;
                     case "stream_stopped":
                         _streaming = false;
-                        _statusText.Text = e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
+                        _infoText.Text = e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
                             ? "Transmissão interrompida: " + err.GetString()
-                            : "Transmissão parada.";
+                            : "";
+                        HidePreview("Transmissão parada.");
                         UpdateUi();
                         break;
                 }
@@ -142,6 +174,40 @@ public partial class MainWindow : Window
         }
 
         if (changedUsers) RefreshUsers();
+    }
+
+    /// Pede a miniatura mais recente ao Rust e desenha na área do vídeo.
+    private void UpdatePreview()
+    {
+        if (!NativeMethods.HostPreview(_previewBuffer, out var width, out var height)) return;
+
+        if (_previewBitmap is null || _previewBitmap.PixelSize.Width != width || _previewBitmap.PixelSize.Height != height)
+        {
+            _previewBitmap = new WriteableBitmap(
+                new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+            _previewImage.Source = _previewBitmap;
+        }
+
+        using (var frame = _previewBitmap.Lock())
+        {
+            // Copia linha por linha: o bitmap pode ter bytes extras no fim de cada linha
+            for (var y = 0; y < height; y++)
+                Marshal.Copy(_previewBuffer, y * width * 4, frame.Address + y * frame.RowBytes, width * 4);
+        }
+
+        // Força o redesenho com o conteúdo novo
+        _previewImage.InvalidateVisual();
+        _previewImage.IsVisible = true;
+        _placeholderText.IsVisible = false;
+    }
+
+    private void HidePreview(string message)
+    {
+        _previewImage.IsVisible = false;
+        _previewImage.Source = null;
+        _previewBitmap = null;
+        _placeholderText.Text = message;
+        _placeholderText.IsVisible = true;
     }
 
     private void RefreshUsers()
