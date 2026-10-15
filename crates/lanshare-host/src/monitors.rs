@@ -1,5 +1,5 @@
 //! Monitores do Host: lista os monitores e tira uma foto de cada um
-//! (usado na janela de escolha do que transmitir).
+//! (usado no painel de escolha do que transmitir).
 
 use crate::capture::ScreenCapture;
 use rayon::prelude::*;
@@ -22,8 +22,12 @@ const THUMB_TIMEOUT: Duration = Duration::from_millis(2500);
 pub struct MonitorInfo {
     /// Posição na lista do Windows (é o número que a transmissão usa para achar o monitor).
     pub index: usize,
-    /// Ex.: "Monitor 1 - Principal".
+    /// Ex.: "Monitor 1 - DELL U2419H".
     pub name: String,
+    /// Modelo informado pelo Windows (ou "Genérico").
+    pub model: String,
+    pub width: u32,
+    pub height: u32,
     pub primary: bool,
 }
 
@@ -59,22 +63,36 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>, BoxError> {
     Ok(order
         .into_iter()
         .enumerate()
-        .map(|(position, (index, is_primary))| MonitorInfo {
-            index,
-            name: format!(
-                "Monitor {} - {}",
-                position + 1,
-                if is_primary { "Principal" } else { "Secundário" }
-            ),
-            primary: is_primary,
+        .map(|(position, (index, is_primary))| {
+            let monitor = &monitors[index];
+            let model = model_name(monitor);
+            MonitorInfo {
+                index,
+                name: format!("Monitor {} - {model}", position + 1),
+                model,
+                width: monitor.width().unwrap_or(0),
+                height: monitor.height().unwrap_or(0),
+                primary: is_primary,
+            }
         })
         .collect())
+}
+
+/// Nome do modelo que o Windows leu do próprio monitor (ex.: "DELL U2419H").
+fn model_name(monitor: &Monitor) -> String {
+    monitor
+        .name()
+        .ok()
+        .map(|name| name.trim().to_string())
+        // Sem o nome do modelo, alguns sistemas devolvem só o nome técnico (\\.\DISPLAY1)
+        .filter(|name| !name.is_empty() && !name.starts_with(r"\\.\"))
+        .unwrap_or_else(|| "Genérico".to_string())
 }
 
 /// Captura uma imagem do monitor e a reduz para a miniatura.
 /// Leva uma fração de segundo; não use na thread da interface.
 pub fn monitor_thumbnail(index: usize) -> Result<Thumbnail, BoxError> {
-    let capture = ScreenCapture::start_on(Some(index))?;
+    let capture = ScreenCapture::start_quiet(index)?;
     let received = capture.frames.recv_timeout(THUMB_TIMEOUT);
     let _ = capture.stop();
     let frame = received.map_err(|_| "o monitor nao entregou nenhuma imagem")?;

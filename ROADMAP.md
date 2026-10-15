@@ -50,9 +50,9 @@
 - [x] Ask for the password when joining a protected room
 - [x] Add Host options: kick clients and set a password
 - [x] Add a screen sharing button
-- [ ] Detect multiple monitors
-- [ ] Display monitor names and previews
-- [ ] Select and stream a specific monitor
+- [x] Detect multiple monitors
+- [x] Display monitor names and previews
+- [x] Select and stream a specific monitor
 - [ ] Detect available windows
 - [ ] Display window names, application icons and previews
 - [ ] Select and stream a specific window
@@ -126,11 +126,12 @@
 
 ---
 
-## High-Performance Streaming
+## Future Updates
  Optimize
  Support 1440p (Quad HD)
  Support 4K
  Reach 60 FPS
  Stream multiple monitors at the same time as one large screen
- Display the webcam feed of all connected users
+ Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
+ Allow multiples screen transmitions and notify who is showing the screen on the user feed
  Linux Port

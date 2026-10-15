@@ -147,6 +147,9 @@ public partial class MainWindow : Window
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
+        // Painel "Escolha o monitor"
+        InitSourcePicker();
+
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
         _nameInput.KeyDown += (_, e) =>
@@ -166,7 +169,7 @@ public partial class MainWindow : Window
 
         // Host
         _roomButton.Click += (_, _) => ToggleRoom();
-        _startStreamButton.Click += (_, _) => StartStream();
+        _startStreamButton.Click += (_, _) => OpenSourcePicker(); // escolhe o monitor antes de transmitir
         _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
         _hostBackButton.Click += (_, _) => ShowMode(Mode.Home); // só aparece com a sala fechada
 
@@ -203,7 +206,7 @@ public partial class MainWindow : Window
             if (_clientActive && _clientState == ClientState.Idle) ScanRooms();
         };
 
-       InitFullscreen();
+        InitFullscreen();
 
         var savedName = ShowCoreStatus();
         if (_coreOk)
@@ -424,11 +427,12 @@ public partial class MainWindow : Window
         UpdateUi();
     }
 
-    private void StartStream()
+    /// Começa a transmitir o monitor escolhido no painel ("index" da lista de monitores).
+    private void StartStream(int monitorIndex)
     {
         var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
         var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
-        var (ok, error) = NativeMethods.HostStartStream(height, fps);
+        var (ok, error) = NativeMethods.HostStartStreamOn(height, fps, monitorIndex);
         if (!ok)
         {
             _infoText.Text = error ?? "Erro ao iniciar a transmissão.";

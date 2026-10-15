@@ -6,6 +6,7 @@
 
 use lanshare_client::ClientEngine;
 use lanshare_core::settings::{self, Settings};
+use lanshare_host::monitors;
 use lanshare_host::{HostConfig, HostEngine, StreamSettings};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -141,13 +142,71 @@ pub extern "C" fn lanshare_host_kick(id: u64) -> *mut c_char {
     }
 }
 
-/// Começa a transmitir a tela. `height`: 720 ou 1080; `fps`: 15 ou 30.
+/// Monitores do computador, como JSON (principal primeiro):
+/// [{"index":0,"name":"Monitor 1 - DELL U2419H","model":"DELL U2419H","width":1920,"height":1080,"primary":true}].
+/// Não precisa da sala aberta.
+#[no_mangle]
+pub extern "C" fn lanshare_host_monitors() -> *mut c_char {
+    let list = monitors::list_monitors().unwrap_or_default();
+    to_c(serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Tira uma foto reduzida de um monitor e copia para `buffer` (BGRA, 4 bytes por pixel).
+/// `capacity` = tamanho do buffer em bytes (use 400*240*4). Preenche o tamanho da foto
+/// e o tamanho real do monitor. Retorna 1 se deu certo, 0 se não.
+/// Leva uma fração de segundo: chame fora da thread da interface.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; os outros ponteiros, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_monitor_thumbnail(
+    index: u32,
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+    source_width: *mut u32,
+    source_height: *mut u32,
+) -> i32 {
+    if buffer.is_null()
+        || width.is_null()
+        || height.is_null()
+        || source_width.is_null()
+        || source_height.is_null()
+    {
+        return 0;
+    }
+
+    let Ok(thumb) = monitors::monitor_thumbnail(index as usize) else {
+        return 0;
+    };
+    if thumb.bgra.len() > capacity {
+        return 0;
+    }
+
+    std::ptr::copy_nonoverlapping(thumb.bgra.as_ptr(), buffer, thumb.bgra.len());
+    *width = thumb.width;
+    *height = thumb.height;
+    *source_width = thumb.source_width;
+    *source_height = thumb.source_height;
+    1
+}
+
+/// Começa a transmitir o monitor principal. `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream(height: u32, fps: u32) -> *mut c_char {
+    lanshare_host_start_stream_on(height, fps, -1)
+}
+
+/// Começa a transmitir um monitor. `monitor`: o "index" da lista de monitores
+/// (negativo = principal). `height`: 720 ou 1080; `fps`: 15 ou 30.
+#[no_mangle]
+pub extern "C" fn lanshare_host_start_stream_on(height: u32, fps: u32, monitor: i32) -> *mut c_char {
+    let monitor = usize::try_from(monitor).ok();
     let host = HOST.lock().unwrap();
     match host.as_ref() {
         None => reply_err("a sala não está aberta"),
-        Some(engine) => match engine.start_stream(StreamSettings { height, fps }) {
+        Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, monitor) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
         },

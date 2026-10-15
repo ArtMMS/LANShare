@@ -35,12 +35,14 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
-    /// Começa a capturar, comprimir e enviar a tela aos Clients.
-    pub fn start(
+    /// Começa a capturar, comprimir e enviar um monitor aos Clients
+    /// (índice da lista do Windows; None = principal).
+    pub fn start_on(
         registry: Registry,
         settings: StreamSettings,
         events: EventSender,
         preview: PreviewSlot,
+        monitor: Option<usize>,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
@@ -49,7 +51,14 @@ impl StreamHandle {
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
-            let result = run(registry, thread_stop, settings, &thread_events, &preview);
+            let result = run(
+                registry,
+                thread_stop,
+                settings,
+                monitor,
+                &thread_events,
+                &preview,
+            );
             thread_preview.clear(); // a miniatura some junto com a transmissão
             thread_events.emit(HostEvent::StreamStopped {
                 error: result.err().map(|erro| erro.to_string()),
@@ -89,11 +98,12 @@ fn run(
     registry: Registry,
     stop: Arc<AtomicBool>,
     settings: StreamSettings,
+    monitor: Option<usize>,
     events: &EventSender,
     preview: &PreviewSlot,
 ) -> Result<(), BoxError> {
     events.debug("run: iniciando a captura");
-    let capture = ScreenCapture::start()?;
+    let capture = ScreenCapture::start_on(monitor)?;
     events.debug("run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
 

@@ -4,7 +4,7 @@
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
 ![Version](https://img.shields.io/badge/version-v0.4-orange)
-![Progress](https://img.shields.io/badge/progress-55%25-orange)
+![Progress](https://img.shields.io/badge/progress-72%25-brightgreen)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
@@ -74,7 +74,7 @@ Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ## 🐛 Known Issues
 
-- If the host starts streaming its screen to a client, stops the stream, and then starts streaming again, the application crashes.
+*No known issues.*
 
 ---
 

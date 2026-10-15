@@ -6,6 +6,40 @@
         Width="1000" Height="640"
         MinWidth="720" MinHeight="480">
 
+    <Window.Styles>
+        <!-- Cartões de monitor do painel "Escolha o monitor" -->
+        <Style Selector="ListBoxItem.monitor">
+            <Setter Property="Margin" Value="6" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Background" Value="#22272E" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A3038" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#24304A" />
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A3854" />
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#24304A" />
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
+        <Style Selector="ListBoxItem.monitor:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A3854" />
+        </Style>
+    </Window.Styles>
+
     <Grid>
 
         <!-- Layout principal: lateral + área grande -->
@@ -226,6 +260,55 @@
             </Border>
 
         </Grid>
+
+        <!-- Escolha do monitor (por cima de tudo, com o fundo escurecido) -->
+        <Border x:Name="SourcePicker" Background="#B3000000" IsVisible="False">
+            <Border Background="#1B1F24" BorderBrush="#2E343C" BorderThickness="1"
+                    CornerRadius="12" Padding="24" Width="600"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    BoxShadow="0 12 40 0 #80000000">
+                <StackPanel Spacing="16">
+
+                    <TextBlock Text="Escolha o monitor" FontSize="22" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+
+                    <!-- Área dos cards (as janelas entram aqui depois, como outra aba) -->
+                    <Border Background="#15191E" BorderBrush="#2E343C" BorderThickness="1" CornerRadius="8">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="10" Margin="14,12">
+                                <TextBlock Classes="icon" Text="&#xE7F4;" VerticalAlignment="Center" />
+                                <TextBlock Text="Selecionar e transmitir um monitor específico"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Border Height="1" Background="#2E343C" />
+
+                            <TextBlock x:Name="PickerStatus" Opacity="0.7" Margin="14,12"
+                                       TextWrapping="Wrap" IsVisible="False" />
+
+                            <ListBox x:Name="MonitorList" Background="Transparent" Margin="6"
+                                     MaxHeight="360"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                            </ListBox>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid ColumnDefinitions="*,12,*">
+                        <Button x:Name="PickerCancelButton" Grid.Column="0" Content="Cancelar"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Padding="0,10" />
+                        <Button x:Name="PickerConfirmButton" Grid.Column="2" Content="Iniciar transmissão"
+                                Classes="accent"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Padding="0,10" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
 
         <!-- Tela de nome de usuário (primeira abertura, por cima de tudo, dentro do app) -->
         <Border x:Name="NameScreen" Background="#111418" IsVisible="False">

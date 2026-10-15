@@ -12,6 +12,7 @@ mod engine;
 mod events;
 mod hw_encoder;
 mod kick;
+pub mod monitors;
 mod preview;
 mod registry;
 mod stream;

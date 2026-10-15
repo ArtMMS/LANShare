@@ -200,8 +200,18 @@ impl HostEngine {
         Ok(target.name)
     }
 
-    /// Começa a transmitir a tela para os Clients.
+    /// Começa a transmitir o monitor principal para os Clients.
     pub fn start_stream(&self, settings: StreamSettings) -> Result<(), String> {
+        self.start_stream_on(settings, None)
+    }
+
+    /// Começa a transmitir um monitor para os Clients
+    /// (índice da lista do Windows; None = principal).
+    pub fn start_stream_on(
+        &self,
+        settings: StreamSettings,
+        monitor: Option<usize>,
+    ) -> Result<(), String> {
         if !matches!(settings.height, 720 | 1080) || !matches!(settings.fps, 15 | 30) {
             return Err("Resolucao ou FPS invalidos (use 720 ou 1080, e 15 ou 30).".to_string());
         }
@@ -211,11 +221,12 @@ impl HostEngine {
             return Err("A tela ja esta sendo compartilhada.".to_string());
         }
 
-        *streaming = Some(StreamHandle::start(
+        *streaming = Some(StreamHandle::start_on(
             self.registry.clone(),
             settings,
             self.events.clone(),
             self.preview.clone(),
+            monitor,
         ));
         Ok(())
     }

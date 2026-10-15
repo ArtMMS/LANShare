@@ -70,13 +70,28 @@ pub struct ScreenCapture {
 impl ScreenCapture {
     /// Começa a capturar o monitor principal em outra thread.
     pub fn start() -> Result<Self, BoxError> {
-        let monitor = Monitor::primary()?;
+        Self::start_on(None)
+    }
+
+    /// Começa a capturar um monitor (índice da lista do Windows; None = principal).
+    pub fn start_on(index: Option<usize>) -> Result<Self, BoxError> {
+        Self::open(find_monitor(index)?, DrawBorderSettings::Default)
+    }
+
+    /// Igual a `start_on`, mas tenta sem a borda amarela do Windows (usado nas miniaturas,
+    /// que abrem e fecham a captura o tempo todo). Sem suporte a isso, usa a borda padrão.
+    pub fn start_quiet(index: usize) -> Result<Self, BoxError> {
+        Self::open(find_monitor(Some(index))?, DrawBorderSettings::WithoutBorder)
+            .or_else(|_| Self::open(find_monitor(Some(index))?, DrawBorderSettings::Default))
+    }
+
+    fn open(monitor: Monitor, border: DrawBorderSettings) -> Result<Self, BoxError> {
         let (sender, frames) = mpsc::sync_channel(2);
 
         let settings = Settings::new(
             monitor,
             CursorCaptureSettings::Default,
-            DrawBorderSettings::Default,
+            border,
             SecondaryWindowSettings::Default,
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
@@ -92,6 +107,17 @@ impl ScreenCapture {
     pub fn stop(self) -> Result<(), BoxError> {
         self.control.stop()?;
         Ok(())
+    }
+}
+
+/// Acha o monitor pelo índice da lista do Windows (None = principal).
+fn find_monitor(index: Option<usize>) -> Result<Monitor, BoxError> {
+    match index {
+        None => Ok(Monitor::primary()?),
+        Some(i) => Monitor::enumerate()?
+            .into_iter()
+            .nth(i)
+            .ok_or_else(|| format!("o monitor {} nao foi encontrado", i + 1).into()),
     }
 }
 
