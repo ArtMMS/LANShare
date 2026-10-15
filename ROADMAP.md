@@ -127,12 +127,10 @@
 ---
 
 ## High-Performance Streaming
- Support IPV6
+ Optimize
  Support 1440p (Quad HD)
  Support 4K
  Reach 60 FPS
  Stream multiple monitors at the same time as one large screen
  Display the webcam feed of all connected users
- Further reduce latency
- Optimize bandwidth usage
  Linux Port

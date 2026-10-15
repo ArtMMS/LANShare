@@ -13,7 +13,7 @@ LANShare is a local network application designed to share a computer's screen wi
 The project is being developed with performance, stability, and ease of use in mind, with future plans to include synchronized audio streaming and support for higher resolutions and frame rates.
 
 
-![gif](assets/demo_gif_0_4.gif)
+![gif](assets/demo_gif_1_0.gif)
 
 ---
 
