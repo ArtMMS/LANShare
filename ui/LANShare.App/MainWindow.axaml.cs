@@ -13,6 +13,9 @@ namespace LANShare.App;
 
 public partial class MainWindow : Window
 {
+    /// Versão mostrada ao lado do nome do app.
+    private const string AppVersion = "v1.0";
+
     private enum Mode { Home, Host, Client }
     private enum ClientState { Idle, Connecting, Connected }
 
@@ -42,7 +45,7 @@ public partial class MainWindow : Window
     private readonly Button _createRoomButton, _joinRoomButton;
 
     // Host
-    private readonly TextBlock _statusLabel, _addressLabel;
+    private readonly TextBlock _statusLabel;
     private readonly TextBox _roomNameBox, _passwordBox;
     private readonly Button _roomButton, _startStreamButton, _stopStreamButton, _hostBackButton;
     private readonly ComboBox _resolutionBox, _fpsBox;
@@ -114,7 +117,6 @@ public partial class MainWindow : Window
         _joinRoomButton = Find<Button>("JoinRoomButton");
 
         _statusLabel = Find<TextBlock>("StatusLabel");
-        _addressLabel = Find<TextBlock>("AddressLabel");
         _roomNameBox = Find<TextBox>("RoomNameBox");
         _passwordBox = Find<TextBox>("PasswordBox");
         _roomButton = Find<Button>("RoomButton");
@@ -166,7 +168,7 @@ public partial class MainWindow : Window
         _roomButton.Click += (_, _) => ToggleRoom();
         _startStreamButton.Click += (_, _) => StartStream();
         _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
-        _hostBackButton.Click += (_, _) => HostBack();
+        _hostBackButton.Click += (_, _) => ShowMode(Mode.Home); // só aparece com a sala fechada
 
         // Client
         _refreshRoomsButton.Click += (_, _) => ScanRooms();
@@ -234,16 +236,17 @@ public partial class MainWindow : Window
     /// Confere se a ponte C# ↔ Rust funciona. Devolve o nome salvo (null na primeira abertura).
     private string? ShowCoreStatus()
     {
+        _versionText.Text = AppVersion;
         try
         {
-            _versionText.Text = $"Motor Rust v{NativeMethods.GetVersion()}";
+            _ = NativeMethods.GetVersion(); // só confere que a DLL do Rust carregou
             var saved = NativeMethods.GetUsername();
             _coreOk = true;
             return saved;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
-            _versionText.Text = "Motor Rust indisponível";
+            _versionText.Text = $"{AppVersion} — motor Rust indisponível";
             _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
             _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _homeNameBox.IsEnabled = false;
             return null;
@@ -393,12 +396,6 @@ public partial class MainWindow : Window
 
     // ───────────────────────── Host ─────────────────────────
 
-    private void HostBack()
-    {
-        if (_roomOpen) ToggleRoom(); // fecha a sala
-        ShowMode(Mode.Home);
-    }
-
     private void ToggleRoom()
     {
         if (_roomOpen)
@@ -408,10 +405,8 @@ public partial class MainWindow : Window
             _streaming = false;
             StopTimerIfIdle();
             _usersPanel.Children.Clear();
-            _addressLabel.Text = "";
-            _infoText.Text = "";
-            HidePreview("Sala fechada.");
             UpdateUi();
+            ShowMode(Mode.Home); // fechar a sala já volta para o início
             return;
         }
 
@@ -454,7 +449,6 @@ public partial class MainWindow : Window
                 switch (e.GetProperty("type").GetString())
                 {
                     case "started":
-                        _addressLabel.Text = "Endereço: " + e.GetProperty("address").GetString();
                         _placeholderText.Text = "Sala aberta. Clique em Iniciar transmissão.";
                         changedUsers = true; // mostra o próprio Host na lista
                         break;
@@ -526,7 +520,7 @@ public partial class MainWindow : Window
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
         _startStreamButton.IsEnabled = _roomOpen && !_streaming;
         _stopStreamButton.IsEnabled = _roomOpen && _streaming;
-        _hostBackButton.Content = _roomOpen ? "Fechar sala e voltar" : "Voltar ao início";
+        _hostBackButton.IsVisible = !_roomOpen; // com a sala aberta, "Fechar sala" já volta ao início
     }
 
     // ───────────────────────── Client ─────────────────────────
