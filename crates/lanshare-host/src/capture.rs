@@ -1,6 +1,7 @@
-// Captura de tela do Host via Windows Graphics Capture (WGC).
+// Captura de tela do Host via Windows Graphics Capture (WGC): um monitor inteiro ou uma janela.
 
 use std::error::Error;
+use std::ffi::c_void;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
@@ -12,8 +13,20 @@ use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
     MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
+use windows_capture::window::Window;
 
 type BoxError = Box<dyn Error + Send + Sync>;
+
+/// O que capturar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureTarget {
+    /// O monitor principal.
+    PrimaryMonitor,
+    /// Um monitor, pelo índice da lista do Windows.
+    Monitor(usize),
+    /// Uma janela, pelo identificador (HWND) da lista de janelas.
+    Window(u64),
+}
 
 /// Um frame da tela em memória: pixels RGBA, 4 bytes por pixel, sem padding.
 pub struct CapturedFrame {
@@ -70,36 +83,48 @@ pub struct ScreenCapture {
 impl ScreenCapture {
     /// Começa a capturar o monitor principal em outra thread.
     pub fn start() -> Result<Self, BoxError> {
-        Self::start_on(None)
+        Self::start_target(CaptureTarget::PrimaryMonitor)
     }
 
-    /// Começa a capturar um monitor (índice da lista do Windows; None = principal).
-    pub fn start_on(index: Option<usize>) -> Result<Self, BoxError> {
-        Self::open(find_monitor(index)?, DrawBorderSettings::Default)
+    /// Começa a capturar um monitor ou uma janela em outra thread.
+    pub fn start_target(target: CaptureTarget) -> Result<Self, BoxError> {
+        Self::open(target, DrawBorderSettings::Default)
     }
 
-    /// Igual a `start_on`, mas tenta sem a borda amarela do Windows (usado nas miniaturas,
+    /// Igual a `start_target`, mas tenta sem a borda amarela do Windows (usado nas miniaturas,
     /// que abrem e fecham a captura o tempo todo). Sem suporte a isso, usa a borda padrão.
-    pub fn start_quiet(index: usize) -> Result<Self, BoxError> {
-        Self::open(find_monitor(Some(index))?, DrawBorderSettings::WithoutBorder)
-            .or_else(|_| Self::open(find_monitor(Some(index))?, DrawBorderSettings::Default))
+    pub fn start_quiet(target: CaptureTarget) -> Result<Self, BoxError> {
+        Self::open(target, DrawBorderSettings::WithoutBorder)
+            .or_else(|_| Self::open(target, DrawBorderSettings::Default))
     }
 
-    fn open(monitor: Monitor, border: DrawBorderSettings) -> Result<Self, BoxError> {
+    fn open(target: CaptureTarget, border: DrawBorderSettings) -> Result<Self, BoxError> {
         let (sender, frames) = mpsc::sync_channel(2);
 
-        let settings = Settings::new(
-            monitor,
-            CursorCaptureSettings::Default,
-            border,
-            SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Default,
-            DirtyRegionSettings::Default,
-            ColorFormat::Rgba8,
-            sender,
-        );
+        // Mesmas opções para monitor e janela; só muda o que é capturado
+        macro_rules! start_with {
+            ($item:expr) => {
+                Handler::start_free_threaded(Settings::new(
+                    $item,
+                    CursorCaptureSettings::Default,
+                    border,
+                    SecondaryWindowSettings::Default,
+                    MinimumUpdateIntervalSettings::Default,
+                    DirtyRegionSettings::Default,
+                    ColorFormat::Rgba8,
+                    sender,
+                ))?
+            };
+        }
 
-        let control = Handler::start_free_threaded(settings)?;
+        let control = match target {
+            CaptureTarget::PrimaryMonitor => start_with!(Monitor::primary()?),
+            CaptureTarget::Monitor(index) => start_with!(find_monitor(index)?),
+            CaptureTarget::Window(id) => {
+                start_with!(Window::from_raw_hwnd(id as usize as *mut c_void))
+            }
+        };
+
         Ok(Self { control, frames })
     }
 
@@ -110,15 +135,12 @@ impl ScreenCapture {
     }
 }
 
-/// Acha o monitor pelo índice da lista do Windows (None = principal).
-fn find_monitor(index: Option<usize>) -> Result<Monitor, BoxError> {
-    match index {
-        None => Ok(Monitor::primary()?),
-        Some(i) => Monitor::enumerate()?
-            .into_iter()
-            .nth(i)
-            .ok_or_else(|| format!("o monitor {} nao foi encontrado", i + 1).into()),
-    }
+/// Acha o monitor pelo índice da lista do Windows.
+fn find_monitor(index: usize) -> Result<Monitor, BoxError> {
+    Monitor::enumerate()?
+        .into_iter()
+        .nth(index)
+        .ok_or_else(|| format!("o monitor {} nao foi encontrado", index + 1).into())
 }
 
 /// Teste temporário: captura por alguns segundos e mostra o resultado no terminal.

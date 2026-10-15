@@ -3,6 +3,7 @@
 //! Este módulo NÃO imprime nada e NÃO lê o teclado. Quem usa (o terminal ou a janela)
 //! manda comandos pelos métodos de `HostEngine` e recebe o que acontece pelos eventos.
 
+use crate::capture::CaptureTarget;
 use crate::discovery::{self, RoomSettings};
 use crate::events::{EventSender, HostEvent, LocalAddress, UserEntry};
 use crate::kick::Kicker;
@@ -202,15 +203,14 @@ impl HostEngine {
 
     /// Começa a transmitir o monitor principal para os Clients.
     pub fn start_stream(&self, settings: StreamSettings) -> Result<(), String> {
-        self.start_stream_on(settings, None)
+        self.start_stream_on(settings, CaptureTarget::PrimaryMonitor)
     }
 
-    /// Começa a transmitir um monitor para os Clients
-    /// (índice da lista do Windows; None = principal).
+    /// Começa a transmitir um monitor ou uma janela para os Clients.
     pub fn start_stream_on(
         &self,
         settings: StreamSettings,
-        monitor: Option<usize>,
+        target: CaptureTarget,
     ) -> Result<(), String> {
         if !matches!(settings.height, 720 | 1080) || !matches!(settings.fps, 15 | 30) {
             return Err("Resolucao ou FPS invalidos (use 720 ou 1080, e 15 ou 30).".to_string());
@@ -226,7 +226,7 @@ impl HostEngine {
             settings,
             self.events.clone(),
             self.preview.clone(),
-            monitor,
+            target,
         ));
         Ok(())
     }

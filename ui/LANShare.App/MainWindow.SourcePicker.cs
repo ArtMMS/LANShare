@@ -11,57 +11,84 @@ using Avalonia.Threading;
 
 namespace LANShare.App;
 
-/// Painel "Escolha o monitor" (abre ao clicar em "Iniciar transmissão" no Host).
+/// Painel de escolha do que transmitir (abre ao clicar em "Iniciar transmissão" no Host).
+/// Duas abas: "Monitores inteiros" e "Janela específica".
 public partial class MainWindow
 {
-    /// De quanto em quanto tempo as prévias dos monitores são atualizadas.
+    /// Pausa entre uma volta de atualização das prévias e a próxima.
     private static readonly TimeSpan ThumbnailRefresh = TimeSpan.FromSeconds(1);
+
+    /// Tamanho da prévia em cada cartão.
+    private const double TileWidth = 180;
+    private const double TileHeight = 102;
 
     private static readonly IBrush AccentBrush = new SolidColorBrush(Color.Parse("#4F7CFF"));
 
-    /// Um cartão de monitor e a imagem que ele mostra.
-    private sealed class MonitorTile(int index, Image thumbnail, TextBlock placeholder, TextBlock resolution)
+    private enum PickerTab { Monitors, Windows }
+
+    /// Um cartão (monitor ou janela) e as peças que mudam depois de criado.
+    private sealed class SourceTile
     {
-        public int Index { get; } = index;
-        public Image Thumbnail { get; } = thumbnail;
-        public TextBlock Placeholder { get; } = placeholder;
-        public TextBlock Resolution { get; } = resolution;
+        public int MonitorIndex { get; init; } = -1;
+        public ulong WindowId { get; init; }
+        public bool IsWindow => WindowId != 0;
+        public bool Minimized { get; init; }
+
+        public required Image Thumbnail { get; init; }
+        public required TextBlock Placeholder { get; init; }
+        public required Image BigIcon { get; init; }
+        public required TextBlock Detail { get; init; }
+        public Image? SmallIcon { get; init; }
+
         public WriteableBitmap? Bitmap { get; set; }
     }
 
-    /// Resultado de uma foto: tamanho da miniatura e do monitor.
+    /// Resultado de uma foto: tamanho da miniatura e do que foi capturado.
     private readonly record struct Shot(int Width, int Height, int SourceWidth, int SourceHeight);
 
     private Border _sourcePicker = null!;
-    private ListBox _monitorList = null!;
+    private ListBox _monitorList = null!, _windowList = null!;
     private TextBlock _pickerStatus = null!;
+    private Button _monitorsTabButton = null!, _windowsTabButton = null!;
     private Button _pickerConfirmButton = null!, _pickerCancelButton = null!;
 
     private bool _pickerOpen;
+    private PickerTab _pickerTab = PickerTab.Monitors;
+    private List<SourceTile> _monitorTiles = new(), _windowTiles = new();
 
-    /// Muda a cada abertura/fechamento: para a atualização das prévias do painel anterior.
+    /// Muda a cada abertura/fechamento: para as tarefas do painel anterior.
     private int _pickerGeneration;
+
+    private ListBox ActivePickerList => _pickerTab == PickerTab.Monitors ? _monitorList : _windowList;
 
     /// Chamado uma vez no construtor.
     private void InitSourcePicker()
     {
         _sourcePicker = Find<Border>("SourcePicker");
         _monitorList = Find<ListBox>("MonitorList");
+        _windowList = Find<ListBox>("WindowList");
         _pickerStatus = Find<TextBlock>("PickerStatus");
+        _monitorsTabButton = Find<Button>("MonitorsTabButton");
+        _windowsTabButton = Find<Button>("WindowsTabButton");
         _pickerConfirmButton = Find<Button>("PickerConfirmButton");
         _pickerCancelButton = Find<Button>("PickerCancelButton");
 
+        _monitorsTabButton.Click += (_, _) => SelectPickerTab(PickerTab.Monitors);
+        _windowsTabButton.Click += (_, _) => SelectPickerTab(PickerTab.Windows);
         _pickerConfirmButton.Click += (_, _) => ConfirmSourcePicker();
         _pickerCancelButton.Click += (_, _) => CloseSourcePicker();
-        _monitorList.DoubleTapped += (_, _) => ConfirmSourcePicker();
-        _monitorList.SelectionChanged += (_, _) =>
-            _pickerConfirmButton.IsEnabled = _monitorList.SelectedItem is not null;
-        _monitorList.KeyDown += (_, e) =>
+
+        foreach (var list in new[] { _monitorList, _windowList })
         {
-            if (e.Key != Key.Enter) return;
-            ConfirmSourcePicker();
-            e.Handled = true;
-        };
+            list.DoubleTapped += (_, _) => ConfirmSourcePicker();
+            list.SelectionChanged += (_, _) => UpdatePickerConfirm();
+            list.KeyDown += (_, e) =>
+            {
+                if (e.Key != Key.Enter) return;
+                ConfirmSourcePicker();
+                e.Handled = true;
+            };
+        }
 
         // Clicar na parte escurecida (fora do painel) cancela
         _sourcePicker.PointerPressed += (_, e) =>
@@ -80,43 +107,30 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    /// Abre o painel por cima de tudo, com um cartão por monitor.
+    /// Abre o painel por cima de tudo, na aba de monitores.
     private void OpenSourcePicker()
     {
         if (!_roomOpen || _streaming || _pickerOpen) return;
 
-        var items = new List<ListBoxItem>();
-        var tiles = new List<MonitorTile>();
-        using (var monitors = NativeMethods.HostMonitors())
-        {
-            foreach (var monitor in monitors.RootElement.EnumerateArray())
-            {
-                var index = monitor.GetProperty("index").GetInt32();
-                var item = BuildMonitorTile(
-                    index,
-                    monitor.GetProperty("name").GetString() ?? $"Monitor {index + 1}",
-                    monitor.GetProperty("width").GetInt32(),
-                    monitor.GetProperty("height").GetInt32(),
-                    monitor.GetProperty("primary").GetBoolean());
-                items.Add(item);
-                tiles.Add((MonitorTile)item.Tag!);
-            }
-        }
-
         _pickerOpen = true;
         var generation = ++_pickerGeneration;
 
-        _monitorList.ItemsSource = items;
-        _monitorList.SelectedIndex = items.Count > 0 ? 0 : -1; // o principal já vem selecionado
-        _pickerConfirmButton.IsEnabled = items.Count > 0;
-        _pickerStatus.Text = items.Count == 0 ? "Nenhum monitor encontrado." : "";
-        _pickerStatus.IsVisible = items.Count == 0;
+        var monitorItems = BuildMonitorItems();
+        var windowItems = BuildWindowItems();
+        _monitorTiles = monitorItems.Select(i => (SourceTile)i.Tag!).ToList();
+        _windowTiles = windowItems.Select(i => (SourceTile)i.Tag!).ToList();
 
+        _monitorList.ItemsSource = monitorItems;
+        _windowList.ItemsSource = windowItems;
+        _monitorList.SelectedIndex = monitorItems.Count > 0 ? 0 : -1; // o principal já vem selecionado
+        _windowList.SelectedIndex = -1; // a janela o Host escolhe
+
+        SelectPickerTab(PickerTab.Monitors);
         _sourcePicker.IsVisible = true;
         _mainLayout.IsEnabled = false; // o fundo fica travado enquanto o painel está aberto
-        Dispatcher.UIThread.Post(() => _monitorList.Focus());
 
-        _ = RefreshThumbnailsAsync(tiles, generation);
+        _ = RefreshThumbnailsAsync(generation);
+        _ = LoadWindowIconsAsync(_windowTiles, generation);
     }
 
     private void CloseSourcePicker()
@@ -124,39 +138,92 @@ public partial class MainWindow
         if (!_pickerOpen) return;
 
         _pickerOpen = false;
-        _pickerGeneration++; // para a atualização das prévias
+        _pickerGeneration++; // para a atualização das prévias e dos ícones
         _sourcePicker.IsVisible = false;
         _mainLayout.IsEnabled = true;
         _monitorList.ItemsSource = null;
+        _windowList.ItemsSource = null;
+        _monitorTiles = new();
+        _windowTiles = new();
     }
 
-    /// Fecha o painel e começa a transmitir o monitor escolhido.
+    private void SelectPickerTab(PickerTab tab)
+    {
+        _pickerTab = tab;
+        var monitors = tab == PickerTab.Monitors;
+
+        _monitorsTabButton.Classes.Set("active", monitors);
+        _windowsTabButton.Classes.Set("active", !monitors);
+        _monitorList.IsVisible = monitors;
+        _windowList.IsVisible = !monitors;
+
+        var empty = monitors ? _monitorTiles.Count == 0 : _windowTiles.Count == 0;
+        _pickerStatus.Text = !empty ? "" : monitors
+            ? "Nenhum monitor encontrado."
+            : "Nenhuma janela aberta para transmitir.";
+        _pickerStatus.IsVisible = empty;
+
+        UpdatePickerConfirm();
+        Dispatcher.UIThread.Post(() => ActivePickerList.Focus());
+    }
+
+    private void UpdatePickerConfirm() =>
+        _pickerConfirmButton.IsEnabled = ActivePickerList.SelectedItem is not null;
+
+    /// Fecha o painel e começa a transmitir o que foi escolhido na aba aberta.
     private void ConfirmSourcePicker()
     {
         if (!_pickerOpen) return;
-        if (_monitorList.SelectedItem is not ListBoxItem { Tag: MonitorTile tile }) return;
+        if (ActivePickerList.SelectedItem is not ListBoxItem { Tag: SourceTile tile }) return;
 
         CloseSourcePicker();
-        StartStream(tile.Index);
+        if (tile.IsWindow) StartWindowStream(tile.WindowId);
+        else StartStream(tile.MonitorIndex);
     }
 
-    /// Atualiza a prévia de cada monitor, um por vez, enquanto o painel estiver aberto.
-    private async Task RefreshThumbnailsAsync(List<MonitorTile> tiles, int generation)
+    /// Começa a transmitir uma janela (o monitor usa o StartStream do MainWindow.axaml.cs).
+    private void StartWindowStream(ulong windowId)
+    {
+        var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
+        var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
+        var (ok, error) = NativeMethods.HostStartStreamWindow(height, fps, windowId);
+        if (!ok)
+        {
+            _infoText.Text = error ?? "Erro ao iniciar a transmissão.";
+            return;
+        }
+
+        _streaming = true;
+        _infoText.Text = "Capturando a janela. A imagem é enviada quando um usuário entrar.";
+        UpdateUi();
+    }
+
+    // ───────────────────────── Prévias e ícones ─────────────────────────
+
+    /// Atualiza as prévias da aba aberta, uma por vez, enquanto o painel estiver aberto.
+    private async Task RefreshThumbnailsAsync(int generation)
     {
         var buffer = new byte[NativeMethods.ThumbnailBufferSize];
 
         while (generation == _pickerGeneration)
         {
+            var tab = _pickerTab;
+            var tiles = tab == PickerTab.Monitors ? _monitorTiles : _windowTiles;
+
             foreach (var tile in tiles)
             {
+                if (generation != _pickerGeneration) return;
+                if (_pickerTab != tab) break; // trocou de aba: começa a outra já
+                if (tile.Minimized) continue; // janela minimizada não tem imagem
+
                 Shot? shot;
                 try
                 {
-                    shot = await Task.Run(() => TakeThumbnail(tile.Index, buffer));
+                    shot = await Task.Run(() => TakeThumbnail(tile, buffer));
                 }
                 catch (Exception)
                 {
-                    shot = null; // mantém o ícone (ou a última prévia) no cartão
+                    shot = null; // mantém o que o cartão já mostra
                 }
 
                 // O painel pode ter sido fechado enquanto a foto era tirada
@@ -165,17 +232,21 @@ public partial class MainWindow
                 if (shot is { } s) ShowThumbnail(tile, buffer, s);
             }
 
-            await Task.Delay(ThumbnailRefresh);
+            if (_pickerTab == tab) await Task.Delay(ThumbnailRefresh);
         }
     }
 
-    private static Shot? TakeThumbnail(int index, byte[] buffer) =>
-        NativeMethods.HostMonitorThumbnail(index, buffer, out var w, out var h, out var sw, out var sh)
-            ? new Shot(w, h, sw, sh)
-            : null;
+    private static Shot? TakeThumbnail(SourceTile tile, byte[] buffer)
+    {
+        int w, h, sw, sh;
+        var ok = tile.IsWindow
+            ? NativeMethods.HostWindowThumbnail(tile.WindowId, buffer, out w, out h, out sw, out sh)
+            : NativeMethods.HostMonitorThumbnail(tile.MonitorIndex, buffer, out w, out h, out sw, out sh);
+        return ok ? new Shot(w, h, sw, sh) : null;
+    }
 
     /// Desenha a foto no cartão (reaproveita a imagem se o tamanho não mudou).
-    private static void ShowThumbnail(MonitorTile tile, byte[] bgra, Shot shot)
+    private static void ShowThumbnail(SourceTile tile, byte[] bgra, Shot shot)
     {
         if (tile.Bitmap is null
             || tile.Bitmap.PixelSize.Width != shot.Width
@@ -195,60 +266,113 @@ public partial class MainWindow
         tile.Thumbnail.InvalidateVisual();
         tile.Placeholder.IsVisible = false;
 
-        if (string.IsNullOrEmpty(tile.Resolution.Text))
-            tile.Resolution.Text = $"{shot.SourceWidth} × {shot.SourceHeight}";
+        if (!tile.IsWindow && string.IsNullOrEmpty(tile.Detail.Text))
+            tile.Detail.Text = $"{shot.SourceWidth} × {shot.SourceHeight}";
     }
 
-    /// Cartão de um monitor: prévia, nome, resolução e o selo "Principal".
+    /// Busca o ícone de cada janela (uma por vez, fora da thread da interface).
+    private async Task LoadWindowIconsAsync(List<SourceTile> tiles, int generation)
+    {
+        foreach (var tile in tiles)
+        {
+            if (generation != _pickerGeneration) return;
+
+            byte[]? pixels;
+            try
+            {
+                pixels = await Task.Run(() =>
+                {
+                    var buffer = new byte[NativeMethods.WindowIconBufferSize];
+                    return NativeMethods.HostWindowIcon(tile.WindowId, buffer) ? buffer : null;
+                });
+            }
+            catch (Exception)
+            {
+                pixels = null;
+            }
+
+            if (generation != _pickerGeneration) return;
+            if (pixels is null) continue;
+
+            var icon = MakeIconBitmap(pixels);
+            if (tile.SmallIcon is not null)
+            {
+                tile.SmallIcon.Source = icon;
+                tile.SmallIcon.IsVisible = true;
+            }
+
+            // Minimizada: o ícone grande ocupa o lugar da prévia
+            if (tile.Minimized)
+            {
+                tile.BigIcon.Source = icon;
+                tile.BigIcon.IsVisible = true;
+                tile.Placeholder.IsVisible = false;
+            }
+        }
+    }
+
+    private static WriteableBitmap MakeIconBitmap(byte[] bgra)
+    {
+        var size = NativeMethods.WindowIconSize;
+        var bitmap = new WriteableBitmap(
+            new PixelSize(size, size), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+
+        using var frame = bitmap.Lock();
+        for (var y = 0; y < size; y++)
+            Marshal.Copy(bgra, y * size * 4, frame.Address + y * frame.RowBytes, size * 4);
+
+        return bitmap;
+    }
+
+    // ───────────────────────── Cartões ─────────────────────────
+
+    private static List<ListBoxItem> BuildMonitorItems()
+    {
+        var items = new List<ListBoxItem>();
+        using var monitors = NativeMethods.HostMonitors();
+        foreach (var m in monitors.RootElement.EnumerateArray())
+        {
+            var index = m.GetProperty("index").GetInt32();
+            items.Add(BuildMonitorTile(
+                index,
+                m.GetProperty("name").GetString() ?? $"Monitor {index + 1}",
+                m.GetProperty("width").GetInt32(),
+                m.GetProperty("height").GetInt32(),
+                m.GetProperty("primary").GetBoolean()));
+        }
+        return items;
+    }
+
+    private static List<ListBoxItem> BuildWindowItems()
+    {
+        var items = new List<ListBoxItem>();
+        using var windows = NativeMethods.HostWindows();
+        foreach (var w in windows.RootElement.EnumerateArray())
+        {
+            items.Add(BuildWindowTile(
+                w.GetProperty("id").GetUInt64(),
+                w.GetProperty("title").GetString() ?? "Janela",
+                w.GetProperty("minimized").GetBoolean()));
+        }
+        return items;
+    }
+
+    /// Cartão de monitor: prévia, nome, resolução e o selo "Principal".
     private static ListBoxItem BuildMonitorTile(int index, string name, int width, int height, bool primary)
     {
-        var thumbnail = new Image { Stretch = Stretch.Uniform };
+        var (frame, thumbnail, placeholder, bigIcon) = BuildPreviewFrame("\uE7F4");
 
-        // Ícone de monitor enquanto a prévia não chega
-        var placeholder = new TextBlock
-        {
-            Text = "\uE7F4",
-            FontFamily = IconFont,
-            FontSize = 34,
-            Opacity = 0.35,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
+        var label = TileTitle(name);
+        label.MaxWidth = TileWidth;
 
-        var frame = new Border
-        {
-            Width = 220,
-            Height = 124,
-            CornerRadius = new CornerRadius(6),
-            ClipToBounds = true,
-            Background = new SolidColorBrush(Color.Parse("#0F1216")),
-            Child = new Grid { Children = { thumbnail, placeholder } },
-        };
-
-        var label = new TextBlock
-        {
-            Text = name,
-            FontWeight = FontWeight.SemiBold,
-            TextAlignment = TextAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = 220,
-        };
-        ToolTip.SetTip(label, name);
-
-        var resolution = new TextBlock
-        {
-            Text = width > 0 && height > 0 ? $"{width} × {height}" : "",
-            FontSize = 11,
-            Opacity = 0.7,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
+        var detail = TileDetail(width > 0 && height > 0 ? $"{width} × {height}" : "");
         var details = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Center,
-            Children = { resolution },
+            MinHeight = 16,
+            Children = { detail },
         };
         if (primary)
         {
@@ -268,19 +392,131 @@ public partial class MainWindow
             });
         }
 
+        var tile = new SourceTile
+        {
+            MonitorIndex = index,
+            Thumbnail = thumbnail,
+            Placeholder = placeholder,
+            BigIcon = bigIcon,
+            Detail = detail,
+        };
+        return WrapTile(tile, frame, label, details);
+    }
+
+    /// Cartão de janela: prévia (ou ícone grande, se minimizada), ícone + título.
+    private static ListBoxItem BuildWindowTile(ulong id, string title, bool minimized)
+    {
+        var (frame, thumbnail, placeholder, bigIcon) = BuildPreviewFrame("\uE7C4");
+
+        var smallIcon = new Image
+        {
+            Width = 18,
+            Height = 18,
+            IsVisible = false,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var titleText = TileTitle(title);
+        titleText.MaxWidth = TileWidth - 26;
+
+        var label = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Children = { smallIcon, titleText },
+        };
+
+        var detail = TileDetail(minimized ? "Minimizada" : "");
+        var details = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MinHeight = 16,
+            Children = { detail },
+        };
+
+        var tile = new SourceTile
+        {
+            WindowId = id,
+            Minimized = minimized,
+            Thumbnail = thumbnail,
+            Placeholder = placeholder,
+            BigIcon = bigIcon,
+            Detail = detail,
+            SmallIcon = smallIcon,
+        };
+        return WrapTile(tile, frame, label, details);
+    }
+
+    /// Quadro da prévia: a imagem, o ícone de espera e o ícone grande (janela minimizada).
+    private static (Border Frame, Image Thumbnail, TextBlock Placeholder, Image BigIcon) BuildPreviewFrame(string glyph)
+    {
+        var thumbnail = new Image { Stretch = Stretch.Uniform };
+
+        var placeholder = new TextBlock
+        {
+            Text = glyph,
+            FontFamily = IconFont,
+            FontSize = 30,
+            Opacity = 0.35,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var bigIcon = new Image
+        {
+            Width = 40,
+            Height = 40,
+            IsVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var frame = new Border
+        {
+            Width = TileWidth,
+            Height = TileHeight,
+            CornerRadius = new CornerRadius(6),
+            ClipToBounds = true,
+            Background = new SolidColorBrush(Color.Parse("#0F1216")),
+            Child = new Grid { Children = { thumbnail, placeholder, bigIcon } },
+        };
+
+        return (frame, thumbnail, placeholder, bigIcon);
+    }
+
+    private static TextBlock TileTitle(string text)
+    {
+        var label = new TextBlock
+        {
+            Text = text,
+            FontWeight = FontWeight.SemiBold,
+            TextAlignment = TextAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTip.SetTip(label, text);
+        return label;
+    }
+
+    private static TextBlock TileDetail(string text) => new()
+    {
+        Text = text,
+        FontSize = 11,
+        Opacity = 0.7,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    private static ListBoxItem WrapTile(SourceTile tile, Control frame, Control label, Control details)
+    {
         var content = new StackPanel
         {
             Spacing = 8,
-            Width = 220,
+            Width = TileWidth,
             Children = { frame, label, details },
         };
 
-        var item = new ListBoxItem
-        {
-            Content = content,
-            Tag = new MonitorTile(index, thumbnail, placeholder, resolution),
-        };
-        item.Classes.Add("monitor");
+        var item = new ListBoxItem { Content = content, Tag = tile };
+        item.Classes.Add("source");
         return item;
     }
 }

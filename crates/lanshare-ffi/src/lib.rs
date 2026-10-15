@@ -6,8 +6,8 @@
 
 use lanshare_client::ClientEngine;
 use lanshare_core::settings::{self, Settings};
-use lanshare_host::monitors;
-use lanshare_host::{HostConfig, HostEngine, StreamSettings};
+use lanshare_host::monitors::{self, Thumbnail};
+use lanshare_host::{app_windows, CaptureTarget, HostConfig, HostEngine, StreamSettings};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, MutexGuard};
@@ -168,49 +168,77 @@ pub unsafe extern "C" fn lanshare_host_monitor_thumbnail(
     source_width: *mut u32,
     source_height: *mut u32,
 ) -> i32 {
-    if buffer.is_null()
-        || width.is_null()
-        || height.is_null()
-        || source_width.is_null()
-        || source_height.is_null()
-    {
+    let result = monitors::monitor_thumbnail(index as usize);
+    write_thumbnail(result.ok(), buffer, capacity, width, height, source_width, source_height)
+}
+
+/// Janelas que dá para transmitir, como JSON (a mais recente primeiro):
+/// [{"id":123456,"title":"Documento - Bloco de Notas","minimized":false}].
+#[no_mangle]
+pub extern "C" fn lanshare_host_windows() -> *mut c_char {
+    let list = app_windows::list_windows();
+    to_c(serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
+}
+
+/// Igual a `lanshare_host_monitor_thumbnail`, mas para uma janela (pelo "id" da lista).
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; os outros ponteiros, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_window_thumbnail(
+    id: u64,
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+    source_width: *mut u32,
+    source_height: *mut u32,
+) -> i32 {
+    let result = app_windows::window_thumbnail(id);
+    write_thumbnail(result.ok(), buffer, capacity, width, height, source_width, source_height)
+}
+
+/// Copia o ícone da janela para `buffer`: 32x32 pixels BGRA com alfa pré-multiplicado
+/// (use 32*32*4 bytes). Retorna 1 se a janela tem ícone, 0 se não.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_window_icon(id: u64, buffer: *mut u8, capacity: usize) -> i32 {
+    if buffer.is_null() {
         return 0;
     }
-
-    let Ok(thumb) = monitors::monitor_thumbnail(index as usize) else {
+    let Some(pixels) = app_windows::window_icon(id) else {
         return 0;
     };
-    if thumb.bgra.len() > capacity {
+    if pixels.len() > capacity {
         return 0;
     }
-
-    std::ptr::copy_nonoverlapping(thumb.bgra.as_ptr(), buffer, thumb.bgra.len());
-    *width = thumb.width;
-    *height = thumb.height;
-    *source_width = thumb.source_width;
-    *source_height = thumb.source_height;
+    std::ptr::copy_nonoverlapping(pixels.as_ptr(), buffer, pixels.len());
     1
 }
 
 /// Começa a transmitir o monitor principal. `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream(height: u32, fps: u32) -> *mut c_char {
-    lanshare_host_start_stream_on(height, fps, -1)
+    start_stream(height, fps, CaptureTarget::PrimaryMonitor)
 }
 
 /// Começa a transmitir um monitor. `monitor`: o "index" da lista de monitores
 /// (negativo = principal). `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream_on(height: u32, fps: u32, monitor: i32) -> *mut c_char {
-    let monitor = usize::try_from(monitor).ok();
-    let host = HOST.lock().unwrap();
-    match host.as_ref() {
-        None => reply_err("a sala não está aberta"),
-        Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, monitor) {
-            Ok(()) => reply_ok(),
-            Err(error) => reply_err(&error),
-        },
-    }
+    let target = match usize::try_from(monitor) {
+        Ok(index) => CaptureTarget::Monitor(index),
+        Err(_) => CaptureTarget::PrimaryMonitor,
+    };
+    start_stream(height, fps, target)
+}
+
+/// Começa a transmitir uma janela (o "id" da lista de janelas).
+#[no_mangle]
+pub extern "C" fn lanshare_host_start_stream_window(height: u32, fps: u32, id: u64) -> *mut c_char {
+    start_stream(height, fps, CaptureTarget::Window(id))
 }
 
 /// Para a transmissão. Retorna 1 se havia uma transmissão, 0 se não.
@@ -266,6 +294,50 @@ pub extern "C" fn lanshare_host_stop() {
     if let Some(engine) = engine {
         let _ = engine.stop();
     }
+}
+
+fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
+    let host = HOST.lock().unwrap();
+    match host.as_ref() {
+        None => reply_err("a sala não está aberta"),
+        Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, target) {
+            Ok(()) => reply_ok(),
+            Err(error) => reply_err(&error),
+        },
+    }
+}
+
+/// Copia uma miniatura (de monitor ou janela) para o buffer da interface.
+unsafe fn write_thumbnail(
+    thumb: Option<Thumbnail>,
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+    source_width: *mut u32,
+    source_height: *mut u32,
+) -> i32 {
+    if buffer.is_null()
+        || width.is_null()
+        || height.is_null()
+        || source_width.is_null()
+        || source_height.is_null()
+    {
+        return 0;
+    }
+    let Some(thumb) = thumb else {
+        return 0;
+    };
+    if thumb.bgra.len() > capacity {
+        return 0;
+    }
+
+    std::ptr::copy_nonoverlapping(thumb.bgra.as_ptr(), buffer, thumb.bgra.len());
+    *width = thumb.width;
+    *height = thumb.height;
+    *source_width = thumb.source_width;
+    *source_height = thumb.source_height;
+    1
 }
 
 // ───────────────────────────── Client ─────────────────────────────

@@ -53,10 +53,10 @@
 - [x] Detect multiple monitors
 - [x] Display monitor names and previews
 - [x] Select and stream a specific monitor
-- [ ] Detect available windows
-- [ ] Display window names, application icons and previews
-- [ ] Select and stream a specific window
-- [ ] Follow the shared window when it moves, resizes or changes monitor
+- [x] Detect available windows
+- [x] Display window names, application icons and previews
+- [x] Select and stream a specific window
+- [x] Follow the shared window when it moves, resizes or changes monitor
 - [x] Add screen sharing controls and start/stop buttons
 - [x] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
 - [x] Add fullscreen mode (F11)

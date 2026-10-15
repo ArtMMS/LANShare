@@ -1,7 +1,7 @@
 //! Monitores do Host: lista os monitores e tira uma foto de cada um
 //! (usado no painel de escolha do que transmitir).
 
-use crate::capture::ScreenCapture;
+use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
 use rayon::prelude::*;
 use serde::Serialize;
 use std::error::Error;
@@ -31,11 +31,11 @@ pub struct MonitorInfo {
     pub primary: bool,
 }
 
-/// Foto reduzida de um monitor (pixels BGRA, 4 bytes por pixel).
+/// Foto reduzida de um monitor ou janela (pixels BGRA, 4 bytes por pixel).
 pub struct Thumbnail {
     pub width: u32,
     pub height: u32,
-    /// Tamanho real do monitor.
+    /// Tamanho real do que foi capturado.
     pub source_width: u32,
     pub source_height: u32,
     pub bgra: Vec<u8>,
@@ -92,17 +92,21 @@ fn model_name(monitor: &Monitor) -> String {
 /// Captura uma imagem do monitor e a reduz para a miniatura.
 /// Leva uma fração de segundo; não use na thread da interface.
 pub fn monitor_thumbnail(index: usize) -> Result<Thumbnail, BoxError> {
-    let capture = ScreenCapture::start_quiet(index)?;
+    let capture = ScreenCapture::start_quiet(CaptureTarget::Monitor(index))?;
     let received = capture.frames.recv_timeout(THUMB_TIMEOUT);
     let _ = capture.stop();
     let frame = received.map_err(|_| "o monitor nao entregou nenhuma imagem")?;
+    shrink(&frame)
+}
 
+/// Reduz um frame capturado (RGBA) para a miniatura (BGRA), mantendo a proporção.
+pub(crate) fn shrink(frame: &CapturedFrame) -> Result<Thumbnail, BoxError> {
     let (src_w, src_h) = (frame.width as usize, frame.height as usize);
     if src_w == 0 || src_h == 0 || frame.data.len() < src_w * src_h * 4 {
-        return Err("imagem do monitor invalida".into());
+        return Err("imagem capturada invalida".into());
     }
 
-    // Nunca amplia; mantém a proporção do monitor
+    // Nunca amplia; mantém a proporção original
     let scale = (THUMB_MAX_WIDTH as f64 / src_w as f64)
         .min(THUMB_MAX_HEIGHT as f64 / src_h as f64)
         .min(1.0);
@@ -144,8 +148,8 @@ pub fn monitor_thumbnail(index: usize) -> Result<Thumbnail, BoxError> {
     Ok(Thumbnail {
         width: dst_w as u32,
         height: dst_h as u32,
-        source_width: frame.width as u32,
-        source_height: frame.height as u32,
+        source_width: frame.width,
+        source_height: frame.height,
         bgra,
     })
 }

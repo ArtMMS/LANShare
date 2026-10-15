@@ -45,10 +45,24 @@ internal static class NativeMethods
         out uint width, out uint height, out uint sourceWidth, out uint sourceHeight);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_windows();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_host_window_thumbnail(
+        ulong id, byte[] buffer, UIntPtr capacity,
+        out uint width, out uint height, out uint sourceWidth, out uint sourceHeight);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_host_window_icon(ulong id, byte[] buffer, UIntPtr capacity);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_host_start_stream(uint height, uint fps);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_host_start_stream_on(uint height, uint fps, int monitor);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_start_stream_window(uint height, uint fps, ulong id);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_host_stop_stream();
@@ -171,14 +185,18 @@ internal static class NativeMethods
 
     public static (bool Ok, string? Error) HostKick(ulong id) => ParseReply(lanshare_host_kick(id));
 
-    /// Monitores do computador (principal primeiro): index, name, model, width, height, primary.
-    public static JsonDocument HostMonitors() =>
-        JsonDocument.Parse(TakeString(lanshare_host_monitors()) ?? "[]");
-
-    /// Tamanho máximo da miniatura de monitor (igual ao THUMB_MAX do monitors.rs).
+    /// Tamanho máximo da miniatura de monitor/janela (igual ao THUMB_MAX do monitors.rs).
     public const int ThumbnailMaxWidth = 400;
     public const int ThumbnailMaxHeight = 240;
     public const int ThumbnailBufferSize = ThumbnailMaxWidth * ThumbnailMaxHeight * 4;
+
+    /// Lado do ícone de janela (igual ao ICON_SIZE do app_windows.rs).
+    public const int WindowIconSize = 32;
+    public const int WindowIconBufferSize = WindowIconSize * WindowIconSize * 4;
+
+    /// Monitores do computador (principal primeiro): index, name, model, width, height, primary.
+    public static JsonDocument HostMonitors() =>
+        JsonDocument.Parse(TakeString(lanshare_host_monitors()) ?? "[]");
 
     /// Tira uma foto reduzida do monitor. Demora uma fração de segundo: chame fora da thread da interface.
     public static bool HostMonitorThumbnail(
@@ -194,12 +212,38 @@ internal static class NativeMethods
         return ok;
     }
 
+    /// Janelas que dá para transmitir (a mais recente primeiro): id, title, minimized.
+    public static JsonDocument HostWindows() =>
+        JsonDocument.Parse(TakeString(lanshare_host_windows()) ?? "[]");
+
+    /// Tira uma foto reduzida da janela. Demora uma fração de segundo: chame fora da thread da interface.
+    public static bool HostWindowThumbnail(
+        ulong id, byte[] buffer, out int width, out int height, out int sourceWidth, out int sourceHeight)
+    {
+        var ok = lanshare_host_window_thumbnail(
+            id, buffer, (UIntPtr)buffer.Length,
+            out var w, out var h, out var sw, out var sh) != 0;
+        width = (int)w;
+        height = (int)h;
+        sourceWidth = (int)sw;
+        sourceHeight = (int)sh;
+        return ok;
+    }
+
+    /// Ícone da janela (32x32 BGRA, alfa pré-multiplicado). False se a janela não tem ícone.
+    public static bool HostWindowIcon(ulong id, byte[] buffer) =>
+        lanshare_host_window_icon(id, buffer, (UIntPtr)buffer.Length) != 0;
+
     public static (bool Ok, string? Error) HostStartStream(uint height, uint fps) =>
         ParseReply(lanshare_host_start_stream(height, fps));
 
     /// Transmite um monitor específico (o "index" da lista; negativo = principal).
     public static (bool Ok, string? Error) HostStartStreamOn(uint height, uint fps, int monitor) =>
         ParseReply(lanshare_host_start_stream_on(height, fps, monitor));
+
+    /// Transmite uma janela específica (o "id" da lista de janelas).
+    public static (bool Ok, string? Error) HostStartStreamWindow(uint height, uint fps, ulong id) =>
+        ParseReply(lanshare_host_start_stream_window(height, fps, id));
 
     public static bool HostStopStream() => lanshare_host_stop_stream() != 0;
 

@@ -1,11 +1,12 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
 //! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
 
-use crate::capture::ScreenCapture;
+use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
 use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
 use crate::preview::PreviewSlot;
 use crate::registry::Registry;
+use rayon::prelude::*;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -35,14 +36,13 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
-    /// Começa a capturar, comprimir e enviar um monitor aos Clients
-    /// (índice da lista do Windows; None = principal).
+    /// Começa a capturar, comprimir e enviar um monitor ou uma janela aos Clients.
     pub fn start_on(
         registry: Registry,
         settings: StreamSettings,
         events: EventSender,
         preview: PreviewSlot,
-        monitor: Option<usize>,
+        target: CaptureTarget,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
@@ -55,7 +55,7 @@ impl StreamHandle {
                 registry,
                 thread_stop,
                 settings,
-                monitor,
+                target,
                 &thread_events,
                 &preview,
             );
@@ -98,14 +98,18 @@ fn run(
     registry: Registry,
     stop: Arc<AtomicBool>,
     settings: StreamSettings,
-    monitor: Option<usize>,
+    target: CaptureTarget,
     events: &EventSender,
     preview: &PreviewSlot,
 ) -> Result<(), BoxError> {
     events.debug("run: iniciando a captura");
-    let capture = ScreenCapture::start_on(monitor)?;
+    let capture = ScreenCapture::start_target(target)?;
     events.debug("run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
+
+    // Tamanho fixado no primeiro frame. Se a janela (ou o monitor) mudar de tamanho depois,
+    // a imagem é encaixada nele, para o encoder e os Clients não precisarem mudar.
+    let mut canvas: Option<(u32, u32)> = None;
 
     let started = Instant::now();
     let mut report_start = Instant::now();
@@ -125,7 +129,11 @@ fn run(
             Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                return Err("a captura de tela foi encerrada".into());
+                let reason = match target {
+                    CaptureTarget::Window(_) => "a janela compartilhada foi fechada",
+                    _ => "a captura de tela foi encerrada",
+                };
+                return Err(reason.into());
             }
         };
 
@@ -133,6 +141,15 @@ fn run(
             first_frame_logged = true;
             events.debug("run: primeiro frame recebido da captura");
         }
+
+        let frame = match canvas {
+            None => {
+                canvas = Some((frame.width, frame.height));
+                frame
+            }
+            Some((w, h)) if frame.width == w && frame.height == h => frame,
+            Some((w, h)) => fit_into(&frame, w, h),
+        };
 
         // Preview do Host: no mesmo FPS da transmissão (com folga de 1/4 para o jitter)
         let want_preview =
@@ -173,10 +190,10 @@ fn run(
             events.debug("run: encoder criado");
             let (out_w, out_h) = created.frame_size();
             events.emit(HostEvent::StreamStarted {
-                source_width: frame.width as u32,
-                source_height: frame.height as u32,
-                width: out_w as u32,
-                height: out_h as u32,
+                source_width: frame.width,
+                source_height: frame.height,
+                width: out_w,
+                height: out_h,
                 fps: settings.fps,
             });
             encoder = Some(created);
@@ -235,6 +252,65 @@ fn run(
     drop(encoder);
     events.debug("run: encoder liberado");
     Ok(())
+}
+
+/// Encaixa o frame num quadro de `width` x `height`, mantendo a proporção
+/// (centralizado, com faixas pretas onde sobrar). Usado quando a janela muda de tamanho.
+fn fit_into(frame: &CapturedFrame, width: u32, height: u32) -> CapturedFrame {
+    let (sw, sh) = (frame.width as usize, frame.height as usize);
+    let (cw, ch) = (width as usize, height as usize);
+    let mut data = vec![0u8; cw * ch * 4];
+
+    if sw == 0 || sh == 0 || frame.data.len() < sw * sh * 4 {
+        for px in data.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        return CapturedFrame { width, height, data };
+    }
+
+    let scale = (cw as f64 / sw as f64).min(ch as f64 / sh as f64);
+    let dw = ((sw as f64 * scale).round() as usize).clamp(1, cw);
+    let dh = ((sh as f64 * scale).round() as usize).clamp(1, ch);
+    let (x0, y0) = ((cw - dw) / 2, (ch - dh) / 2);
+    let src = &frame.data;
+
+    data.par_chunks_mut(cw * 4)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for px in row.chunks_exact_mut(4) {
+                px[3] = 255; // fundo preto opaco
+            }
+            if y < y0 || y >= y0 + dh {
+                return;
+            }
+
+            // Cada pixel novo é a média dos pixels originais que ele cobre
+            let dy = y - y0;
+            let sy0 = dy * sh / dh;
+            let sy1 = ((dy + 1) * sh / dh).max(sy0 + 1).min(sh);
+
+            for dx in 0..dw {
+                let sx0 = dx * sw / dw;
+                let sx1 = ((dx + 1) * sw / dw).max(sx0 + 1).min(sw);
+
+                let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+                for sy in sy0..sy1 {
+                    for px in src[(sy * sw + sx0) * 4..(sy * sw + sx1) * 4].chunks_exact(4) {
+                        r += px[0] as u32;
+                        g += px[1] as u32;
+                        b += px[2] as u32;
+                    }
+                }
+
+                let n = ((sy1 - sy0) * (sx1 - sx0)) as u32;
+                let o = (x0 + dx) * 4;
+                row[o] = (r / n) as u8;
+                row[o + 1] = (g / n) as u8;
+                row[o + 2] = (b / n) as u8;
+            }
+        });
+
+    CapturedFrame { width, height, data }
 }
 
 /// Esse pacote H.264 (formato Annex B) é um keyframe?

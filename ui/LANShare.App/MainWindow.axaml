@@ -7,8 +7,37 @@
         MinWidth="720" MinHeight="480">
 
     <Window.Styles>
-        <!-- Cartões de monitor do painel "Escolha o monitor" -->
-        <Style Selector="ListBoxItem.monitor">
+        <!-- Abas do painel de escolha (Monitores inteiros / Janela específica) -->
+        <Style Selector="Button.pickerTab">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="0,12" />
+            <Setter Property="Margin" Value="6,6,6,0" />
+            <Setter Property="CornerRadius" Value="6,6,0,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0,0,0,2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Opacity" Value="0.65" />
+        </Style>
+        <Style Selector="Button.pickerTab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#22272E" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.pickerTab:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A3038" />
+        </Style>
+        <Style Selector="Button.pickerTab.active">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="Background" Value="#262B33" />
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
+        <Style Selector="Button.pickerTab.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2A3038" />
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
+
+        <!-- Cartões de monitor e de janela -->
+        <Style Selector="ListBoxItem.source">
             <Setter Property="Margin" Value="6" />
             <Setter Property="Padding" Value="10" />
             <Setter Property="CornerRadius" Value="8" />
@@ -17,25 +46,25 @@
             <Setter Property="BorderThickness" Value="2" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
-        <Style Selector="ListBoxItem.monitor /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="CornerRadius" Value="8" />
         </Style>
-        <Style Selector="ListBoxItem.monitor:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#2A3038" />
         </Style>
-        <Style Selector="ListBoxItem.monitor:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source:selected /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#24304A" />
             <Setter Property="BorderBrush" Value="#4F7CFF" />
         </Style>
-        <Style Selector="ListBoxItem.monitor:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#2A3854" />
             <Setter Property="BorderBrush" Value="#4F7CFF" />
         </Style>
-        <Style Selector="ListBoxItem.monitor:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source:selected:focus /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#24304A" />
             <Setter Property="BorderBrush" Value="#4F7CFF" />
         </Style>
-        <Style Selector="ListBoxItem.monitor:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Style Selector="ListBoxItem.source:pressed /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#2A3854" />
         </Style>
     </Window.Styles>
@@ -261,39 +290,58 @@
 
         </Grid>
 
-        <!-- Escolha do monitor (por cima de tudo, com o fundo escurecido) -->
+        <!-- Escolha do que transmitir (por cima de tudo, com o fundo escurecido) -->
         <Border x:Name="SourcePicker" Background="#B3000000" IsVisible="False">
             <Border Background="#1B1F24" BorderBrush="#2E343C" BorderThickness="1"
-                    CornerRadius="12" Padding="24" Width="600"
+                    CornerRadius="12" Padding="20" Width="700"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
                     BoxShadow="0 12 40 0 #80000000">
                 <StackPanel Spacing="16">
 
-                    <TextBlock Text="Escolha o monitor" FontSize="22" FontWeight="SemiBold"
-                               HorizontalAlignment="Center" />
-
-                    <!-- Área dos cards (as janelas entram aqui depois, como outra aba) -->
-                    <Border Background="#15191E" BorderBrush="#2E343C" BorderThickness="1" CornerRadius="8">
+                    <Border Background="#15191E" BorderBrush="#2E343C" BorderThickness="1"
+                            CornerRadius="8" ClipToBounds="True">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Spacing="10" Margin="14,12">
-                                <TextBlock Classes="icon" Text="&#xE7F4;" VerticalAlignment="Center" />
-                                <TextBlock Text="Selecionar e transmitir um monitor específico"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
+
+                            <!-- Abas -->
+                            <Grid ColumnDefinitions="*,*">
+                                <Button x:Name="MonitorsTabButton" Grid.Column="0" Classes="pickerTab active">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock Classes="icon" Text="&#xE7F4;" VerticalAlignment="Center" />
+                                        <TextBlock Text="Monitores inteiros" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="WindowsTabButton" Grid.Column="1" Classes="pickerTab">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock Classes="icon" Text="&#xE7C4;" VerticalAlignment="Center" />
+                                        <TextBlock Text="Janela específica" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
                             <Border Height="1" Background="#2E343C" />
 
-                            <TextBlock x:Name="PickerStatus" Opacity="0.7" Margin="14,12"
+                            <TextBlock x:Name="PickerStatus" Opacity="0.7" Margin="14,12,14,0"
                                        TextWrapping="Wrap" IsVisible="False" />
 
-                            <ListBox x:Name="MonitorList" Background="Transparent" Margin="6"
-                                     MaxHeight="360"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                <ListBox.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center" />
-                                    </ItemsPanelTemplate>
-                                </ListBox.ItemsPanel>
-                            </ListBox>
+                            <!-- As duas listas ocupam o mesmo lugar; só a da aba aberta aparece -->
+                            <Grid Height="380">
+                                <ListBox x:Name="MonitorList" Background="Transparent" Margin="6"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                </ListBox>
+                                <ListBox x:Name="WindowList" Background="Transparent" Margin="6"
+                                         IsVisible="False"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                </ListBox>
+                            </Grid>
                         </StackPanel>
                     </Border>
 
