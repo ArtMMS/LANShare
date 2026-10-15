@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -11,67 +12,322 @@ namespace LANShare.App;
 
 public partial class MainWindow : Window
 {
-    private readonly TextBlock _versionText, _placeholderText, _infoText, _statusLabel, _addressLabel;
+    private enum Mode { Home, Host, Client }
+    private enum ClientState { Idle, Connecting, Connected }
+
+    private sealed record RoomEntry(
+        string Name, string Address, int Users, int? MaxUsers, bool HasPassword, bool Compatible);
+
+    // Estrutura geral
+    private readonly Grid _mainLayout;
+    private readonly DockPanel _homePanel, _hostPanel, _clientPanel;
+    private readonly TextBlock _versionText, _placeholderText, _infoText;
+    private readonly Image _previewImage;
+
+    // Tela de nome
+    private readonly Border _nameScreen;
+    private readonly TextBlock _nameTitle, _nameSubtitle, _nameError;
+    private readonly TextBox _nameInput;
+    private readonly Button _nameConfirmButton, _nameCancelButton;
+
+    // Início
+    private readonly TextBlock _homeNameText;
+    private readonly Button _changeNameButton, _createRoomButton, _joinRoomButton;
+
+    // Host
+    private readonly TextBlock _statusLabel, _addressLabel;
     private readonly TextBox _roomNameBox, _passwordBox;
-    private readonly Button _roomButton, _startStreamButton, _stopStreamButton;
+    private readonly Button _roomButton, _startStreamButton, _stopStreamButton, _hostBackButton;
     private readonly ComboBox _resolutionBox, _fpsBox;
     private readonly StackPanel _usersPanel;
-    private readonly Image _previewImage;
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
 
-    // Buffer reaproveitado para receber a miniatura do Rust
+    // Client
+    private readonly TextBlock _clientStatusLabel, _roomsStatusText, _passwordHint, _clientUsersHeader;
+    private readonly TextBox _clientNameBox, _clientAddressBox, _clientPasswordBox;
+    private readonly Button _refreshRoomsButton, _passwordConfirmButton, _clientConnectButton, _clientBackButton;
+    private readonly ListBox _roomsList;
+    private readonly StackPanel _passwordPanel, _clientUsersPanel;
+
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly DispatcherTimer _scanTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+
+    // Buffer reaproveitado para receber a imagem do Rust (preview do Host ou tela do Client)
     private readonly byte[] _previewBuffer = new byte[NativeMethods.PreviewBufferSize];
     private WriteableBitmap? _previewBitmap;
 
+    private Mode _mode = Mode.Home;
+    private bool _coreOk;
+    private string? _username;
+    private bool _editingName;
+
+    // Host
     private bool _roomOpen;
     private bool _streaming;
-    private bool _coreOk;
+
+    // Client
+    private bool _clientActive;
+    private ClientState _clientState = ClientState.Idle;
+    private readonly Dictionary<ulong, string> _clientUsers = new();
+    private ulong _myId;
+    private string? _roomsSignature;
+    private int _roomCount;
+    private string? _kickedReason;
+    private int _pingMs = -1;
+    private double _videoFps, _videoMbps;
+    private string? _videoSize;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        _versionText = this.FindControl<TextBlock>("VersionText")!;
-        _placeholderText = this.FindControl<TextBlock>("PlaceholderText")!;
-        _infoText = this.FindControl<TextBlock>("InfoText")!;
-        _statusLabel = this.FindControl<TextBlock>("StatusLabel")!;
-        _addressLabel = this.FindControl<TextBlock>("AddressLabel")!;
-        _roomNameBox = this.FindControl<TextBox>("RoomNameBox")!;
-        _passwordBox = this.FindControl<TextBox>("PasswordBox")!;
-        _roomButton = this.FindControl<Button>("RoomButton")!;
-        _startStreamButton = this.FindControl<Button>("StartStreamButton")!;
-        _stopStreamButton = this.FindControl<Button>("StopStreamButton")!;
-        _resolutionBox = this.FindControl<ComboBox>("ResolutionBox")!;
-        _fpsBox = this.FindControl<ComboBox>("FpsBox")!;
-        _usersPanel = this.FindControl<StackPanel>("UsersPanel")!;
-        _previewImage = this.FindControl<Image>("PreviewImage")!;
+        _mainLayout = Find<Grid>("MainLayout");
+        _homePanel = Find<DockPanel>("HomePanel");
+        _hostPanel = Find<DockPanel>("HostPanel");
+        _clientPanel = Find<DockPanel>("ClientPanel");
+        _versionText = Find<TextBlock>("VersionText");
+        _placeholderText = Find<TextBlock>("PlaceholderText");
+        _infoText = Find<TextBlock>("InfoText");
+        _previewImage = Find<Image>("PreviewImage");
 
+        _nameScreen = Find<Border>("NameScreen");
+        _nameTitle = Find<TextBlock>("NameTitle");
+        _nameSubtitle = Find<TextBlock>("NameSubtitle");
+        _nameError = Find<TextBlock>("NameError");
+        _nameInput = Find<TextBox>("NameInput");
+        _nameConfirmButton = Find<Button>("NameConfirmButton");
+        _nameCancelButton = Find<Button>("NameCancelButton");
+
+        _homeNameText = Find<TextBlock>("HomeNameText");
+        _changeNameButton = Find<Button>("ChangeNameButton");
+        _createRoomButton = Find<Button>("CreateRoomButton");
+        _joinRoomButton = Find<Button>("JoinRoomButton");
+
+        _statusLabel = Find<TextBlock>("StatusLabel");
+        _addressLabel = Find<TextBlock>("AddressLabel");
+        _roomNameBox = Find<TextBox>("RoomNameBox");
+        _passwordBox = Find<TextBox>("PasswordBox");
+        _roomButton = Find<Button>("RoomButton");
+        _startStreamButton = Find<Button>("StartStreamButton");
+        _stopStreamButton = Find<Button>("StopStreamButton");
+        _hostBackButton = Find<Button>("HostBackButton");
+        _resolutionBox = Find<ComboBox>("ResolutionBox");
+        _fpsBox = Find<ComboBox>("FpsBox");
+        _usersPanel = Find<StackPanel>("UsersPanel");
+
+        _clientStatusLabel = Find<TextBlock>("ClientStatusLabel");
+        _roomsStatusText = Find<TextBlock>("RoomsStatusText");
+        _passwordHint = Find<TextBlock>("PasswordHint");
+        _clientUsersHeader = Find<TextBlock>("ClientUsersHeader");
+        _clientNameBox = Find<TextBox>("ClientNameBox");
+        _clientAddressBox = Find<TextBox>("ClientAddressBox");
+        _clientPasswordBox = Find<TextBox>("ClientPasswordBox");
+        _refreshRoomsButton = Find<Button>("RefreshRoomsButton");
+        _passwordConfirmButton = Find<Button>("PasswordConfirmButton");
+        _clientConnectButton = Find<Button>("ClientConnectButton");
+        _clientBackButton = Find<Button>("ClientBackButton");
+        _roomsList = Find<ListBox>("RoomsList");
+        _passwordPanel = Find<StackPanel>("PasswordPanel");
+        _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
+
+        // Tela de nome
+        _nameConfirmButton.Click += (_, _) => ConfirmName();
+        _nameCancelButton.Click += (_, _) => CloseNameScreen();
+        _nameInput.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            ConfirmName();
+            e.Handled = true;
+        };
+
+        // Início
+        _changeNameButton.Click += (_, _) => OpenNameScreen(first: false);
+        _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
+        _joinRoomButton.Click += (_, _) => EnterClientMode();
+
+        // Host
         _roomButton.Click += (_, _) => ToggleRoom();
         _startStreamButton.Click += (_, _) => StartStream();
         _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
-        _timer.Tick += (_, _) => OnTick();
+        _hostBackButton.Click += (_, _) => HostBack();
 
-        ShowCoreStatus();
-        Closing += (_, _) => { if (_coreOk) NativeMethods.HostStop(); };
+        // Client
+        _refreshRoomsButton.Click += (_, _) => ScanRooms();
+        _roomsList.DoubleTapped += (_, _) => ConnectToSelectedRoom();
+        _clientConnectButton.Click += (_, _) => OnClientConnectClick();
+        _passwordConfirmButton.Click += (_, _) => SubmitPassword();
+        _clientBackButton.Click += (_, _) => LeaveClientMode();
+        _clientPasswordBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            SubmitPassword();
+            e.Handled = true;
+        };
+        _clientAddressBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            OnClientConnectClick();
+            e.Handled = true;
+        };
+
+        _timer.Tick += (_, _) => OnTick();
+        _scanTimer.Tick += (_, _) =>
+        {
+            if (_clientActive && _clientState == ClientState.Idle) ScanRooms();
+        };
+
+        var savedName = ShowCoreStatus();
+        if (_coreOk)
+        {
+            ShowMode(Mode.Home);
+            if (string.IsNullOrWhiteSpace(savedName))
+            {
+                OpenNameScreen(first: true);
+            }
+            else
+            {
+                ApplyUsername(savedName);
+            }
+        }
+
+        Opened += (_, _) =>
+        {
+            if (_nameScreen.IsVisible) _nameInput.Focus();
+        };
+        Closing += (_, _) =>
+        {
+            if (!_coreOk) return;
+            NativeMethods.HostStop();
+            NativeMethods.ClientStop();
+        };
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
-    /// Confere se a ponte C# ↔ Rust funciona.
-    private void ShowCoreStatus()
+    private T Find<T>(string name) where T : Control => this.FindControl<T>(name)!;
+
+    /// Confere se a ponte C# ↔ Rust funciona. Devolve o nome salvo (null na primeira abertura).
+    private string? ShowCoreStatus()
     {
         try
         {
             _versionText.Text = $"Motor Rust v{NativeMethods.GetVersion()}";
-            _placeholderText.Text = "Abra a sala para começar.";
+            var saved = NativeMethods.GetUsername();
             _coreOk = true;
+            return saved;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
             _versionText.Text = "Motor Rust indisponível";
             _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
-            _roomButton.IsEnabled = false;
+            _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _changeNameButton.IsEnabled = false;
+            return null;
         }
+    }
+
+    // ───────────────────────── Nome de usuário ─────────────────────────
+
+    private void OpenNameScreen(bool first)
+    {
+        _editingName = !first;
+        _nameTitle.Text = first ? "Seja bem-vindo ao LANShare" : "Alterar nome de usuário";
+        _nameSubtitle.Text = first ? "Para começar, insira seu nome de usuário" : "Digite o novo nome";
+        _nameInput.Text = first ? "" : _username;
+        _nameCancelButton.IsEnabled = !first;
+        SetNameError(null);
+
+        _nameScreen.IsVisible = true;
+        _mainLayout.IsEnabled = false;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _nameInput.Focus();
+            _nameInput.SelectAll();
+        });
+    }
+
+    private void CloseNameScreen()
+    {
+        _nameScreen.IsVisible = false;
+        _mainLayout.IsEnabled = true;
+    }
+
+    private void ConfirmName()
+    {
+        var (ok, name, error) = NativeMethods.SetUsername(_nameInput.Text);
+        if (!ok)
+        {
+            SetNameError(error ?? "Nome inválido.");
+            return;
+        }
+
+        ApplyUsername(name!);
+        CloseNameScreen();
+    }
+
+    private void SetNameError(string? message)
+    {
+        _nameError.Text = message ?? "";
+        _nameError.IsVisible = !string.IsNullOrEmpty(message);
+    }
+
+    private void ApplyUsername(string name)
+    {
+        _username = name;
+        _homeNameText.Text = name;
+        _clientNameBox.Text = name;
+    }
+
+    // ───────────────────────── Modos (Início / Host / Client) ─────────────────────────
+
+    private void ShowMode(Mode mode)
+    {
+        _mode = mode;
+        _homePanel.IsVisible = mode == Mode.Home;
+        _hostPanel.IsVisible = mode == Mode.Host;
+        _clientPanel.IsVisible = mode == Mode.Client;
+
+        HidePreview(mode switch
+        {
+            Mode.Host => "Abra a sala para começar.",
+            Mode.Client => "Escolha uma sala para entrar.",
+            _ => "Escolha uma opção ao lado para começar.",
+        });
+        _infoText.Text = "";
+    }
+
+    private void StopTimerIfIdle()
+    {
+        if (!_roomOpen && !_clientActive) _timer.Stop();
+    }
+
+    /// A cada ~16 ms (60x por segundo): lê os eventos do Rust e atualiza a imagem.
+    private void OnTick()
+    {
+        try
+        {
+            if (_roomOpen)
+            {
+                PollHostEvents();
+                if (_streaming) UpdatePreview();
+            }
+
+            if (_clientActive)
+            {
+                PollClientEvents();
+                if (_clientState == ClientState.Connected) UpdateClientFrame();
+            }
+        }
+        catch (Exception ex)
+        {
+            _infoText.Text = "Erro: " + ex.Message;
+        }
+    }
+
+    // ───────────────────────── Host ─────────────────────────
+
+    private void HostBack()
+    {
+        if (_roomOpen) ToggleRoom(); // fecha a sala
+        ShowMode(Mode.Home);
     }
 
     private void ToggleRoom()
@@ -79,9 +335,9 @@ public partial class MainWindow : Window
         if (_roomOpen)
         {
             NativeMethods.HostStop();
-            _timer.Stop();
             _roomOpen = false;
             _streaming = false;
+            StopTimerIfIdle();
             _usersPanel.Children.Clear();
             _addressLabel.Text = "";
             _infoText.Text = "";
@@ -118,21 +374,7 @@ public partial class MainWindow : Window
         UpdateUi();
     }
 
-    /// A cada ~16 ms (60x por segundo): lê os eventos do Rust e atualiza o preview.
-    private void OnTick()
-    {
-        try
-        {
-            PollEvents();
-            if (_roomOpen && _streaming) UpdatePreview();
-        }
-        catch (Exception ex)
-        {
-            _infoText.Text = "Erro: " + ex.Message;
-        }
-    }
-
-    private void PollEvents()
+    private void PollHostEvents()
     {
         var changedUsers = false;
         while (NativeMethods.HostPollEvent() is { } doc)
@@ -180,34 +422,7 @@ public partial class MainWindow : Window
     private void UpdatePreview()
     {
         if (!NativeMethods.HostPreview(_previewBuffer, out var width, out var height)) return;
-
-        if (_previewBitmap is null || _previewBitmap.PixelSize.Width != width || _previewBitmap.PixelSize.Height != height)
-        {
-            _previewBitmap = new WriteableBitmap(
-                new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
-            _previewImage.Source = _previewBitmap;
-        }
-
-        using (var frame = _previewBitmap.Lock())
-        {
-            // Copia linha por linha: o bitmap pode ter bytes extras no fim de cada linha
-            for (var y = 0; y < height; y++)
-                Marshal.Copy(_previewBuffer, y * width * 4, frame.Address + y * frame.RowBytes, width * 4);
-        }
-
-        // Força o redesenho com o conteúdo novo
-        _previewImage.InvalidateVisual();
-        _previewImage.IsVisible = true;
-        _placeholderText.IsVisible = false;
-    }
-
-    private void HidePreview(string message)
-    {
-        _previewImage.IsVisible = false;
-        _previewImage.Source = null;
-        _previewBitmap = null;
-        _placeholderText.Text = message;
-        _placeholderText.IsVisible = true;
+        PaintFrame(width, height);
     }
 
     private void RefreshUsers()
@@ -236,5 +451,409 @@ public partial class MainWindow : Window
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
         _startStreamButton.IsEnabled = _roomOpen && !_streaming;
         _stopStreamButton.IsEnabled = _roomOpen && _streaming;
+        _hostBackButton.Content = _roomOpen ? "Fechar sala e voltar" : "Voltar ao início";
+    }
+
+    // ───────────────────────── Client ─────────────────────────
+
+    private void EnterClientMode()
+    {
+        var (ok, error) = NativeMethods.ClientStart();
+        if (!ok)
+        {
+            HidePreview(error ?? "Erro ao iniciar o modo cliente.");
+            return;
+        }
+
+        _clientActive = true;
+        ResetClientSession();
+        _roomsList.ItemsSource = null;
+        _roomsSignature = null;
+        _roomCount = 0;
+        _clientAddressBox.Text = "";
+
+        ShowMode(Mode.Client);
+        UpdateClientUi();
+
+        _timer.Start();
+        _scanTimer.Start();
+        ScanRooms();
+    }
+
+    private void LeaveClientMode()
+    {
+        NativeMethods.ClientStop(); // desconecta (manda o Bye) e encerra o motor
+        _clientActive = false;
+        _scanTimer.Stop();
+        ResetClientSession();
+        _roomsList.ItemsSource = null;
+        _roomsSignature = null;
+        _roomCount = 0;
+        _roomsStatusText.Text = "";
+        _roomsStatusText.IsVisible = false;
+        StopTimerIfIdle();
+        ShowMode(Mode.Home);
+    }
+
+    private void ResetClientSession()
+    {
+        _clientState = ClientState.Idle;
+        _clientUsers.Clear();
+        _clientUsersPanel.Children.Clear();
+        _passwordPanel.IsVisible = false;
+        _clientPasswordBox.Text = "";
+        _kickedReason = null;
+        _pingMs = -1;
+        _videoFps = _videoMbps = 0;
+        _videoSize = null;
+    }
+
+    private void ScanRooms()
+    {
+        if (!_clientActive) return;
+        if (_roomCount == 0) SetRoomsStatus("Procurando salas...");
+        NativeMethods.ClientScan(); // se já estiver procurando, o Rust ignora
+    }
+
+    private void SetRoomsStatus(string message)
+    {
+        _roomsStatusText.Text = message;
+        _roomsStatusText.IsVisible = !string.IsNullOrEmpty(message);
+    }
+
+    private void OnClientConnectClick()
+    {
+        // Conectando ou conectado: o botão cancela / desconecta
+        if (_clientState != ClientState.Idle)
+        {
+            NativeMethods.ClientDisconnect();
+            return;
+        }
+
+        var typed = _clientAddressBox.Text?.Trim();
+        if (!string.IsNullOrEmpty(typed))
+        {
+            StartConnection(typed);
+            return;
+        }
+
+        if (_roomsList.SelectedItem is ListBoxItem { Tag: RoomEntry room })
+        {
+            ConnectToRoom(room);
+            return;
+        }
+
+        _infoText.Text = "Selecione uma sala na lista ou digite um IP.";
+    }
+
+    private void ConnectToSelectedRoom()
+    {
+        if (_clientState != ClientState.Idle) return;
+        if (_roomsList.SelectedItem is ListBoxItem { Tag: RoomEntry room }) ConnectToRoom(room);
+    }
+
+    private void ConnectToRoom(RoomEntry room)
+    {
+        if (!room.Compatible)
+        {
+            _infoText.Text = "Esta sala usa uma versão incompatível do LANShare.";
+            return;
+        }
+        StartConnection(room.Address);
+    }
+
+    private void StartConnection(string address)
+    {
+        // Se o nome foi editado aqui, salva antes (o motor lê o nome do settings.json ao conectar)
+        var typedName = _clientNameBox.Text?.Trim();
+        if (!string.Equals(typedName, _username, StringComparison.Ordinal))
+        {
+            var (nameOk, name, nameError) = NativeMethods.SetUsername(typedName);
+            if (!nameOk)
+            {
+                _infoText.Text = nameError ?? "Nome inválido.";
+                return;
+            }
+            ApplyUsername(name!);
+        }
+
+        _kickedReason = null;
+        var (ok, error) = NativeMethods.ClientConnect(address);
+        if (!ok)
+        {
+            _infoText.Text = error ?? "Erro ao conectar.";
+            return;
+        }
+
+        _clientState = ClientState.Connecting;
+        _infoText.Text = "";
+        UpdateClientUi();
+    }
+
+    private void SubmitPassword()
+    {
+        var password = _clientPasswordBox.Text ?? "";
+        if (password.Length == 0) return;
+
+        var (ok, error) = NativeMethods.ClientSubmitPassword(password);
+        if (!ok)
+        {
+            _infoText.Text = error ?? "Erro ao enviar a senha.";
+            return;
+        }
+
+        _clientPasswordBox.Text = "";
+        _passwordPanel.IsVisible = false;
+    }
+
+    private void PollClientEvents()
+    {
+        while (NativeMethods.ClientPollEvent() is { } doc)
+        {
+            using (doc)
+            {
+                var e = doc.RootElement;
+                switch (e.GetProperty("type").GetString())
+                {
+                    case "rooms":
+                        ApplyRooms(e.GetProperty("rooms"));
+                        break;
+
+                    case "scan_failed":
+                        SetRoomsStatus(e.GetProperty("error").GetString() ?? "Erro ao procurar salas.");
+                        break;
+
+                    case "connecting":
+                        _infoText.Text = $"Conectando a {e.GetProperty("address").GetString()}...";
+                        break;
+
+                    case "password_required":
+                        _passwordHint.Text = e.GetProperty("retry").GetBoolean()
+                            ? "Senha incorreta. Tente novamente."
+                            : "Esta sala tem senha.";
+                        _clientPasswordBox.Text = "";
+                        _passwordPanel.IsVisible = true;
+                        _clientPasswordBox.Focus();
+                        break;
+
+                    case "connected":
+                        _clientState = ClientState.Connected;
+                        _myId = e.GetProperty("client_id").GetUInt64();
+                        _clientUsers.Clear();
+                        foreach (var u in e.GetProperty("users").EnumerateArray())
+                            _clientUsers[u.GetProperty("id").GetUInt64()] = u.GetProperty("name").GetString() ?? "?";
+                        _pingMs = -1;
+                        _videoFps = _videoMbps = 0;
+                        _videoSize = null;
+                        _passwordPanel.IsVisible = false;
+                        HidePreview("Conectado. Aguardando a transmissão do Host.");
+                        RefreshClientUsers();
+                        UpdateClientUi();
+                        RefreshClientInfo();
+                        break;
+
+                    case "user_joined":
+                        _clientUsers[e.GetProperty("id").GetUInt64()] = e.GetProperty("name").GetString() ?? "?";
+                        RefreshClientUsers();
+                        break;
+
+                    case "user_left":
+                    case "user_kicked":
+                        _clientUsers.Remove(e.GetProperty("id").GetUInt64());
+                        RefreshClientUsers();
+                        break;
+
+                    case "kicked":
+                        _kickedReason = e.GetProperty("reason").GetString() ?? "Você foi removido pelo Host.";
+                        _infoText.Text = _kickedReason;
+                        break;
+
+                    case "ping":
+                        _pingMs = (int)e.GetProperty("rtt_ms").GetUInt64();
+                        RefreshClientInfo();
+                        break;
+
+                    case "video_started":
+                        _videoSize = $"{e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()}";
+                        RefreshClientInfo();
+                        break;
+
+                    case "video_stats":
+                        _videoFps = e.GetProperty("fps").GetDouble();
+                        _videoMbps = e.GetProperty("mbps").GetDouble();
+                        RefreshClientInfo();
+                        break;
+
+                    case "video_error":
+                        _infoText.Text = e.GetProperty("error").GetString() ?? "Erro no vídeo.";
+                        break;
+
+                    case "rejected":
+                        EndClientSession("Entrada recusada: " + e.GetProperty("reason").GetString());
+                        break;
+
+                    case "connect_failed":
+                        EndClientSession(e.GetProperty("error").GetString() ?? "Não foi possível conectar.");
+                        break;
+
+                    case "disconnected":
+                        var local = e.TryGetProperty("local", out var l) && l.ValueKind == JsonValueKind.True;
+                        var message = _kickedReason
+                            ?? (local ? "" : "Desconectado: " + e.GetProperty("reason").GetString());
+                        EndClientSession(message);
+                        break;
+                }
+            }
+        }
+    }
+
+    /// Volta o Client para "desconectado" (a lista de salas continua na tela).
+    private void EndClientSession(string message)
+    {
+        ResetClientSession();
+        HidePreview("Escolha uma sala para entrar.");
+        _infoText.Text = message;
+        UpdateClientUi();
+        ScanRooms();
+    }
+
+    private void ApplyRooms(JsonElement rooms)
+    {
+        var entries = new List<RoomEntry>();
+        foreach (var r in rooms.EnumerateArray())
+        {
+            entries.Add(new RoomEntry(
+                r.GetProperty("name").GetString() ?? "Sala",
+                r.GetProperty("address").GetString() ?? "",
+                r.GetProperty("users").GetInt32(),
+                r.TryGetProperty("max_users", out var max) && max.ValueKind == JsonValueKind.Number
+                    ? max.GetInt32()
+                    : (int?)null,
+                r.GetProperty("has_password").GetBoolean(),
+                r.GetProperty("compatible").GetBoolean()));
+        }
+
+        _roomCount = entries.Count;
+        SetRoomsStatus(entries.Count == 0 ? "Nenhuma sala encontrada na rede." : "");
+
+        // Só refaz a lista se algo mudou (para não perder a seleção a cada busca)
+        var signature = string.Join("|", entries.Select(x =>
+            $"{x.Name};{x.Address};{x.Users};{x.MaxUsers};{x.HasPassword};{x.Compatible}"));
+        if (signature == _roomsSignature) return;
+        _roomsSignature = signature;
+
+        var selected = (_roomsList.SelectedItem as ListBoxItem)?.Tag as RoomEntry;
+        var items = entries.Select(BuildRoomItem).ToList();
+        _roomsList.ItemsSource = items;
+        if (selected is not null)
+            _roomsList.SelectedItem = items.FirstOrDefault(i => (i.Tag as RoomEntry)?.Address == selected.Address);
+    }
+
+    private static ListBoxItem BuildRoomItem(RoomEntry room)
+    {
+        var people = room.MaxUsers is { } max ? $"{room.Users}/{max}" : room.Users.ToString();
+        var details = $"{room.Address} · {people} na sala";
+        if (room.HasPassword) details += " · com senha";
+        if (!room.Compatible) details += " · versão incompatível";
+
+        var panel = new StackPanel { Spacing = 2 };
+        panel.Children.Add(new TextBlock
+        {
+            Text = room.Name,
+            FontWeight = Avalonia.Media.FontWeight.SemiBold,
+            TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = details,
+            FontSize = 11,
+            Opacity = 0.7,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        });
+        return new ListBoxItem { Content = panel, Tag = room };
+    }
+
+    private void RefreshClientUsers()
+    {
+        _clientUsersPanel.Children.Clear();
+        foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
+        {
+            _clientUsersPanel.Children.Add(new TextBlock { Text = id == _myId ? $"{name} (você)" : name });
+        }
+    }
+
+    /// Linha de informações embaixo do vídeo: ping, resolução, FPS e Mbps.
+    private void RefreshClientInfo()
+    {
+        if (_clientState != ClientState.Connected || _kickedReason is not null) return;
+
+        var parts = new List<string> { "Conectado" };
+        if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
+        if (_videoSize is not null) parts.Add($"{_videoSize} @ {_videoFps:F0} FPS, {_videoMbps:F1} Mbps");
+        _infoText.Text = string.Join(" — ", parts);
+    }
+
+    private void UpdateClientFrame()
+    {
+        if (!NativeMethods.ClientFrame(_previewBuffer, out var width, out var height)) return;
+        PaintFrame(width, height);
+    }
+
+    private void UpdateClientUi()
+    {
+        var idle = _clientState == ClientState.Idle;
+        _clientNameBox.IsEnabled = _clientAddressBox.IsEnabled = idle;
+        _roomsList.IsEnabled = _refreshRoomsButton.IsEnabled = idle;
+
+        _clientConnectButton.Content = _clientState switch
+        {
+            ClientState.Idle => "Conectar",
+            ClientState.Connecting => "Cancelar",
+            _ => "Desconectar",
+        };
+        _clientStatusLabel.Text = _clientState switch
+        {
+            ClientState.Idle => "Desconectado",
+            ClientState.Connecting => "Conectando...",
+            _ => "Conectado",
+        };
+
+        var connected = _clientState == ClientState.Connected;
+        _clientUsersHeader.IsVisible = _clientUsersPanel.IsVisible = connected;
+        _clientBackButton.Content = idle ? "Voltar ao início" : "Sair da sala e voltar";
+    }
+
+    // ───────────────────────── Imagem (Host e Client) ─────────────────────────
+
+    /// Desenha na área do vídeo a imagem BGRA que está em _previewBuffer.
+    private void PaintFrame(int width, int height)
+    {
+        if (_previewBitmap is null || _previewBitmap.PixelSize.Width != width || _previewBitmap.PixelSize.Height != height)
+        {
+            _previewBitmap = new WriteableBitmap(
+                new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+            _previewImage.Source = _previewBitmap;
+        }
+
+        using (var frame = _previewBitmap.Lock())
+        {
+            // Copia linha por linha: o bitmap pode ter bytes extras no fim de cada linha
+            for (var y = 0; y < height; y++)
+                Marshal.Copy(_previewBuffer, y * width * 4, frame.Address + y * frame.RowBytes, width * 4);
+        }
+
+        // Força o redesenho com o conteúdo novo
+        _previewImage.InvalidateVisual();
+        _previewImage.IsVisible = true;
+        _placeholderText.IsVisible = false;
+    }
+
+    private void HidePreview(string message)
+    {
+        _previewImage.IsVisible = false;
+        _previewImage.Source = null;
+        _previewBitmap = null;
+        _placeholderText.Text = message;
+        _placeholderText.IsVisible = true;
     }
 }

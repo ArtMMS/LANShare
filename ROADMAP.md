@@ -41,14 +41,14 @@
 # V0.4 — Graphical User Interface & Screen Selection
 
 - [x] Create a single `.exe`
-- [ ] Create Host and Client GUIs
+- [x] Create Host and Client GUIs
 - [x] Display application version
 - [x] Display connection status
 - [x] Display connected users
 - [x] Broadcast preview for the host
-- [ ] Ask for a user name on first launch and save it
+- [x] Ask for a user name on first launch and save it
 - [ ] Add a room list with name, IP, resolution/FPS and number of users
-- [ ] Ask for the password when joining a protected room
+- [x] Ask for the password when joining a protected room
 - [x] Add Host options: kick clients and set a password
 - [x] Add a screen sharing button
 - [ ] Detect multiple monitors
@@ -60,9 +60,6 @@
 - [ ] Follow the shared window when it moves, resizes or changes monitor
 - [x] Add screen sharing controls and start/stop buttons
 - [x] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
-- [ ] Display stream resolution and FPS in the room information
-- [ ] Add a Host performance monitor (FPS, bitrate and ping)
-- [ ] Display ping on the Client
 - [ ] Add fullscreen mode (F11)
 
 ---

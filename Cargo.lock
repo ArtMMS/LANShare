@@ -301,6 +301,7 @@ dependencies = [
  "minifb",
  "rayon",
  "rpassword",
+ "serde_json",
  "tokio",
  "windows",
 ]
@@ -318,6 +319,8 @@ dependencies = [
 name = "lanshare-ffi"
 version = "0.1.0"
 dependencies = [
+ "lanshare-client",
+ "lanshare-core",
  "lanshare-host",
  "serde_json",
 ]

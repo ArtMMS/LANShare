@@ -6,72 +6,172 @@
         Width="1000" Height="640"
         MinWidth="720" MinHeight="480">
 
-    <Grid ColumnDefinitions="300,*">
+    <Grid>
 
-        <!-- Painel lateral -->
-        <Border Grid.Column="0" Background="#1B1F24" Padding="20">
-            <DockPanel LastChildFill="True">
+        <!-- Layout principal: lateral + área do vídeo -->
+        <Grid x:Name="MainLayout" ColumnDefinitions="300,*">
 
-                <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,16">
-                    <TextBlock Text="LANShare" FontSize="24" FontWeight="SemiBold" />
-                    <TextBlock x:Name="VersionText" Opacity="0.7" Text="..." />
-                </StackPanel>
+            <!-- Painel lateral -->
+            <Border Grid.Column="0" Background="#1B1F24" Padding="20">
+                <DockPanel LastChildFill="True">
 
-                <!-- Botões de transmissão -->
-                <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="130">
-                            <ComboBoxItem>720p</ComboBoxItem>
-                            <ComboBoxItem>1080p</ComboBoxItem>
-                        </ComboBox>
-                        <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="130">
-                            <ComboBoxItem>15 FPS</ComboBoxItem>
-                            <ComboBoxItem>30 FPS</ComboBoxItem>
-                        </ComboBox>
+                    <StackPanel DockPanel.Dock="Top" Spacing="2" Margin="0,0,0,16">
+                        <TextBlock Text="LANShare" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock x:Name="VersionText" Opacity="0.7" Text="..." />
                     </StackPanel>
-                    <Button x:Name="StartStreamButton" Content="Iniciar transmissão"
-                            HorizontalAlignment="Stretch" IsEnabled="False" />
-                    <Button x:Name="StopStreamButton" Content="Parar transmissão"
-                            HorizontalAlignment="Stretch" IsEnabled="False" />
-                </StackPanel>
 
-                <StackPanel Spacing="6">
-                    <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
-                    <TextBlock x:Name="StatusLabel" Text="Sala fechada" />
+                    <!-- Os três painéis ocupam o mesmo espaço; só um aparece por vez -->
+                    <Grid>
 
-                    <TextBlock Text="CONEXÃO" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                    <TextBox x:Name="RoomNameBox" PlaceholderText="Nome da sala (opcional)" />
-                    <TextBox x:Name="PasswordBox" PlaceholderText="Senha (opcional)" PasswordChar="●" />
-                    <Button x:Name="RoomButton" Content="Abrir sala" HorizontalAlignment="Stretch" />
-                    <TextBlock x:Name="AddressLabel" Opacity="0.7" TextWrapping="Wrap" />
+                        <!-- ── Início ── -->
+                        <DockPanel x:Name="HomePanel" LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Bottom" Spacing="6">
+                                <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" />
+                                <TextBlock x:Name="HomeNameText" TextTrimming="CharacterEllipsis" />
+                                <Button x:Name="ChangeNameButton" Content="Alterar nome"
+                                        HorizontalAlignment="Stretch" />
+                            </StackPanel>
 
-                    <TextBlock Text="USUÁRIOS" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                    <ScrollViewer MaxHeight="180">
-                        <StackPanel x:Name="UsersPanel" Spacing="4" />
-                    </ScrollViewer>
-                </StackPanel>
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="COMEÇAR" FontSize="11" Opacity="0.5" />
+                                <Button x:Name="CreateRoomButton" Content="Criar sala"
+                                        HorizontalAlignment="Stretch" />
+                                <Button x:Name="JoinRoomButton" Content="Entrar em sala"
+                                        HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                        </DockPanel>
 
-            </DockPanel>
-        </Border>
+                        <!-- ── Criar sala (Host) ── -->
+                        <DockPanel x:Name="HostPanel" LastChildFill="True" IsVisible="False">
 
-        <!-- Área do vídeo: preview da transmissão + barra de informações -->
-        <Border Grid.Column="1" Background="#111418">
-            <Grid RowDefinitions="*,Auto">
-                <Image x:Name="PreviewImage" Grid.Row="0" Stretch="Uniform"
-                       Margin="16" IsVisible="False" />
-                <TextBlock x:Name="PlaceholderText" Grid.Row="0"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           TextAlignment="Center"
-                           TextWrapping="Wrap"
-                           Margin="32"
-                           Opacity="0.7"
-                           Text="" />
-                <TextBlock x:Name="InfoText" Grid.Row="1"
-                           Margin="16,0,16,12"
-                           Opacity="0.8"
-                           Text="" />
-            </Grid>
+                            <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="130">
+                                        <ComboBoxItem>720p</ComboBoxItem>
+                                        <ComboBoxItem>1080p</ComboBoxItem>
+                                    </ComboBox>
+                                    <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="130">
+                                        <ComboBoxItem>15 FPS</ComboBoxItem>
+                                        <ComboBoxItem>30 FPS</ComboBoxItem>
+                                    </ComboBox>
+                                </StackPanel>
+                                <Button x:Name="StartStreamButton" Content="Iniciar transmissão"
+                                        HorizontalAlignment="Stretch" IsEnabled="False" />
+                                <Button x:Name="StopStreamButton" Content="Parar transmissão"
+                                        HorizontalAlignment="Stretch" IsEnabled="False" />
+                                <Button x:Name="HostBackButton" Content="Voltar ao início"
+                                        HorizontalAlignment="Stretch" Margin="0,8,0,0" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
+                                <TextBlock x:Name="StatusLabel" Text="Sala fechada" />
+
+                                <TextBlock Text="CONEXÃO" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                <TextBox x:Name="RoomNameBox" PlaceholderText="Nome da sala (opcional)" />
+                                <TextBox x:Name="PasswordBox" PlaceholderText="Senha (opcional)" PasswordChar="●" />
+                                <Button x:Name="RoomButton" Content="Abrir sala" HorizontalAlignment="Stretch" />
+                                <TextBlock x:Name="AddressLabel" Opacity="0.7" TextWrapping="Wrap" />
+
+                                <TextBlock Text="USUÁRIOS" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                <ScrollViewer MaxHeight="180">
+                                    <StackPanel x:Name="UsersPanel" Spacing="4" />
+                                </ScrollViewer>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- ── Entrar em sala (Client) ── -->
+                        <DockPanel x:Name="ClientPanel" LastChildFill="True" IsVisible="False">
+
+                            <Button DockPanel.Dock="Bottom" x:Name="ClientBackButton" Content="Voltar ao início"
+                                    HorizontalAlignment="Stretch" Margin="0,12,0,0" />
+
+                            <ScrollViewer>
+                                <StackPanel Spacing="6" Margin="0,0,8,0">
+                                    <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
+                                    <TextBlock x:Name="ClientStatusLabel" Text="Desconectado" />
+
+                                    <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                    <TextBox x:Name="ClientNameBox" MaxLength="24"
+                                             PlaceholderText="Seu nome de usuário" />
+
+                                    <Grid ColumnDefinitions="*,Auto" Margin="0,12,0,0">
+                                        <TextBlock Grid.Column="0" Text="SALAS NA REDE" FontSize="11"
+                                                   Opacity="0.5" VerticalAlignment="Center" />
+                                        <Button Grid.Column="1" x:Name="RefreshRoomsButton" Content="Atualizar"
+                                                Padding="8,2" />
+                                    </Grid>
+                                    <ListBox x:Name="RoomsList" MinHeight="90" MaxHeight="170" />
+                                    <TextBlock x:Name="RoomsStatusText" Opacity="0.7" FontSize="12"
+                                               TextWrapping="Wrap" IsVisible="False" />
+
+                                    <TextBlock Text="OU ENTRE POR IP" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                    <TextBox x:Name="ClientAddressBox"
+                                             PlaceholderText="IP da sala (ex.: 192.168.0.10)" />
+
+                                    <!-- Só aparece quando o Host pede senha -->
+                                    <StackPanel x:Name="PasswordPanel" Spacing="6" IsVisible="False" Margin="0,8,0,0">
+                                        <TextBlock x:Name="PasswordHint" Text="Esta sala tem senha." />
+                                        <TextBox x:Name="ClientPasswordBox" PlaceholderText="Senha da sala"
+                                                 PasswordChar="●" />
+                                        <Button x:Name="PasswordConfirmButton" Content="Entrar"
+                                                HorizontalAlignment="Stretch" />
+                                    </StackPanel>
+
+                                    <Button x:Name="ClientConnectButton" Content="Conectar"
+                                            HorizontalAlignment="Stretch" Margin="0,8,0,0" />
+
+                                    <TextBlock x:Name="ClientUsersHeader" Text="USUÁRIOS NA SALA" FontSize="11"
+                                               Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
+                                    <StackPanel x:Name="ClientUsersPanel" Spacing="4" IsVisible="False" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </DockPanel>
+
+                    </Grid>
+                </DockPanel>
+            </Border>
+
+            <!-- Área do vídeo: preview do Host / tela recebida no Client + barra de informações -->
+            <Border Grid.Column="1" Background="#111418">
+                <Grid RowDefinitions="*,Auto">
+                    <Image x:Name="PreviewImage" Grid.Row="0" Stretch="Uniform"
+                           Margin="16" IsVisible="False" />
+                    <TextBlock x:Name="PlaceholderText" Grid.Row="0"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               Margin="32"
+                               Opacity="0.7"
+                               Text="" />
+                    <TextBlock x:Name="InfoText" Grid.Row="1"
+                               Margin="16,0,16,12"
+                               TextWrapping="Wrap"
+                               Opacity="0.8"
+                               Text="" />
+                </Grid>
+            </Border>
+
+        </Grid>
+
+        <!-- Tela de nome de usuário (por cima de tudo, dentro do app) -->
+        <Border x:Name="NameScreen" Background="#111418" IsVisible="False">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="340" Spacing="10">
+                <TextBlock x:Name="NameTitle" Text="Seja bem-vindo ao LANShare"
+                           FontSize="22" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock x:Name="NameSubtitle" Text="Para começar, insira seu nome de usuário"
+                           Opacity="0.8" HorizontalAlignment="Center" TextAlignment="Center"
+                           TextWrapping="Wrap" Margin="0,0,0,8" />
+                <TextBox x:Name="NameInput" PlaceholderText="Digite seu nome de usuário..." MaxLength="24" />
+                <TextBlock x:Name="NameError" Foreground="#FF6B6B" FontSize="12"
+                           TextWrapping="Wrap" IsVisible="False" />
+                <Button x:Name="NameConfirmButton" Content="Confirmar"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                <Button x:Name="NameCancelButton" Content="Cancelar" IsEnabled="False"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            </StackPanel>
         </Border>
 
     </Grid>

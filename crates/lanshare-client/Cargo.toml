@@ -11,6 +11,7 @@ lanshare-net = { workspace = true }
 tokio = { workspace = true }
 rpassword = { workspace = true }
 if-addrs = { workspace = true }
+serde_json = { workspace = true }
 rayon = "1"
 minifb = "0.28"
 windows = { version = "0.62", features = [
