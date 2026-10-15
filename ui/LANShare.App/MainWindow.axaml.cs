@@ -28,7 +28,8 @@ public partial class MainWindow : Window
 
     // Estrutura geral
     private readonly Grid _mainLayout, _clientLobby;
-    private readonly DockPanel _homePanel, _hostPanel, _clientPanel;
+    private readonly StackPanel _homePanel;
+    private readonly DockPanel _hostPanel, _clientPanel;
     private readonly Border _clientConnecting;
     private readonly TextBlock _versionText, _placeholderText, _infoText;
     private readonly Image _previewImage;
@@ -39,9 +40,11 @@ public partial class MainWindow : Window
     private readonly TextBox _nameInput;
     private readonly Button _nameConfirmButton;
 
+    // Cartão de perfil (rodapé da lateral)
+    private readonly TextBox _profileNameBox;
+    private readonly TextBlock _profileNameError;
+
     // Início
-    private readonly TextBox _homeNameBox;
-    private readonly TextBlock _homeNameError;
     private readonly Button _createRoomButton, _joinRoomButton;
 
     // Host
@@ -52,9 +55,9 @@ public partial class MainWindow : Window
     private readonly StackPanel _usersPanel;
 
     // Client
-    private readonly TextBlock _clientStatusLabel, _clientNameError, _roomsStatusText, _passwordHint,
+    private readonly TextBlock _clientStatusLabel, _roomsStatusText, _passwordHint,
         _clientUsersHeader, _connectingTitle, _connectingText;
-    private readonly TextBox _clientNameBox, _clientAddressBox, _clientPasswordBox;
+    private readonly TextBox _clientAddressBox, _clientPasswordBox;
     private readonly Button _refreshRoomsButton, _passwordConfirmButton, _clientConnectButton,
         _clientBackButton, _clientDisconnectButton, _connectingCancelButton;
     private readonly ListBox _roomsList;
@@ -97,7 +100,7 @@ public partial class MainWindow : Window
 
         _mainLayout = Find<Grid>("MainLayout");
         _clientLobby = Find<Grid>("ClientLobby");
-        _homePanel = Find<DockPanel>("HomePanel");
+        _homePanel = Find<StackPanel>("HomePanel");
         _hostPanel = Find<DockPanel>("HostPanel");
         _clientPanel = Find<DockPanel>("ClientPanel");
         _clientConnecting = Find<Border>("ClientConnecting");
@@ -111,8 +114,9 @@ public partial class MainWindow : Window
         _nameInput = Find<TextBox>("NameInput");
         _nameConfirmButton = Find<Button>("NameConfirmButton");
 
-        _homeNameBox = Find<TextBox>("HomeNameBox");
-        _homeNameError = Find<TextBlock>("HomeNameError");
+        _profileNameBox = Find<TextBox>("ProfileNameBox");
+        _profileNameError = Find<TextBlock>("ProfileNameError");
+
         _createRoomButton = Find<Button>("CreateRoomButton");
         _joinRoomButton = Find<Button>("JoinRoomButton");
 
@@ -128,13 +132,11 @@ public partial class MainWindow : Window
         _usersPanel = Find<StackPanel>("UsersPanel");
 
         _clientStatusLabel = Find<TextBlock>("ClientStatusLabel");
-        _clientNameError = Find<TextBlock>("ClientNameError");
         _roomsStatusText = Find<TextBlock>("RoomsStatusText");
         _passwordHint = Find<TextBlock>("PasswordHint");
         _clientUsersHeader = Find<TextBlock>("ClientUsersHeader");
         _connectingTitle = Find<TextBlock>("ConnectingTitle");
         _connectingText = Find<TextBlock>("ConnectingText");
-        _clientNameBox = Find<TextBox>("ClientNameBox");
         _clientAddressBox = Find<TextBox>("ClientAddressBox");
         _clientPasswordBox = Find<TextBox>("ClientPasswordBox");
         _refreshRoomsButton = Find<Button>("RefreshRoomsButton");
@@ -147,8 +149,9 @@ public partial class MainWindow : Window
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
-        // Painel de escolha do que transmitir
+        // Painel de escolha do que transmitir e cartão de perfil (avatar)
         InitSourcePicker();
+        InitAvatar();
 
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
@@ -159,9 +162,8 @@ public partial class MainWindow : Window
             e.Handled = true;
         };
 
-        // Nome editável (início e Client)
-        WireInlineName(_homeNameBox, _homeNameError);
-        WireInlineName(_clientNameBox, _clientNameError);
+        // Nome editável no cartão de perfil
+        WireInlineName(_profileNameBox, _profileNameError);
 
         // Início
         _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
@@ -253,7 +255,7 @@ public partial class MainWindow : Window
         {
             _versionText.Text = $"{AppVersion} — motor Rust indisponível";
             _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
-            _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _homeNameBox.IsEnabled = false;
+            _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _profileNameBox.IsEnabled = false;
             return null;
         }
     }
@@ -288,8 +290,13 @@ public partial class MainWindow : Window
     private void ApplyUsername(string name)
     {
         _username = name;
-        _homeNameBox.Text = name;
-        _clientNameBox.Text = name;
+        _profileNameBox.Text = name;
+    }
+
+    /// O nome é enviado ao abrir a sala ou ao conectar: só dá para editar fora disso.
+    private void UpdateProfileState()
+    {
+        _profileNameBox.IsEnabled = _coreOk && !_roomOpen && _clientState == ClientState.Idle;
     }
 
     /// Nome que parece texto: clicar edita; Enter ou clicar fora salva; Esc cancela.
@@ -358,6 +365,7 @@ public partial class MainWindow : Window
             _ => "Escolha uma opção ao lado para começar.",
         });
         _infoText.Text = "";
+        UpdateProfileState();
     }
 
     /// Decide o que aparece na área grande: salas, conexão, imagem ou mensagem.
@@ -414,6 +422,9 @@ public partial class MainWindow : Window
             ShowMode(Mode.Home); // fechar a sala já volta para o início
             return;
         }
+
+        // Se o nome ainda está sendo editado, salva antes (o motor lê o nome ao abrir a sala)
+        CommitName(_profileNameBox, _profileNameError);
 
         var (ok, error) = NativeMethods.HostStart(_passwordBox.Text, null, _roomNameBox.Text);
         if (!ok)
@@ -533,6 +544,7 @@ public partial class MainWindow : Window
         _hostBackButton.IsVisible = !_roomOpen; // com a sala aberta, "Fechar sala" já volta ao início
 
         if (_pickerOpen) UpdatePickerConfirm();
+        UpdateProfileState();
     }
 
     // ───────────────────────── Client ─────────────────────────
@@ -633,7 +645,7 @@ public partial class MainWindow : Window
     private void StartConnection(string address)
     {
         // Se o nome ainda está sendo editado, salva antes (o motor lê o nome do settings.json ao conectar)
-        CommitName(_clientNameBox, _clientNameError);
+        CommitName(_profileNameBox, _profileNameError);
 
         _kickedReason = null;
         var (ok, error) = NativeMethods.ClientConnect(address);
@@ -910,7 +922,6 @@ public partial class MainWindow : Window
         var idle = _clientState == ClientState.Idle;
         var connected = _clientState == ClientState.Connected;
 
-        _clientNameBox.IsEnabled = idle; // o nome é enviado ao conectar
         _clientStatusLabel.Text = _clientState switch
         {
             ClientState.Idle => "Desconectado",
@@ -922,6 +933,7 @@ public partial class MainWindow : Window
         _clientDisconnectButton.IsVisible = connected;
         _clientBackButton.Content = idle ? "Voltar ao início" : "Sair da sala e voltar";
 
+        UpdateProfileState();
         UpdateStage();
     }
 

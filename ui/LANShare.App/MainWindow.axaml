@@ -67,6 +67,20 @@
         <Style Selector="ListBoxItem.source:pressed /template/ ContentPresenter#PART_ContentPresenter">
             <Setter Property="Background" Value="#2A3854" />
         </Style>
+
+        <!-- Cartão de perfil -->
+        <Style Selector="Border#AvatarButton:pointerover">
+            <Setter Property="Opacity" Value="0.85" />
+        </Style>
+        <Style Selector="Button#SettingsButton">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button#SettingsButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2E343C" />
+        </Style>
+        <Style Selector="Border#AvatarDropZone:pointerover">
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+        </Style>
     </Window.Styles>
 
     <Grid>
@@ -88,47 +102,57 @@
                                    VerticalAlignment="Bottom" Margin="0,0,0,4" />
                     </StackPanel>
 
+                    <!-- Rodapé fixo (todas as telas): apoio + perfil -->
+                    <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,12,0,0">
+                        <Button Classes="support" Content="Apoie o LANShare"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Click="OnSupportClick" />
+
+                        <Border Background="#23282F" CornerRadius="10" Padding="10">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <Border x:Name="AvatarButton" Width="44" Height="44" Cursor="Hand"
+                                        Background="Transparent" VerticalAlignment="Center"
+                                        ToolTip.Tip="Alterar avatar">
+                                    <Ellipse x:Name="AvatarImage" Width="44" Height="44" />
+                                </Border>
+
+                                <StackPanel Grid.Column="1" Margin="10,0,6,0" VerticalAlignment="Center">
+                                    <TextBox x:Name="ProfileNameBox" Classes="inline" MaxLength="24"
+                                             ToolTip.Tip="Clique para editar o nome" />
+                                    <TextBlock x:Name="ProfileNameError" Foreground="#FF6B6B" FontSize="12"
+                                               TextWrapping="Wrap" IsVisible="False" />
+                                </StackPanel>
+
+                                <Button x:Name="SettingsButton" Grid.Column="2" Width="36" Height="36" Padding="7"
+                                        VerticalAlignment="Center" ToolTip.Tip="Configurações (em breve)">
+                                    <Image Source="avares://LANShare/Assets/settings.png" Width="20" Height="20" />
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
                     <!-- Os três painéis ocupam o mesmo espaço; só um aparece por vez -->
                     <Grid>
 
                         <!-- ── Início ── -->
-                        <DockPanel x:Name="HomePanel" LastChildFill="True">
-                            <StackPanel DockPanel.Dock="Bottom" Spacing="4">
-                                <Button Classes="support" Content="Apoie o LANShare"
-                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                        Margin="0,0,0,12"
-                                        Click="OnSupportClick" />
-
-                                <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" />
-                                <TextBox x:Name="HomeNameBox" Classes="inline" MaxLength="24"
-                                         ToolTip.Tip="Clique para editar o nome" />
-                                <TextBlock x:Name="HomeNameError" Foreground="#FF6B6B" FontSize="12"
-                                           TextWrapping="Wrap" IsVisible="False" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="COMEÇAR" FontSize="11" Opacity="0.5" />
-                                <Button x:Name="CreateRoomButton" Content="Criar sala"
-                                        HorizontalAlignment="Stretch" />
-                                <Button x:Name="JoinRoomButton" Content="Entrar em sala"
-                                        HorizontalAlignment="Stretch" />
-                            </StackPanel>
-                        </DockPanel>
+                        <StackPanel x:Name="HomePanel" Spacing="8">
+                            <TextBlock Text="COMEÇAR" FontSize="11" Opacity="0.5" />
+                            <Button x:Name="CreateRoomButton" Content="Criar sala"
+                                    HorizontalAlignment="Stretch" />
+                            <Button x:Name="JoinRoomButton" Content="Entrar em sala"
+                                    HorizontalAlignment="Stretch" />
+                        </StackPanel>
 
                         <!-- ── Criar sala (Host) ── -->
                         <DockPanel x:Name="HostPanel" LastChildFill="True" IsVisible="False">
 
                             <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
-                                <Button Classes="support" Content="Apoie o LANShare"
-                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                        Click="OnSupportClick" />
-
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="130">
+                                    <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="126">
                                         <ComboBoxItem>720p</ComboBoxItem>
                                         <ComboBoxItem>1080p</ComboBoxItem>
                                     </ComboBox>
-                                    <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="130">
+                                    <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="126">
                                         <ComboBoxItem>15 FPS</ComboBoxItem>
                                         <ComboBoxItem>30 FPS</ComboBoxItem>
                                     </ComboBox>
@@ -163,10 +187,6 @@
                         <DockPanel x:Name="ClientPanel" LastChildFill="True" IsVisible="False">
 
                             <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
-                                <Button Classes="support" Content="Apoie o LANShare"
-                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                        Click="OnSupportClick" />
-
                                 <Button x:Name="ClientDisconnectButton" Content="Desconectar"
                                         HorizontalAlignment="Stretch" IsVisible="False" />
                                 <Button x:Name="ClientBackButton" Content="Voltar ao início"
@@ -177,12 +197,6 @@
                                 <StackPanel Spacing="6" Margin="0,0,8,0">
                                     <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
                                     <TextBlock x:Name="ClientStatusLabel" Text="Desconectado" />
-
-                                    <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                    <TextBox x:Name="ClientNameBox" Classes="inline" MaxLength="24"
-                                             ToolTip.Tip="Clique para editar o nome" />
-                                    <TextBlock x:Name="ClientNameError" Foreground="#FF6B6B" FontSize="12"
-                                               TextWrapping="Wrap" IsVisible="False" />
 
                                     <TextBlock x:Name="ClientUsersHeader" Text="USUÁRIOS NA SALA" FontSize="11"
                                                Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
@@ -354,6 +368,85 @@
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
                     </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Troca de avatar (por cima de tudo, com o fundo escurecido) -->
+        <Border x:Name="AvatarEditor" Background="#B3000000" IsVisible="False">
+            <Border Background="#1B1F24" BorderBrush="#2E343C" BorderThickness="1"
+                    CornerRadius="12" Padding="24" Width="360"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    BoxShadow="0 12 40 0 #80000000">
+                <StackPanel Spacing="16">
+
+                    <TextBlock Text="Alterar avatar" FontSize="20" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+
+                    <Grid Width="280" Height="280" HorizontalAlignment="Center">
+
+                        <!-- Sem imagem: clicar escolhe, ou arrasta para cá -->
+                        <Border x:Name="AvatarDropZone" Background="#15191E" BorderBrush="#3A414B"
+                                BorderThickness="2" CornerRadius="10" Cursor="Hand">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+                                <TextBlock Classes="icon" Text="&#xEB9F;" FontSize="36" Opacity="0.7"
+                                           HorizontalAlignment="Center" />
+                                <TextBlock Text="Clique para escolher uma imagem" HorizontalAlignment="Center" />
+                                <TextBlock Text="ou arraste ela para cá" Opacity="0.6"
+                                           HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Com imagem: arraste para posicionar dentro do círculo -->
+                        <Border x:Name="AvatarCropArea" Background="#0F1216" CornerRadius="10"
+                                ClipToBounds="True" Cursor="SizeAll" IsVisible="False">
+                            <Panel>
+                                <Canvas>
+                                    <Image x:Name="AvatarCropImage" Stretch="Fill" />
+                                </Canvas>
+                                <Path Fill="#B0000000" IsHitTestVisible="False">
+                                    <Path.Data>
+                                        <GeometryGroup FillRule="EvenOdd">
+                                            <RectangleGeometry Rect="0,0,280,280" />
+                                            <EllipseGeometry Rect="20,20,240,240" />
+                                        </GeometryGroup>
+                                    </Path.Data>
+                                </Path>
+                                <Ellipse Width="240" Height="240" Stroke="White" StrokeThickness="2"
+                                         Opacity="0.8" IsHitTestVisible="False" />
+                            </Panel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Zoom -->
+                    <Grid x:Name="AvatarZoomRow" ColumnDefinitions="Auto,*,Auto" IsVisible="False">
+                        <TextBlock Classes="icon" Text="&#xE71F;" Opacity="0.7" VerticalAlignment="Center" />
+                        <Slider x:Name="AvatarZoomSlider" Grid.Column="1" Minimum="1" Maximum="4"
+                                Value="1" Margin="10,0" />
+                        <TextBlock Grid.Column="2" Classes="icon" Text="&#xE8A3;" Opacity="0.7"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+
+                    <Button x:Name="AvatarChooseButton" Content="Escolher outra imagem"
+                            HorizontalAlignment="Center" IsVisible="False" />
+
+                    <TextBlock x:Name="AvatarEditorError" Foreground="#FF6B6B" FontSize="12"
+                               TextWrapping="Wrap" TextAlignment="Center" IsVisible="False" />
+
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="*,8,*">
+                            <Button x:Name="AvatarCancelButton" Grid.Column="0" Content="Cancelar"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Padding="0,10" />
+                            <Button x:Name="AvatarSaveButton" Grid.Column="2" Content="Salvar"
+                                    Classes="accent" IsEnabled="False"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Padding="0,10" />
+                        </Grid>
+                        <Button x:Name="AvatarRemoveButton" Content="Remover avatar"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                Foreground="#FF8A8A" Background="Transparent" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </Border>

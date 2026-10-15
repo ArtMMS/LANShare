@@ -26,9 +26,11 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.*" />
   </ItemGroup>
 
-  <!-- Ícone da janela (barra de título e barra de tarefas), embutido no programa -->
+  <!-- Imagens embutidas no programa: ícone da janela, avatar padrão e ícone de configurações -->
   <ItemGroup>
     <AvaloniaResource Include="..\..\assets\icon.ico" Link="Assets/icon.ico" />
+    <AvaloniaResource Include="..\..\assets\default_avatar.jpg" Link="Assets/default_avatar.jpg" />
+    <AvaloniaResource Include="..\..\assets\settings.png" Link="Assets/settings.png" />
   </ItemGroup>
 
   <!-- Compila o motor Rust antes de compilar o C# (precisa do cargo no PATH) -->

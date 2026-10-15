@@ -86,13 +86,13 @@ impl ScreenCapture {
         Self::start_target(CaptureTarget::PrimaryMonitor)
     }
 
-    /// Começa a capturar um monitor ou uma janela em outra thread.
+    /// Começa a capturar um monitor ou uma janela em outra thread, sem a borda amarela.
     pub fn start_target(target: CaptureTarget) -> Result<Self, BoxError> {
-        Self::open(target, DrawBorderSettings::Default)
+        Self::start_quiet(target)
     }
 
-    /// Igual a `start_target`, mas tenta sem a borda amarela do Windows (usado nas miniaturas,
-    /// que abrem e fecham a captura o tempo todo). Sem suporte a isso, usa a borda padrão.
+    /// Captura sem a borda amarela do Windows (Windows 11).
+    /// Onde isso não é suportado (Windows 10), usa a borda padrão.
     pub fn start_quiet(target: CaptureTarget) -> Result<Self, BoxError> {
         Self::open(target, DrawBorderSettings::WithoutBorder)
             .or_else(|_| Self::open(target, DrawBorderSettings::Default))
