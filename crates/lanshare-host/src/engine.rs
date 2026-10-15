@@ -12,6 +12,7 @@ use crate::stream::{StreamHandle, StreamSettings};
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
 };
+use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
 use serde::Deserialize;
 use std::io;
@@ -58,6 +59,8 @@ struct Shared {
     kicker: Kicker,
     password: Option<Arc<String>>,
     events: EventSender,
+    /// Nome de usuário do Host, mostrado na lista de usuários dos Clients.
+    host_name: Arc<String>,
 }
 
 /// A sala aberta. Tem o seu próprio runtime do tokio, então pode ser usada de qualquer thread.
@@ -102,6 +105,7 @@ impl HostEngine {
             kicker: kicker.clone(),
             password: password.clone(),
             events: events.clone(),
+            host_name: Arc::new(host_display_name()),
         };
 
         events.emit(HostEvent::Started {
@@ -430,6 +434,7 @@ async fn handshake(
                 client_id: client.id,
                 display_name: client.name.clone(),
                 users: shared.registry.users(),
+                host_name: shared.host_name.as_str().to_string(),
             };
             // Se não deu para responder, desfaz o registro
             if let Err(erro) = write_message(stream, &resposta).await {
@@ -520,6 +525,13 @@ async fn refuse(
     });
     write_message(stream, &Message::Rejected { reason }).await?;
     Ok(None)
+}
+
+/// Nome do Host na lista de usuários: o nome de usuário salvo ou, sem ele, o nome do computador.
+fn host_display_name() -> String {
+    settings::load()
+        .map(|s| s.username)
+        .unwrap_or_else(|| std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Host".to_string()))
 }
 
 /// Nome da sala: o pedido (limpo) ou, se vier vazio, o nome do computador.

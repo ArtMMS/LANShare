@@ -3,6 +3,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -18,21 +19,27 @@ public partial class MainWindow : Window
     private sealed record RoomEntry(
         string Name, string Address, int Users, int? MaxUsers, bool HasPassword, bool Compatible);
 
+    // Fonte dos ícones (Windows 11 / Windows 10)
+    private static readonly Avalonia.Media.FontFamily IconFont =
+        new("Segoe Fluent Icons, Segoe MDL2 Assets");
+
     // Estrutura geral
-    private readonly Grid _mainLayout;
+    private readonly Grid _mainLayout, _clientLobby;
     private readonly DockPanel _homePanel, _hostPanel, _clientPanel;
+    private readonly Border _clientConnecting;
     private readonly TextBlock _versionText, _placeholderText, _infoText;
     private readonly Image _previewImage;
 
-    // Tela de nome
+    // Tela de nome (primeira abertura)
     private readonly Border _nameScreen;
-    private readonly TextBlock _nameTitle, _nameSubtitle, _nameError;
+    private readonly TextBlock _nameError;
     private readonly TextBox _nameInput;
-    private readonly Button _nameConfirmButton, _nameCancelButton;
+    private readonly Button _nameConfirmButton;
 
     // Início
-    private readonly TextBlock _homeNameText;
-    private readonly Button _changeNameButton, _createRoomButton, _joinRoomButton;
+    private readonly TextBox _homeNameBox;
+    private readonly TextBlock _homeNameError;
+    private readonly Button _createRoomButton, _joinRoomButton;
 
     // Host
     private readonly TextBlock _statusLabel, _addressLabel;
@@ -42,9 +49,11 @@ public partial class MainWindow : Window
     private readonly StackPanel _usersPanel;
 
     // Client
-    private readonly TextBlock _clientStatusLabel, _roomsStatusText, _passwordHint, _clientUsersHeader;
+    private readonly TextBlock _clientStatusLabel, _clientNameError, _roomsStatusText, _passwordHint,
+        _clientUsersHeader, _connectingTitle, _connectingText;
     private readonly TextBox _clientNameBox, _clientAddressBox, _clientPasswordBox;
-    private readonly Button _refreshRoomsButton, _passwordConfirmButton, _clientConnectButton, _clientBackButton;
+    private readonly Button _refreshRoomsButton, _passwordConfirmButton, _clientConnectButton,
+        _clientBackButton, _clientDisconnectButton, _connectingCancelButton;
     private readonly ListBox _roomsList;
     private readonly StackPanel _passwordPanel, _clientUsersPanel;
 
@@ -58,7 +67,6 @@ public partial class MainWindow : Window
     private Mode _mode = Mode.Home;
     private bool _coreOk;
     private string? _username;
-    private bool _editingName;
 
     // Host
     private bool _roomOpen;
@@ -69,6 +77,7 @@ public partial class MainWindow : Window
     private ClientState _clientState = ClientState.Idle;
     private readonly Dictionary<ulong, string> _clientUsers = new();
     private ulong _myId;
+    private string _hostName = "Host";
     private string? _roomsSignature;
     private int _roomCount;
     private string? _kickedReason;
@@ -80,25 +89,27 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // Permite à janela receber o foco (usado para tirar o cursor do campo do nome)
+        Focusable = true;
+
         _mainLayout = Find<Grid>("MainLayout");
+        _clientLobby = Find<Grid>("ClientLobby");
         _homePanel = Find<DockPanel>("HomePanel");
         _hostPanel = Find<DockPanel>("HostPanel");
         _clientPanel = Find<DockPanel>("ClientPanel");
+        _clientConnecting = Find<Border>("ClientConnecting");
         _versionText = Find<TextBlock>("VersionText");
         _placeholderText = Find<TextBlock>("PlaceholderText");
         _infoText = Find<TextBlock>("InfoText");
         _previewImage = Find<Image>("PreviewImage");
 
         _nameScreen = Find<Border>("NameScreen");
-        _nameTitle = Find<TextBlock>("NameTitle");
-        _nameSubtitle = Find<TextBlock>("NameSubtitle");
         _nameError = Find<TextBlock>("NameError");
         _nameInput = Find<TextBox>("NameInput");
         _nameConfirmButton = Find<Button>("NameConfirmButton");
-        _nameCancelButton = Find<Button>("NameCancelButton");
 
-        _homeNameText = Find<TextBlock>("HomeNameText");
-        _changeNameButton = Find<Button>("ChangeNameButton");
+        _homeNameBox = Find<TextBox>("HomeNameBox");
+        _homeNameError = Find<TextBlock>("HomeNameError");
         _createRoomButton = Find<Button>("CreateRoomButton");
         _joinRoomButton = Find<Button>("JoinRoomButton");
 
@@ -115,9 +126,12 @@ public partial class MainWindow : Window
         _usersPanel = Find<StackPanel>("UsersPanel");
 
         _clientStatusLabel = Find<TextBlock>("ClientStatusLabel");
+        _clientNameError = Find<TextBlock>("ClientNameError");
         _roomsStatusText = Find<TextBlock>("RoomsStatusText");
         _passwordHint = Find<TextBlock>("PasswordHint");
         _clientUsersHeader = Find<TextBlock>("ClientUsersHeader");
+        _connectingTitle = Find<TextBlock>("ConnectingTitle");
+        _connectingText = Find<TextBlock>("ConnectingText");
         _clientNameBox = Find<TextBox>("ClientNameBox");
         _clientAddressBox = Find<TextBox>("ClientAddressBox");
         _clientPasswordBox = Find<TextBox>("ClientPasswordBox");
@@ -125,13 +139,14 @@ public partial class MainWindow : Window
         _passwordConfirmButton = Find<Button>("PasswordConfirmButton");
         _clientConnectButton = Find<Button>("ClientConnectButton");
         _clientBackButton = Find<Button>("ClientBackButton");
+        _clientDisconnectButton = Find<Button>("ClientDisconnectButton");
+        _connectingCancelButton = Find<Button>("ConnectingCancelButton");
         _roomsList = Find<ListBox>("RoomsList");
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
-        // Tela de nome
+        // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
-        _nameCancelButton.Click += (_, _) => CloseNameScreen();
         _nameInput.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter) return;
@@ -139,8 +154,11 @@ public partial class MainWindow : Window
             e.Handled = true;
         };
 
+        // Nome editável (início e Client)
+        WireInlineName(_homeNameBox, _homeNameError);
+        WireInlineName(_clientNameBox, _clientNameError);
+
         // Início
-        _changeNameButton.Click += (_, _) => OpenNameScreen(first: false);
         _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
         _joinRoomButton.Click += (_, _) => EnterClientMode();
 
@@ -153,21 +171,29 @@ public partial class MainWindow : Window
         // Client
         _refreshRoomsButton.Click += (_, _) => ScanRooms();
         _roomsList.DoubleTapped += (_, _) => ConnectToSelectedRoom();
-        _clientConnectButton.Click += (_, _) => OnClientConnectClick();
-        _passwordConfirmButton.Click += (_, _) => SubmitPassword();
-        _clientBackButton.Click += (_, _) => LeaveClientMode();
-        _clientPasswordBox.KeyDown += (_, e) =>
+        _roomsList.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter) return;
-            SubmitPassword();
+            ConnectToSelectedRoom();
             e.Handled = true;
         };
+        _clientConnectButton.Click += (_, _) => OnClientConnectClick();
         _clientAddressBox.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Enter) return;
             OnClientConnectClick();
             e.Handled = true;
         };
+        _passwordConfirmButton.Click += (_, _) => SubmitPassword();
+        _clientPasswordBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            SubmitPassword();
+            e.Handled = true;
+        };
+        _connectingCancelButton.Click += (_, _) => NativeMethods.ClientDisconnect();
+        _clientDisconnectButton.Click += (_, _) => NativeMethods.ClientDisconnect();
+        _clientBackButton.Click += (_, _) => LeaveClientMode();
 
         _timer.Tick += (_, _) => OnTick();
         _scanTimer.Tick += (_, _) =>
@@ -181,7 +207,7 @@ public partial class MainWindow : Window
             ShowMode(Mode.Home);
             if (string.IsNullOrWhiteSpace(savedName))
             {
-                OpenNameScreen(first: true);
+                OpenNameScreen();
             }
             else
             {
@@ -219,35 +245,22 @@ public partial class MainWindow : Window
         {
             _versionText.Text = "Motor Rust indisponível";
             _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
-            _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _changeNameButton.IsEnabled = false;
+            _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _homeNameBox.IsEnabled = false;
             return null;
         }
     }
 
     // ───────────────────────── Nome de usuário ─────────────────────────
 
-    private void OpenNameScreen(bool first)
+    /// Tela de primeira abertura (por cima de tudo, dentro do app).
+    private void OpenNameScreen()
     {
-        _editingName = !first;
-        _nameTitle.Text = first ? "Seja bem-vindo ao LANShare" : "Alterar nome de usuário";
-        _nameSubtitle.Text = first ? "Para começar, insira seu nome de usuário" : "Digite o novo nome";
-        _nameInput.Text = first ? "" : _username;
-        _nameCancelButton.IsEnabled = !first;
-        SetNameError(null);
+        _nameInput.Text = "";
+        SetInlineError(_nameError, null);
 
         _nameScreen.IsVisible = true;
         _mainLayout.IsEnabled = false;
-        Dispatcher.UIThread.Post(() =>
-        {
-            _nameInput.Focus();
-            _nameInput.SelectAll();
-        });
-    }
-
-    private void CloseNameScreen()
-    {
-        _nameScreen.IsVisible = false;
-        _mainLayout.IsEnabled = true;
+        Dispatcher.UIThread.Post(() => _nameInput.Focus());
     }
 
     private void ConfirmName()
@@ -255,25 +268,70 @@ public partial class MainWindow : Window
         var (ok, name, error) = NativeMethods.SetUsername(_nameInput.Text);
         if (!ok)
         {
-            SetNameError(error ?? "Nome inválido.");
+            SetInlineError(_nameError, error ?? "Nome inválido.");
             return;
         }
 
         ApplyUsername(name!);
-        CloseNameScreen();
-    }
-
-    private void SetNameError(string? message)
-    {
-        _nameError.Text = message ?? "";
-        _nameError.IsVisible = !string.IsNullOrEmpty(message);
+        _nameScreen.IsVisible = false;
+        _mainLayout.IsEnabled = true;
     }
 
     private void ApplyUsername(string name)
     {
         _username = name;
-        _homeNameText.Text = name;
+        _homeNameBox.Text = name;
         _clientNameBox.Text = name;
+    }
+
+    /// Nome que parece texto: clicar edita; Enter ou clicar fora salva; Esc cancela.
+    private void WireInlineName(TextBox box, TextBlock error)
+    {
+        box.LostFocus += (_, _) => CommitName(box, error);
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                CommitName(box, error);
+                Focus(); // tira o cursor do campo
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                box.Text = _username;
+                SetInlineError(error, null);
+                Focus();
+                e.Handled = true;
+            }
+        };
+    }
+
+    private void CommitName(TextBox box, TextBlock error)
+    {
+        var typed = box.Text?.Trim() ?? "";
+        if (string.Equals(typed, _username, StringComparison.Ordinal))
+        {
+            box.Text = _username;
+            return;
+        }
+
+        var (ok, name, message) = NativeMethods.SetUsername(typed);
+        if (!ok)
+        {
+            box.Text = _username; // volta ao nome anterior
+            SetInlineError(error, message ?? "Nome inválido.");
+            DispatcherTimer.RunOnce(() => SetInlineError(error, null), TimeSpan.FromSeconds(3));
+            return;
+        }
+
+        ApplyUsername(name!);
+        SetInlineError(error, null);
+    }
+
+    private static void SetInlineError(TextBlock label, string? message)
+    {
+        label.Text = message ?? "";
+        label.IsVisible = !string.IsNullOrEmpty(message);
     }
 
     // ───────────────────────── Modos (Início / Host / Client) ─────────────────────────
@@ -292,6 +350,17 @@ public partial class MainWindow : Window
             _ => "Escolha uma opção ao lado para começar.",
         });
         _infoText.Text = "";
+    }
+
+    /// Decide o que aparece na área grande: salas, conexão, imagem ou mensagem.
+    private void UpdateStage()
+    {
+        var lobby = _mode == Mode.Client && _clientState == ClientState.Idle;
+        var connecting = _mode == Mode.Client && _clientState == ClientState.Connecting;
+
+        _clientLobby.IsVisible = lobby;
+        _clientConnecting.IsVisible = connecting;
+        _placeholderText.IsVisible = !lobby && !connecting && !_previewImage.IsVisible;
     }
 
     private void StopTimerIfIdle()
@@ -387,6 +456,7 @@ public partial class MainWindow : Window
                     case "started":
                         _addressLabel.Text = "Endereço: " + e.GetProperty("address").GetString();
                         _placeholderText.Text = "Sala aberta. Clique em Iniciar transmissão.";
+                        changedUsers = true; // mostra o próprio Host na lista
                         break;
                     case "user_joined":
                     case "user_left":
@@ -425,9 +495,14 @@ public partial class MainWindow : Window
         PaintFrame(width, height);
     }
 
+    /// Lista da sala: primeiro o próprio Host, depois os clients (com o botão Expulsar).
     private void RefreshUsers()
     {
         _usersPanel.Children.Clear();
+        if (!_roomOpen) return;
+
+        _usersPanel.Children.Add(new TextBlock { Text = $"{_username} (você, host)" });
+
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
         {
@@ -439,7 +514,7 @@ public partial class MainWindow : Window
             var row = new DockPanel();
             DockPanel.SetDock(kick, Dock.Right);
             row.Children.Add(kick);
-            row.Children.Add(new TextBlock { Text = name, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center });
+            row.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
             _usersPanel.Children.Add(row);
         }
     }
@@ -489,8 +564,7 @@ public partial class MainWindow : Window
         _roomsList.ItemsSource = null;
         _roomsSignature = null;
         _roomCount = 0;
-        _roomsStatusText.Text = "";
-        _roomsStatusText.IsVisible = false;
+        SetRoomsStatus("");
         StopTimerIfIdle();
         ShowMode(Mode.Home);
     }
@@ -502,6 +576,7 @@ public partial class MainWindow : Window
         _clientUsersPanel.Children.Clear();
         _passwordPanel.IsVisible = false;
         _clientPasswordBox.Text = "";
+        _hostName = "Host";
         _kickedReason = null;
         _pingMs = -1;
         _videoFps = _videoMbps = 0;
@@ -521,39 +596,26 @@ public partial class MainWindow : Window
         _roomsStatusText.IsVisible = !string.IsNullOrEmpty(message);
     }
 
+    /// Botão "Conectar" do cartão de IP.
     private void OnClientConnectClick()
     {
-        // Conectando ou conectado: o botão cancela / desconecta
-        if (_clientState != ClientState.Idle)
-        {
-            NativeMethods.ClientDisconnect();
-            return;
-        }
+        if (_clientState != ClientState.Idle) return;
 
         var typed = _clientAddressBox.Text?.Trim();
-        if (!string.IsNullOrEmpty(typed))
+        if (string.IsNullOrEmpty(typed))
         {
-            StartConnection(typed);
+            _infoText.Text = "Digite o IP da sala ou dê um duplo clique em uma sala da lista.";
             return;
         }
 
-        if (_roomsList.SelectedItem is ListBoxItem { Tag: RoomEntry room })
-        {
-            ConnectToRoom(room);
-            return;
-        }
-
-        _infoText.Text = "Selecione uma sala na lista ou digite um IP.";
+        StartConnection(typed);
     }
 
     private void ConnectToSelectedRoom()
     {
         if (_clientState != ClientState.Idle) return;
-        if (_roomsList.SelectedItem is ListBoxItem { Tag: RoomEntry room }) ConnectToRoom(room);
-    }
+        if (_roomsList.SelectedItem is not ListBoxItem { Tag: RoomEntry room }) return;
 
-    private void ConnectToRoom(RoomEntry room)
-    {
         if (!room.Compatible)
         {
             _infoText.Text = "Esta sala usa uma versão incompatível do LANShare.";
@@ -564,18 +626,8 @@ public partial class MainWindow : Window
 
     private void StartConnection(string address)
     {
-        // Se o nome foi editado aqui, salva antes (o motor lê o nome do settings.json ao conectar)
-        var typedName = _clientNameBox.Text?.Trim();
-        if (!string.Equals(typedName, _username, StringComparison.Ordinal))
-        {
-            var (nameOk, name, nameError) = NativeMethods.SetUsername(typedName);
-            if (!nameOk)
-            {
-                _infoText.Text = nameError ?? "Nome inválido.";
-                return;
-            }
-            ApplyUsername(name!);
-        }
+        // Se o nome ainda está sendo editado, salva antes (o motor lê o nome do settings.json ao conectar)
+        CommitName(_clientNameBox, _clientNameError);
 
         _kickedReason = null;
         var (ok, error) = NativeMethods.ClientConnect(address);
@@ -587,6 +639,9 @@ public partial class MainWindow : Window
 
         _clientState = ClientState.Connecting;
         _infoText.Text = "";
+        _connectingTitle.Text = "Conectando...";
+        _connectingText.Text = $"Conectando a {address}...";
+        _passwordPanel.IsVisible = false;
         UpdateClientUi();
     }
 
@@ -604,6 +659,8 @@ public partial class MainWindow : Window
 
         _clientPasswordBox.Text = "";
         _passwordPanel.IsVisible = false;
+        _connectingTitle.Text = "Conectando...";
+        _connectingText.Text = "Verificando a senha...";
     }
 
     private void PollClientEvents()
@@ -624,10 +681,12 @@ public partial class MainWindow : Window
                         break;
 
                     case "connecting":
-                        _infoText.Text = $"Conectando a {e.GetProperty("address").GetString()}...";
+                        _connectingText.Text = $"Conectando a {e.GetProperty("address").GetString()}...";
                         break;
 
                     case "password_required":
+                        _connectingTitle.Text = "Sala protegida";
+                        _connectingText.Text = "";
                         _passwordHint.Text = e.GetProperty("retry").GetBoolean()
                             ? "Senha incorreta. Tente novamente."
                             : "Esta sala tem senha.";
@@ -639,6 +698,11 @@ public partial class MainWindow : Window
                     case "connected":
                         _clientState = ClientState.Connected;
                         _myId = e.GetProperty("client_id").GetUInt64();
+                        _hostName = e.TryGetProperty("host_name", out var hn)
+                                    && hn.ValueKind == JsonValueKind.String
+                                    && !string.IsNullOrWhiteSpace(hn.GetString())
+                            ? hn.GetString()!
+                            : "Host";
                         _clientUsers.Clear();
                         foreach (var u in e.GetProperty("users").EnumerateArray())
                             _clientUsers[u.GetProperty("id").GetUInt64()] = u.GetProperty("name").GetString() ?? "?";
@@ -707,11 +771,11 @@ public partial class MainWindow : Window
         }
     }
 
-    /// Volta o Client para "desconectado" (a lista de salas continua na tela).
+    /// Volta o Client para "desconectado" (a lista de salas volta para a tela).
     private void EndClientSession(string message)
     {
         ResetClientSession();
-        HidePreview("Escolha uma sala para entrar.");
+        HidePreview("");
         _infoText.Text = message;
         UpdateClientUi();
         ScanRooms();
@@ -749,33 +813,61 @@ public partial class MainWindow : Window
             _roomsList.SelectedItem = items.FirstOrDefault(i => (i.Tag as RoomEntry)?.Address == selected.Address);
     }
 
+    private static TextBlock GlyphIcon(string glyph, double size) => new()
+    {
+        Text = glyph,
+        FontFamily = IconFont,
+        FontSize = size,
+        Opacity = 0.8,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    private static StackPanel InfoLine(string glyph, string text)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        row.Children.Add(GlyphIcon(glyph, 12));
+        row.Children.Add(new TextBlock { Text = text, FontSize = 12, Opacity = 0.75 });
+        return row;
+    }
+
+    /// Cartão de uma sala: nome, endereço, usuários e senha.
     private static ListBoxItem BuildRoomItem(RoomEntry room)
     {
-        var people = room.MaxUsers is { } max ? $"{room.Users}/{max}" : room.Users.ToString();
-        var details = $"{room.Address} · {people} na sala";
-        if (room.HasPassword) details += " · com senha";
-        if (!room.Compatible) details += " · versão incompatível";
+        var people = room.MaxUsers is { } max ? $"{room.Users}/{max} na sala" : $"{room.Users} na sala";
 
-        var panel = new StackPanel { Spacing = 2 };
-        panel.Children.Add(new TextBlock
+        var details = new StackPanel { Spacing = 4 };
+        details.Children.Add(new TextBlock
         {
             Text = room.Name,
+            FontSize = 18,
             FontWeight = Avalonia.Media.FontWeight.SemiBold,
             TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
         });
-        panel.Children.Add(new TextBlock
+        details.Children.Add(new TextBlock { Text = room.Address, FontSize = 12, Opacity = 0.7 });
+        details.Children.Add(InfoLine("\uE716", people));
+        if (room.HasPassword) details.Children.Add(InfoLine("\uE72E", "com senha"));
+        if (!room.Compatible) details.Children.Add(InfoLine("\uE7BA", "versão incompatível"));
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        grid.Children.Add(details);
+        if (room.HasPassword)
         {
-            Text = details,
-            FontSize = 11,
-            Opacity = 0.7,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-        });
-        return new ListBoxItem { Content = panel, Tag = room };
+            var lockIcon = GlyphIcon("\uE72E", 16);
+            lockIcon.VerticalAlignment = VerticalAlignment.Top;
+            Grid.SetColumn(lockIcon, 1);
+            grid.Children.Add(lockIcon);
+        }
+
+        var item = new ListBoxItem { Content = grid, Tag = room };
+        item.Classes.Add("room");
+        return item;
     }
 
+    /// Lista da sala: primeiro o Host, depois os clients (você marcado).
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
+        _clientUsersPanel.Children.Add(new TextBlock { Text = $"{_hostName} (host)" });
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
             _clientUsersPanel.Children.Add(new TextBlock { Text = id == _myId ? $"{name} (você)" : name });
@@ -802,15 +894,9 @@ public partial class MainWindow : Window
     private void UpdateClientUi()
     {
         var idle = _clientState == ClientState.Idle;
-        _clientNameBox.IsEnabled = _clientAddressBox.IsEnabled = idle;
-        _roomsList.IsEnabled = _refreshRoomsButton.IsEnabled = idle;
+        var connected = _clientState == ClientState.Connected;
 
-        _clientConnectButton.Content = _clientState switch
-        {
-            ClientState.Idle => "Conectar",
-            ClientState.Connecting => "Cancelar",
-            _ => "Desconectar",
-        };
+        _clientNameBox.IsEnabled = idle; // o nome é enviado ao conectar
         _clientStatusLabel.Text = _clientState switch
         {
             ClientState.Idle => "Desconectado",
@@ -818,14 +904,16 @@ public partial class MainWindow : Window
             _ => "Conectado",
         };
 
-        var connected = _clientState == ClientState.Connected;
         _clientUsersHeader.IsVisible = _clientUsersPanel.IsVisible = connected;
+        _clientDisconnectButton.IsVisible = connected;
         _clientBackButton.Content = idle ? "Voltar ao início" : "Sair da sala e voltar";
+
+        UpdateStage();
     }
 
     // ───────────────────────── Imagem (Host e Client) ─────────────────────────
 
-    /// Desenha na área do vídeo a imagem BGRA que está em _previewBuffer.
+    /// Desenha na área grande a imagem BGRA que está em _previewBuffer.
     private void PaintFrame(int width, int height)
     {
         if (_previewBitmap is null || _previewBitmap.PixelSize.Width != width || _previewBitmap.PixelSize.Height != height)
@@ -844,8 +932,12 @@ public partial class MainWindow : Window
 
         // Força o redesenho com o conteúdo novo
         _previewImage.InvalidateVisual();
-        _previewImage.IsVisible = true;
-        _placeholderText.IsVisible = false;
+
+        if (!_previewImage.IsVisible)
+        {
+            _previewImage.IsVisible = true;
+            UpdateStage();
+        }
     }
 
     private void HidePreview(string message)
@@ -854,6 +946,6 @@ public partial class MainWindow : Window
         _previewImage.Source = null;
         _previewBitmap = null;
         _placeholderText.Text = message;
-        _placeholderText.IsVisible = true;
+        UpdateStage();
     }
 }

@@ -277,6 +277,7 @@ async fn handshake(
                 client_id,
                 display_name,
                 users,
+                ..
             } => return Ok(Some((client_id, display_name, users))),
 
             Message::PasswordRequired => {

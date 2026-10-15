@@ -5,6 +5,70 @@
 
     <Application.Styles>
         <FluentTheme />
+
+        <!-- Cartão -->
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="#1B1F24" />
+            <Setter Property="BorderBrush" Value="#2A3038" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+
+        <Style Selector="TextBlock.section">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Opacity" Value="0.6" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <Style Selector="TextBlock.cardTitle">
+            <Setter Property="FontSize" Value="22" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <!-- Ícones (Windows 11 / Windows 10) -->
+        <Style Selector="TextBlock.icon">
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- Nome editável: parece texto; destaca ao passar o mouse e ao editar -->
+        <Style Selector="TextBox.inline">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Padding" Value="8,6" />
+        </Style>
+        <Style Selector="TextBox.inline:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="#2A3038" />
+            <Setter Property="BorderBrush" Value="#3A424C" />
+        </Style>
+        <Style Selector="TextBox.inline:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="#0F1216" />
+            <Setter Property="BorderBrush" Value="#5B9BFF" />
+        </Style>
+
+        <!-- Lista e cartões de sala -->
+        <Style Selector="ListBox.rooms">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="ListBoxItem.room">
+            <Setter Property="Margin" Value="0,0,8,10" />
+            <Setter Property="Padding" Value="16,12" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="#161A1F" />
+            <Setter Property="BorderBrush" Value="#2A3038" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="ListBoxItem.room:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1D2229" />
+            <Setter Property="BorderBrush" Value="#3A424C" />
+        </Style>
+        <Style Selector="ListBoxItem.room:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1F2A3A" />
+            <Setter Property="BorderBrush" Value="#5B9BFF" />
+        </Style>
     </Application.Styles>
 
 </Application>

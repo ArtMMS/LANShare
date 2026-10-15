@@ -250,6 +250,7 @@ enum Handshake {
         client_id: u64,
         display_name: String,
         users: Vec<UserInfo>,
+        host_name: String,
     },
     Rejected(String),
     Cancelled,
@@ -284,7 +285,7 @@ async fn run_session(
     // Sem isso o TCP junta pacotes pequenos e atrasa o vídeo
     let _ = stream.set_nodelay(true);
 
-    let (client_id, display_name, users) = match handshake(
+    let (client_id, display_name, users, host_name) = match handshake(
         &mut stream,
         &username,
         &mut shutdown,
@@ -297,7 +298,8 @@ async fn run_session(
             client_id,
             display_name,
             users,
-        }) => (client_id, display_name, users),
+            host_name,
+        }) => (client_id, display_name, users, host_name),
         Ok(Handshake::Rejected(reason)) => return SessionEnd::Rejected(reason),
         Ok(Handshake::Cancelled) => return SessionEnd::Cancelled,
         Err(erro) => return SessionEnd::Failed(format!("Falha na conexão: {erro}")),
@@ -309,6 +311,7 @@ async fn run_session(
             "type": "connected",
             "client_id": client_id,
             "display_name": display_name,
+            "host_name": host_name,
             "users": users
                 .iter()
                 .map(|u| json!({ "id": u.id, "name": u.name }))
@@ -396,11 +399,13 @@ async fn handshake(
                 client_id,
                 display_name,
                 users,
+                host_name,
             } => {
                 return Ok(Handshake::Welcome {
                     client_id,
                     display_name,
                     users,
+                    host_name,
                 })
             }
 

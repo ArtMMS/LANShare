@@ -8,7 +8,7 @@
 
     <Grid>
 
-        <!-- Layout principal: lateral + área do vídeo -->
+        <!-- Layout principal: lateral + área grande -->
         <Grid x:Name="MainLayout" ColumnDefinitions="300,*">
 
             <!-- Painel lateral -->
@@ -25,11 +25,12 @@
 
                         <!-- ── Início ── -->
                         <DockPanel x:Name="HomePanel" LastChildFill="True">
-                            <StackPanel DockPanel.Dock="Bottom" Spacing="6">
+                            <StackPanel DockPanel.Dock="Bottom" Spacing="4">
                                 <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" />
-                                <TextBlock x:Name="HomeNameText" TextTrimming="CharacterEllipsis" />
-                                <Button x:Name="ChangeNameButton" Content="Alterar nome"
-                                        HorizontalAlignment="Stretch" />
+                                <TextBox x:Name="HomeNameBox" Classes="inline" MaxLength="24"
+                                         ToolTip.Tip="Clique para editar o nome" />
+                                <TextBlock x:Name="HomeNameError" Foreground="#FF6B6B" FontSize="12"
+                                           TextWrapping="Wrap" IsVisible="False" />
                             </StackPanel>
 
                             <StackPanel Spacing="8">
@@ -73,9 +74,9 @@
                                 <Button x:Name="RoomButton" Content="Abrir sala" HorizontalAlignment="Stretch" />
                                 <TextBlock x:Name="AddressLabel" Opacity="0.7" TextWrapping="Wrap" />
 
-                                <TextBlock Text="USUÁRIOS" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                <ScrollViewer MaxHeight="180">
-                                    <StackPanel x:Name="UsersPanel" Spacing="4" />
+                                <TextBlock Text="USUÁRIOS NA SALA" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                <ScrollViewer MaxHeight="220">
+                                    <StackPanel x:Name="UsersPanel" Spacing="6" />
                                 </ScrollViewer>
                             </StackPanel>
                         </DockPanel>
@@ -83,8 +84,12 @@
                         <!-- ── Entrar em sala (Client) ── -->
                         <DockPanel x:Name="ClientPanel" LastChildFill="True" IsVisible="False">
 
-                            <Button DockPanel.Dock="Bottom" x:Name="ClientBackButton" Content="Voltar ao início"
-                                    HorizontalAlignment="Stretch" Margin="0,12,0,0" />
+                            <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+                                <Button x:Name="ClientDisconnectButton" Content="Desconectar"
+                                        HorizontalAlignment="Stretch" IsVisible="False" />
+                                <Button x:Name="ClientBackButton" Content="Voltar ao início"
+                                        HorizontalAlignment="Stretch" />
+                            </StackPanel>
 
                             <ScrollViewer>
                                 <StackPanel Spacing="6" Margin="0,0,8,0">
@@ -92,38 +97,14 @@
                                     <TextBlock x:Name="ClientStatusLabel" Text="Desconectado" />
 
                                     <TextBlock Text="SEU NOME" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                    <TextBox x:Name="ClientNameBox" MaxLength="24"
-                                             PlaceholderText="Seu nome de usuário" />
-
-                                    <Grid ColumnDefinitions="*,Auto" Margin="0,12,0,0">
-                                        <TextBlock Grid.Column="0" Text="SALAS NA REDE" FontSize="11"
-                                                   Opacity="0.5" VerticalAlignment="Center" />
-                                        <Button Grid.Column="1" x:Name="RefreshRoomsButton" Content="Atualizar"
-                                                Padding="8,2" />
-                                    </Grid>
-                                    <ListBox x:Name="RoomsList" MinHeight="90" MaxHeight="170" />
-                                    <TextBlock x:Name="RoomsStatusText" Opacity="0.7" FontSize="12"
+                                    <TextBox x:Name="ClientNameBox" Classes="inline" MaxLength="24"
+                                             ToolTip.Tip="Clique para editar o nome" />
+                                    <TextBlock x:Name="ClientNameError" Foreground="#FF6B6B" FontSize="12"
                                                TextWrapping="Wrap" IsVisible="False" />
-
-                                    <TextBlock Text="OU ENTRE POR IP" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                    <TextBox x:Name="ClientAddressBox"
-                                             PlaceholderText="IP da sala (ex.: 192.168.0.10)" />
-
-                                    <!-- Só aparece quando o Host pede senha -->
-                                    <StackPanel x:Name="PasswordPanel" Spacing="6" IsVisible="False" Margin="0,8,0,0">
-                                        <TextBlock x:Name="PasswordHint" Text="Esta sala tem senha." />
-                                        <TextBox x:Name="ClientPasswordBox" PlaceholderText="Senha da sala"
-                                                 PasswordChar="●" />
-                                        <Button x:Name="PasswordConfirmButton" Content="Entrar"
-                                                HorizontalAlignment="Stretch" />
-                                    </StackPanel>
-
-                                    <Button x:Name="ClientConnectButton" Content="Conectar"
-                                            HorizontalAlignment="Stretch" Margin="0,8,0,0" />
 
                                     <TextBlock x:Name="ClientUsersHeader" Text="USUÁRIOS NA SALA" FontSize="11"
                                                Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
-                                    <StackPanel x:Name="ClientUsersPanel" Spacing="4" IsVisible="False" />
+                                    <StackPanel x:Name="ClientUsersPanel" Spacing="6" IsVisible="False" />
                                 </StackPanel>
                             </ScrollViewer>
                         </DockPanel>
@@ -132,19 +113,91 @@
                 </DockPanel>
             </Border>
 
-            <!-- Área do vídeo: preview do Host / tela recebida no Client + barra de informações -->
+            <!-- Área grande: salas / conexão / vídeo + barra de informações -->
             <Border Grid.Column="1" Background="#111418">
                 <Grid RowDefinitions="*,Auto">
-                    <Image x:Name="PreviewImage" Grid.Row="0" Stretch="Uniform"
-                           Margin="16" IsVisible="False" />
-                    <TextBlock x:Name="PlaceholderText" Grid.Row="0"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               Margin="32"
-                               Opacity="0.7"
-                               Text="" />
+
+                    <Grid Grid.Row="0">
+
+                        <!-- Client desconectado: lista de salas e entrada por IP -->
+                        <Grid x:Name="ClientLobby" ColumnDefinitions="3*,2*" Margin="32" IsVisible="False">
+
+                            <DockPanel Grid.Column="0" Margin="0,0,16,0">
+                                <TextBlock DockPanel.Dock="Top" Classes="section" Text="SALAS NA REDE" />
+                                <Border Classes="card">
+                                    <DockPanel>
+                                        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+                                            <TextBlock Classes="cardTitle" Text="Salas na rede atual"
+                                                       VerticalAlignment="Center" />
+                                            <Button Grid.Column="1" x:Name="RefreshRoomsButton"
+                                                    Padding="12,6" VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Classes="icon" Text="&#xE72C;" />
+                                                    <TextBlock Text="Atualizar" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                        <TextBlock DockPanel.Dock="Top" x:Name="RoomsStatusText"
+                                                   Opacity="0.7" FontSize="13" TextWrapping="Wrap"
+                                                   Margin="0,0,0,10" IsVisible="False" />
+                                        <ListBox x:Name="RoomsList" Classes="rooms" />
+                                    </DockPanel>
+                                </Border>
+                            </DockPanel>
+
+                            <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Top">
+                                <TextBlock Classes="section" Text="CONEXÃO POR IP" />
+                                <Border Classes="card">
+                                    <StackPanel Spacing="12">
+                                        <TextBlock Classes="cardTitle" Text="Ou entre por IP" />
+                                        <TextBox x:Name="ClientAddressBox"
+                                                 PlaceholderText="IP da sala (ex.: 192.168.0.10)" />
+                                        <Button x:Name="ClientConnectButton" HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="Conectar" />
+                                                <TextBlock Classes="icon" Text="&#xE71B;" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Client conectando: andamento e pedido de senha -->
+                        <Border x:Name="ClientConnecting" Classes="card" Width="380"
+                                HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
+                            <StackPanel Spacing="12">
+                                <TextBlock x:Name="ConnectingTitle" Classes="cardTitle" Text="Conectando..."
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="ConnectingText" Opacity="0.7" TextWrapping="Wrap" />
+
+                                <!-- Só aparece quando o Host pede senha -->
+                                <StackPanel x:Name="PasswordPanel" Spacing="8" IsVisible="False">
+                                    <TextBlock x:Name="PasswordHint" Text="Esta sala tem senha." />
+                                    <TextBox x:Name="ClientPasswordBox" PlaceholderText="Senha da sala"
+                                             PasswordChar="●" />
+                                    <Button x:Name="PasswordConfirmButton" Content="Entrar"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                </StackPanel>
+
+                                <Button x:Name="ConnectingCancelButton" Content="Cancelar"
+                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Preview do Host / tela recebida no Client -->
+                        <Image x:Name="PreviewImage" Stretch="Uniform" Margin="16" IsVisible="False" />
+                        <TextBlock x:Name="PlaceholderText"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Margin="32"
+                                   Opacity="0.7"
+                                   Text="" />
+                    </Grid>
+
                     <TextBlock x:Name="InfoText" Grid.Row="1"
                                Margin="16,0,16,12"
                                TextWrapping="Wrap"
@@ -155,13 +208,13 @@
 
         </Grid>
 
-        <!-- Tela de nome de usuário (por cima de tudo, dentro do app) -->
+        <!-- Tela de nome de usuário (primeira abertura, por cima de tudo, dentro do app) -->
         <Border x:Name="NameScreen" Background="#111418" IsVisible="False">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="340" Spacing="10">
-                <TextBlock x:Name="NameTitle" Text="Seja bem-vindo ao LANShare"
+                <TextBlock Text="Seja bem-vindo ao LANShare"
                            FontSize="22" FontWeight="SemiBold"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                <TextBlock x:Name="NameSubtitle" Text="Para começar, insira seu nome de usuário"
+                <TextBlock Text="Para começar, insira seu nome de usuário"
                            Opacity="0.8" HorizontalAlignment="Center" TextAlignment="Center"
                            TextWrapping="Wrap" Margin="0,0,0,8" />
                 <TextBox x:Name="NameInput" PlaceholderText="Digite seu nome de usuário..." MaxLength="24" />
@@ -169,7 +222,7 @@
                            TextWrapping="Wrap" IsVisible="False" />
                 <Button x:Name="NameConfirmButton" Content="Confirmar"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                <Button x:Name="NameCancelButton" Content="Cancelar" IsEnabled="False"
+                <Button Content="Cancelar" IsEnabled="False"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             </StackPanel>
         </Border>

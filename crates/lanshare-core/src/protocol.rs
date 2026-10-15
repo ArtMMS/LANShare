@@ -109,11 +109,15 @@ pub enum Message {
     /// Client -> Host: a senha digitada pelo usuário.
     Password { password: String },
 
-    /// Host -> Client: aceito. Diz quem o Client é e quem está na sala (inclui ele mesmo).
+    /// Host -> Client: aceito. Diz quem o Client é, quem está na sala (inclui ele mesmo)
+    /// e o nome de usuário do Host.
     Welcome {
         client_id: u64,
         display_name: String,
         users: Vec<UserInfo>,
+        /// Vazio quando o Host é de uma versão que ainda não envia o nome.
+        #[serde(default)]
+        host_name: String,
     },
 
     /// Host -> Client: recusado, com o motivo.
@@ -293,6 +297,7 @@ mod tests {
                 client_id: 2,
                 display_name: "Beto".to_string(),
                 users: vec![ana.clone(), beto.clone()],
+                host_name: "Carla".to_string(),
             },
             Message::Rejected {
                 reason: "sala cheia".to_string(),
@@ -314,6 +319,17 @@ mod tests {
             write_message(&mut a, &enviada).await.unwrap();
             let recebida = read_message(&mut b).await.unwrap();
             assert_eq!(enviada, recebida);
+        }
+    }
+
+    // Um Welcome de um Host antigo (sem host_name) ainda é entendido.
+    #[test]
+    fn welcome_sem_host_name_ainda_funciona() {
+        let json = r#"{"Welcome":{"client_id":1,"display_name":"Ana","users":[]}}"#;
+        let message: Message = serde_json::from_str(json).unwrap();
+        match message {
+            Message::Welcome { host_name, .. } => assert!(host_name.is_empty()),
+            outra => panic!("mensagem inesperada: {outra:?}"),
         }
     }
 
