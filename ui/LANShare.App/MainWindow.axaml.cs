@@ -203,6 +203,8 @@ public partial class MainWindow : Window
             if (_clientActive && _clientState == ClientState.Idle) ScanRooms();
         };
 
+       InitFullscreen();
+
         var savedName = ShowCoreStatus();
         if (_coreOk)
         {

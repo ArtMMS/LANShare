@@ -69,6 +69,23 @@
             <Setter Property="Background" Value="#1F2A3A" />
             <Setter Property="BorderBrush" Value="#5B9BFF" />
         </Style>
+
+        <!-- Botão de apoio (azul) -->
+        <Style Selector="Button.support">
+            <Setter Property="Background">
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Offset="0" Color="#3B5B8F" />
+                    <GradientStop Offset="1" Color="#2A4268" />
+                </LinearGradientBrush>
+            </Setter>
+            <Setter Property="BorderBrush" Value="#5B7FB8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="Button.support:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#46699F" />
+            <Setter Property="BorderBrush" Value="#7C9FD6" />
+        </Style>
     </Application.Styles>
 
 </Application>

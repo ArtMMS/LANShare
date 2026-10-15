@@ -47,7 +47,6 @@
 - [x] Display connected users
 - [x] Broadcast preview for the host
 - [x] Ask for a user name on first launch and save it
-- [ ] Add a room list with name, IP, resolution/FPS and number of users
 - [x] Ask for the password when joining a protected room
 - [x] Add Host options: kick clients and set a password
 - [x] Add a screen sharing button
@@ -60,7 +59,7 @@
 - [ ] Follow the shared window when it moves, resizes or changes monitor
 - [x] Add screen sharing controls and start/stop buttons
 - [x] Add resolution and FPS selectors (720p / 1080p, 15 / 30 FPS)
-- [ ] Add fullscreen mode (F11)
+- [x] Add fullscreen mode (F11)
 
 ---
 
@@ -128,14 +127,12 @@
 ---
 
 ## High-Performance Streaming
-
- Support resolutions above 1080p
+ Support IPV6
  Support 1440p (Quad HD)
  Support 4K
  Reach 60 FPS
  Stream multiple monitors at the same time as one large screen
  Display the webcam feed of all connected users
- Improve streaming quality
  Further reduce latency
  Optimize bandwidth usage
  Linux Port
