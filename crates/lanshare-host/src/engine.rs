@@ -231,6 +231,15 @@ impl HostEngine {
         Ok(())
     }
 
+    /// Troca o monitor ou a janela transmitida sem parar a transmissão.
+    pub fn switch_source(&self, target: CaptureTarget) -> Result<(), String> {
+        let streaming = self.lock_streaming();
+        match streaming.as_ref() {
+            Some(handle) if handle.is_running() => handle.switch_source(target),
+            _ => Err("Nao ha transmissao em andamento.".to_string()),
+        }
+    }
+
     /// Para a transmissão da tela e avisa os Clients. Devolve false se não havia transmissão.
     pub fn stop_stream(&self) -> bool {
         // Tira da caixa antes de esperar a thread terminar (para não segurar o lock)

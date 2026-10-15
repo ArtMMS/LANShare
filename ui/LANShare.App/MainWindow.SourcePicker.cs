@@ -11,7 +11,7 @@ using Avalonia.Threading;
 
 namespace LANShare.App;
 
-/// Painel de escolha do que transmitir (abre ao clicar em "Iniciar transmissão" no Host).
+/// Painel de escolha do que transmitir (abre em "Iniciar transmissão" e em "Alterar transmissão").
 /// Duas abas: "Monitores inteiros" e "Janela específica".
 public partial class MainWindow
 {
@@ -58,6 +58,10 @@ public partial class MainWindow
 
     /// Muda a cada abertura/fechamento: para as tarefas do painel anterior.
     private int _pickerGeneration;
+
+    /// O que está sendo transmitido agora (para o painel já abrir com ele marcado).
+    private int _streamMonitor = -1;
+    private ulong _streamWindow;
 
     private ListBox ActivePickerList => _pickerTab == PickerTab.Monitors ? _monitorList : _windowList;
 
@@ -107,10 +111,10 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    /// Abre o painel por cima de tudo, na aba de monitores.
+    /// Abre o painel por cima de tudo. Transmitindo, já abre com a fonte atual marcada.
     private void OpenSourcePicker()
     {
-        if (!_roomOpen || _streaming || _pickerOpen) return;
+        if (!_roomOpen || _pickerOpen) return;
 
         _pickerOpen = true;
         var generation = ++_pickerGeneration;
@@ -125,7 +129,23 @@ public partial class MainWindow
         _monitorList.SelectedIndex = monitorItems.Count > 0 ? 0 : -1; // o principal já vem selecionado
         _windowList.SelectedIndex = -1; // a janela o Host escolhe
 
-        SelectPickerTab(PickerTab.Monitors);
+        var startTab = PickerTab.Monitors;
+        if (_streaming && _streamWindow != 0)
+        {
+            var current = windowItems.FirstOrDefault(i => ((SourceTile)i.Tag!).WindowId == _streamWindow);
+            if (current is not null)
+            {
+                _windowList.SelectedItem = current;
+                startTab = PickerTab.Windows;
+            }
+        }
+        else if (_streaming && _streamMonitor >= 0)
+        {
+            var current = monitorItems.FirstOrDefault(i => ((SourceTile)i.Tag!).MonitorIndex == _streamMonitor);
+            if (current is not null) _monitorList.SelectedItem = current;
+        }
+
+        SelectPickerTab(startTab);
         _sourcePicker.IsVisible = true;
         _mainLayout.IsEnabled = false; // o fundo fica travado enquanto o painel está aberto
 
@@ -167,18 +187,56 @@ public partial class MainWindow
         Dispatcher.UIThread.Post(() => ActivePickerList.Focus());
     }
 
-    private void UpdatePickerConfirm() =>
+    /// Texto e estado do botão de confirmar (Iniciar ou Alterar, conforme a transmissão).
+    private void UpdatePickerConfirm()
+    {
+        _pickerConfirmButton.Content = _streaming ? "Alterar transmissão" : "Iniciar transmissão";
         _pickerConfirmButton.IsEnabled = ActivePickerList.SelectedItem is not null;
+    }
 
-    /// Fecha o painel e começa a transmitir o que foi escolhido na aba aberta.
+    /// Fecha o painel e começa (ou troca) a transmissão para o que foi escolhido.
     private void ConfirmSourcePicker()
     {
         if (!_pickerOpen) return;
         if (ActivePickerList.SelectedItem is not ListBoxItem { Tag: SourceTile tile }) return;
 
         CloseSourcePicker();
+
+        if (_streaming)
+        {
+            SwitchStream(tile);
+            return;
+        }
+
         if (tile.IsWindow) StartWindowStream(tile.WindowId);
         else StartStream(tile.MonitorIndex);
+
+        if (_streaming) RememberSource(tile);
+    }
+
+    /// Troca o monitor/janela sem parar a transmissão.
+    private void SwitchStream(SourceTile tile)
+    {
+        // Escolheu o mesmo que já está no ar: nada a fazer
+        if (tile.IsWindow ? tile.WindowId == _streamWindow : tile.MonitorIndex == _streamMonitor) return;
+
+        var (ok, error) = tile.IsWindow
+            ? NativeMethods.HostSwitchWindow(tile.WindowId)
+            : NativeMethods.HostSwitchMonitor(tile.MonitorIndex);
+        if (!ok)
+        {
+            _infoText.Text = error ?? "Não foi possível alterar a transmissão.";
+            return;
+        }
+
+        RememberSource(tile);
+        _infoText.Text = tile.IsWindow ? "Transmissão alterada para a janela." : "Transmissão alterada para o monitor.";
+    }
+
+    private void RememberSource(SourceTile tile)
+    {
+        _streamWindow = tile.IsWindow ? tile.WindowId : 0;
+        _streamMonitor = tile.IsWindow ? -1 : tile.MonitorIndex;
     }
 
     /// Começa a transmitir uma janela (o monitor usa o StartStream do MainWindow.axaml.cs).

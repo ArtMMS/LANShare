@@ -147,7 +147,7 @@ public partial class MainWindow : Window
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
-        // Painel "Escolha o monitor"
+        // Painel de escolha do que transmitir
         InitSourcePicker();
 
         // Tela de nome (primeira abertura)
@@ -167,9 +167,9 @@ public partial class MainWindow : Window
         _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
         _joinRoomButton.Click += (_, _) => EnterClientMode();
 
-        // Host
+        // Host ("Iniciar transmissão" vira "Alterar transmissão" enquanto transmite)
         _roomButton.Click += (_, _) => ToggleRoom();
-        _startStreamButton.Click += (_, _) => OpenSourcePicker(); // escolhe o monitor antes de transmitir
+        _startStreamButton.Click += (_, _) => OpenSourcePicker();
         _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
         _hostBackButton.Click += (_, _) => ShowMode(Mode.Home); // só aparece com a sala fechada
 
@@ -524,9 +524,15 @@ public partial class MainWindow : Window
         _statusLabel.Text = _roomOpen ? (_streaming ? "Transmitindo" : "Sala aberta") : "Sala fechada";
         _roomButton.Content = _roomOpen ? "Fechar sala" : "Abrir sala";
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
-        _startStreamButton.IsEnabled = _roomOpen && !_streaming;
+
+        // Transmitindo, o mesmo botão troca o monitor/janela sem parar a transmissão
+        _startStreamButton.IsEnabled = _roomOpen;
+        _startStreamButton.Content = _streaming ? "Alterar transmissão" : "Iniciar transmissão";
         _stopStreamButton.IsEnabled = _roomOpen && _streaming;
+
         _hostBackButton.IsVisible = !_roomOpen; // com a sala aberta, "Fechar sala" já volta ao início
+
+        if (_pickerOpen) UpdatePickerConfirm();
     }
 
     // ───────────────────────── Client ─────────────────────────

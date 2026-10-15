@@ -65,6 +65,12 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_host_start_stream_window(uint height, uint fps, ulong id);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_switch_monitor(int monitor);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_switch_window(ulong id);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_host_stop_stream();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -244,6 +250,14 @@ internal static class NativeMethods
     /// Transmite uma janela específica (o "id" da lista de janelas).
     public static (bool Ok, string? Error) HostStartStreamWindow(uint height, uint fps, ulong id) =>
         ParseReply(lanshare_host_start_stream_window(height, fps, id));
+
+    /// Troca a transmissão em andamento para outro monitor, sem parar.
+    public static (bool Ok, string? Error) HostSwitchMonitor(int monitor) =>
+        ParseReply(lanshare_host_switch_monitor(monitor));
+
+    /// Troca a transmissão em andamento para uma janela, sem parar.
+    public static (bool Ok, string? Error) HostSwitchWindow(ulong id) =>
+        ParseReply(lanshare_host_switch_window(id));
 
     public static bool HostStopStream() => lanshare_host_stop_stream() != 0;
 

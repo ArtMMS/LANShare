@@ -9,7 +9,7 @@ use crate::registry::Registry;
 use rayon::prelude::*;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -18,6 +18,9 @@ type BoxError = Box<dyn Error + Send + Sync>;
 
 /// De quanto em quanto tempo o Host emite o resumo da transmissão.
 const REPORT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Tempo máximo esperando a transmissão trocar de monitor/janela.
+const SWITCH_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Opções escolhidas pelo Host antes de transmitir.
 #[derive(Debug, Clone, Copy)]
@@ -28,11 +31,18 @@ pub struct StreamSettings {
     pub fps: u32,
 }
 
+/// Pedido de troca do que está sendo capturado, com a resposta de volta.
+struct SwitchRequest {
+    target: CaptureTarget,
+    reply: SyncSender<Result<(), String>>,
+}
+
 /// A transmissão em andamento (roda numa thread própria).
 pub struct StreamHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     events: EventSender,
+    switch_tx: Sender<SwitchRequest>,
 }
 
 impl StreamHandle {
@@ -48,6 +58,7 @@ impl StreamHandle {
         let thread_stop = stop.clone();
         let thread_events = events.clone();
         let thread_preview = preview.clone();
+        let (switch_tx, switch_rx) = mpsc::channel();
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
@@ -56,6 +67,7 @@ impl StreamHandle {
                 thread_stop,
                 settings,
                 target,
+                switch_rx,
                 &thread_events,
                 &preview,
             );
@@ -69,7 +81,21 @@ impl StreamHandle {
             stop,
             thread: Some(thread),
             events,
+            switch_tx,
         }
+    }
+
+    /// Troca o que está sendo transmitido sem parar a transmissão.
+    /// Espera a troca acontecer e devolve o resultado.
+    pub fn switch_source(&self, target: CaptureTarget) -> Result<(), String> {
+        let (reply, answer) = mpsc::sync_channel(1);
+        self.switch_tx
+            .send(SwitchRequest { target, reply })
+            .map_err(|_| "A transmissao ja terminou.".to_string())?;
+
+        answer
+            .recv_timeout(SWITCH_TIMEOUT)
+            .map_err(|_| "A troca demorou demais. Tente de novo.".to_string())?
     }
 
     /// false se a transmissão já terminou sozinha (por erro).
@@ -94,22 +120,29 @@ impl Drop for StreamHandle {
     }
 }
 
+/// Tamanho fixo da imagem transmitida: 16:9 na altura escolhida (1280x720 ou 1920x1080).
+/// Qualquer fonte (monitor ou janela, de qualquer tamanho) é encaixada nele.
+fn canvas_size(height: u32) -> (u32, u32) {
+    let height = height & !1;
+    ((height * 16 / 9) & !1, height)
+}
+
 fn run(
     registry: Registry,
     stop: Arc<AtomicBool>,
     settings: StreamSettings,
     target: CaptureTarget,
+    switch_rx: Receiver<SwitchRequest>,
     events: &EventSender,
     preview: &PreviewSlot,
 ) -> Result<(), BoxError> {
     events.debug("run: iniciando a captura");
-    let capture = ScreenCapture::start_target(target)?;
+    let mut capture = ScreenCapture::start_target(target)?;
+    let mut current = target;
     events.debug("run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
 
-    // Tamanho fixado no primeiro frame. Se a janela (ou o monitor) mudar de tamanho depois,
-    // a imagem é encaixada nele, para o encoder e os Clients não precisarem mudar.
-    let mut canvas: Option<(u32, u32)> = None;
+    let (canvas_w, canvas_h) = canvas_size(settings.height);
 
     let started = Instant::now();
     let mut report_start = Instant::now();
@@ -125,11 +158,29 @@ fn run(
     let mut next_frame_at = Instant::now();
 
     while !stop.load(Ordering::Relaxed) {
+        // Troca de monitor/janela: liga a captura nova antes de desligar a antiga
+        if let Ok(request) = switch_rx.try_recv() {
+            let result = match ScreenCapture::start_target(request.target) {
+                Ok(new_capture) => {
+                    let old = std::mem::replace(&mut capture, new_capture);
+                    let _ = old.stop();
+                    current = request.target;
+                    // A imagem nova aparece na hora para quem está assistindo
+                    if let Some(encoder) = encoder.as_ref() {
+                        encoder.force_keyframe();
+                    }
+                    Ok(())
+                }
+                Err(erro) => Err(format!("Nao foi possivel trocar a transmissao: {erro}")),
+            };
+            let _ = request.reply.send(result);
+        }
+
         let frame = match capture.frames.recv_timeout(Duration::from_millis(100)) {
             Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
-                let reason = match target {
+                let reason = match current {
                     CaptureTarget::Window(_) => "a janela compartilhada foi fechada",
                     _ => "a captura de tela foi encerrada",
                 };
@@ -142,13 +193,11 @@ fn run(
             events.debug("run: primeiro frame recebido da captura");
         }
 
-        let frame = match canvas {
-            None => {
-                canvas = Some((frame.width, frame.height));
-                frame
-            }
-            Some((w, h)) if frame.width == w && frame.height == h => frame,
-            Some((w, h)) => fit_into(&frame, w, h),
+        // Encaixa no quadro fixo (se já não tiver o tamanho certo)
+        let frame = if frame.width == canvas_w && frame.height == canvas_h {
+            frame
+        } else {
+            fit_into(&frame, canvas_w, canvas_h)
         };
 
         // Preview do Host: no mesmo FPS da transmissão (com folga de 1/4 para o jitter)
@@ -177,7 +226,7 @@ fn run(
             next_frame_at + frame_interval
         };
 
-        // O encoder nasce no primeiro frame, quando já sabemos a resolução da tela
+        // O encoder nasce no primeiro frame enviado
         if encoder.is_none() {
             events.debug("run: criando o encoder");
             let created = HwEncoder::new(
@@ -255,7 +304,7 @@ fn run(
 }
 
 /// Encaixa o frame num quadro de `width` x `height`, mantendo a proporção
-/// (centralizado, com faixas pretas onde sobrar). Usado quando a janela muda de tamanho.
+/// (centralizado, com faixas pretas onde sobrar).
 fn fit_into(frame: &CapturedFrame, width: u32, height: u32) -> CapturedFrame {
     let (sw, sh) = (frame.width as usize, frame.height as usize);
     let (cw, ch) = (width as usize, height as usize);

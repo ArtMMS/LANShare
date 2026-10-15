@@ -228,17 +228,25 @@ pub extern "C" fn lanshare_host_start_stream(height: u32, fps: u32) -> *mut c_ch
 /// (negativo = principal). `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream_on(height: u32, fps: u32, monitor: i32) -> *mut c_char {
-    let target = match usize::try_from(monitor) {
-        Ok(index) => CaptureTarget::Monitor(index),
-        Err(_) => CaptureTarget::PrimaryMonitor,
-    };
-    start_stream(height, fps, target)
+    start_stream(height, fps, monitor_target(monitor))
 }
 
 /// Começa a transmitir uma janela (o "id" da lista de janelas).
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream_window(height: u32, fps: u32, id: u64) -> *mut c_char {
     start_stream(height, fps, CaptureTarget::Window(id))
+}
+
+/// Troca a transmissão em andamento para outro monitor (negativo = principal), sem parar.
+#[no_mangle]
+pub extern "C" fn lanshare_host_switch_monitor(monitor: i32) -> *mut c_char {
+    switch_source(monitor_target(monitor))
+}
+
+/// Troca a transmissão em andamento para uma janela (o "id" da lista), sem parar.
+#[no_mangle]
+pub extern "C" fn lanshare_host_switch_window(id: u64) -> *mut c_char {
+    switch_source(CaptureTarget::Window(id))
 }
 
 /// Para a transmissão. Retorna 1 se havia uma transmissão, 0 se não.
@@ -296,11 +304,30 @@ pub extern "C" fn lanshare_host_stop() {
     }
 }
 
+/// Índice da lista de monitores -> o que capturar (negativo = principal).
+fn monitor_target(monitor: i32) -> CaptureTarget {
+    match usize::try_from(monitor) {
+        Ok(index) => CaptureTarget::Monitor(index),
+        Err(_) => CaptureTarget::PrimaryMonitor,
+    }
+}
+
 fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
     let host = HOST.lock().unwrap();
     match host.as_ref() {
         None => reply_err("a sala não está aberta"),
         Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, target) {
+            Ok(()) => reply_ok(),
+            Err(error) => reply_err(&error),
+        },
+    }
+}
+
+fn switch_source(target: CaptureTarget) -> *mut c_char {
+    let host = HOST.lock().unwrap();
+    match host.as_ref() {
+        None => reply_err("a sala não está aberta"),
+        Some(engine) => match engine.switch_source(target) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
         },
