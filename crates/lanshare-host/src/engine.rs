@@ -40,6 +40,9 @@ const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 /// Tamanho máximo do nome da sala (em caracteres).
 const MAX_ROOM_NAME_LEN: usize = 32;
 
+/// De quanto em quanto tempo o vigia confere se a transmissão caiu sozinha.
+const STREAM_WATCH_INTERVAL: Duration = Duration::from_millis(500);
+
 /// Opções da sala, escolhidas pelo Host antes de abrir.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -72,7 +75,7 @@ pub struct HostEngine {
     event_rx: Mutex<Receiver<HostEvent>>,
     shutdown_tx: watch::Sender<bool>,
     /// A transmissão da tela (None = não está transmitindo).
-    streaming: Mutex<Option<StreamHandle>>,
+    streaming: Arc<Mutex<Option<StreamHandle>>>,
     /// Miniatura do que está sendo transmitido (preview do Host).
     preview: PreviewSlot,
 }
@@ -99,6 +102,7 @@ impl HostEngine {
         let registry = Registry::new(config.max_clients);
         let kicker = Kicker::new();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let streaming: Arc<Mutex<Option<StreamHandle>>> = Arc::new(Mutex::new(None));
 
         let shared = Shared {
             registry: registry.clone(),
@@ -126,6 +130,13 @@ impl HostEngine {
             },
         ));
 
+        // Avisa os Clients se a transmissão cair sozinha (por exemplo, por erro de captura)
+        runtime.spawn(watch_stream(
+            streaming.clone(),
+            registry.clone(),
+            shutdown_rx.clone(),
+        ));
+
         // Aceita os Clients que chegarem
         runtime.spawn(accept_loop(listener, shutdown_rx, shared));
 
@@ -136,7 +147,7 @@ impl HostEngine {
             events,
             event_rx: Mutex::new(event_rx),
             shutdown_tx,
-            streaming: Mutex::new(None),
+            streaming,
             preview: PreviewSlot::default(),
         })
     }
@@ -209,7 +220,7 @@ impl HostEngine {
         Ok(())
     }
 
-    /// Para a transmissão da tela. Devolve false se não havia transmissão.
+    /// Para a transmissão da tela e avisa os Clients. Devolve false se não havia transmissão.
     pub fn stop_stream(&self) -> bool {
         // Tira da caixa antes de esperar a thread terminar (para não segurar o lock)
         let handle = self.lock_streaming().take();
@@ -217,6 +228,8 @@ impl HostEngine {
         match handle {
             Some(running) => {
                 running.stop();
+                // Os Clients mostram "transmissão parada" em vez de ficarem com a última imagem
+                self.registry.broadcast(&Message::StreamStopped, None);
                 true
             }
             None => false,
@@ -263,6 +276,43 @@ impl HostEngine {
 
     fn lock_streaming(&self) -> MutexGuard<'_, Option<StreamHandle>> {
         self.streaming.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Se a transmissão cair sozinha (por exemplo, erro de captura), avisa os Clients
+/// do mesmo jeito que numa parada normal.
+async fn watch_stream(
+    streaming: Arc<Mutex<Option<StreamHandle>>>,
+    registry: Registry,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(STREAM_WATCH_INTERVAL);
+    let mut dead_polls = 0u32;
+
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = shutdown.changed() => break,
+        }
+
+        let ended = {
+            let mut slot = streaming.lock().unwrap_or_else(|e| e.into_inner());
+            let dead = slot.as_ref().is_some_and(|s| !s.is_running());
+            dead_polls = if dead { dead_polls + 1 } else { 0 };
+
+            // Duas checagens seguidas, para não confundir o início da transmissão com uma queda
+            if dead_polls >= 2 {
+                slot.take()
+            } else {
+                None
+            }
+        };
+
+        if let Some(handle) = ended {
+            dead_polls = 0;
+            handle.stop();
+            registry.broadcast(&Message::StreamStopped, None);
+        }
     }
 }
 

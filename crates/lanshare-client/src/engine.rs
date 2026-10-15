@@ -319,7 +319,8 @@ async fn run_session(
         }),
     );
 
-    let generation = frame.begin_session();
+    // Número da "geração" do vídeo: muda quando a transmissão para, para descartar imagens velhas
+    let mut generation = frame.begin_session();
 
     // O Client só envia Ping/Pong/Bye, mas a caixa de saída precisa existir
     let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel::<Message>();
@@ -345,6 +346,14 @@ async fn run_session(
                         VideoPipeline::start(cb_frame.clone(), generation, cb_events.clone())
                     })
                     .push(video_frame);
+            }
+            Message::StreamStopped => {
+                // O Host parou de transmitir: o decodificador antigo termina sozinho
+                video = None;
+                // Imagens que ainda estavam sendo decodificadas são descartadas
+                generation = cb_frame.begin_session();
+                stats = VideoStats::new();
+                send(&cb_events, json!({ "type": "stream_stopped" }));
             }
             Message::UserJoined { user } => send(
                 &cb_events,

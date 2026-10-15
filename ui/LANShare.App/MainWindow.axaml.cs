@@ -742,6 +742,14 @@ public partial class MainWindow : Window
                         RefreshClientInfo();
                         break;
 
+                    case "stream_stopped":
+                        // O Host parou de transmitir: a conexão continua, só a imagem acaba
+                        _videoFps = _videoMbps = 0;
+                        _videoSize = null;
+                        HidePreview("Transmissão parada.");
+                        RefreshClientInfo();
+                        break;
+
                     case "video_error":
                         _infoText.Text = e.GetProperty("error").GetString() ?? "Erro no vídeo.";
                         break;

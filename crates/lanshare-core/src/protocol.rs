@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -134,6 +134,9 @@ pub enum Message {
 
     /// Host -> Clients: alguém foi removido da sala pelo Host.
     UserKicked { user: UserInfo },
+
+    /// Host -> Clients: o Host parou de transmitir a tela (a conexão continua aberta).
+    StreamStopped,
 
     /// "Você está aí?" O outro lado responde com um Pong do mesmo id.
     Ping { id: u64 },
@@ -308,6 +311,7 @@ mod tests {
                 reason: "Voce foi removido pelo Host".to_string(),
             },
             Message::UserKicked { user: beto },
+            Message::StreamStopped,
             Message::Ping { id: 7 },
             Message::Pong { id: 7 },
             Message::Bye,
