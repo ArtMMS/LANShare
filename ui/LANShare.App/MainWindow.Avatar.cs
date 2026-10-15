@@ -6,7 +6,6 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
-using Avalonia.Threading;
 
 namespace LANShare.App;
 
@@ -18,8 +17,11 @@ public partial class MainWindow
     private const double CropCircle = 240;
     private const double CropInset = (CropView - CropCircle) / 2;
 
-    private static readonly IBrush NoteBrush = new SolidColorBrush(Color.Parse("#9AA4B2"));
-    private static readonly IBrush ErrorBrush = new SolidColorBrush(Color.Parse("#FF6B6B"));
+    /// Formatos aceitos como avatar (GIF fica de fora).
+    private static readonly FilePickerFileType AvatarImageTypes = new("Imagens")
+    {
+        Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp" },
+    };
 
     private Border _avatarButton = null!, _avatarEditor = null!, _avatarDropZone = null!, _avatarCropArea = null!;
     private Ellipse _avatarImage = null!;
@@ -30,17 +32,10 @@ public partial class MainWindow
     private Button _avatarChooseButton = null!, _avatarRemoveButton = null!, _avatarCancelButton = null!,
         _avatarSaveButton = null!, _settingsButton = null!;
 
-    // Avatar mostrado no cartão (com animação, se for GIF)
-    private readonly ImageBrush _avatarBrush = new() { Stretch = Stretch.UniformToFill };
-    private readonly DispatcherTimer _avatarTimer = new();
-    private AvatarImage? _avatar;
-    private int _avatarFrame;
-
     private bool _avatarEditorOpen;
 
     // Imagem sendo recortada e a posição dela dentro da área de recorte
     private Bitmap? _cropSource;
-    private byte[]? _cropGifBytes; // só quando a imagem escolhida é um GIF
     private double _cropMinScale = 1, _cropScale = 1, _cropX, _cropY;
     private Point? _cropDragFrom;
 
@@ -71,7 +66,7 @@ public partial class MainWindow
         _avatarDropZone.PointerPressed += async (_, _) => await PickAvatarFileAsync();
         _avatarChooseButton.Click += async (_, _) => await PickAvatarFileAsync();
         _avatarCancelButton.Click += (_, _) => CloseAvatarEditor();
-        _avatarSaveButton.Click += async (_, _) => await SaveAvatarAsync();
+        _avatarSaveButton.Click += (_, _) => SaveAvatar();
         _avatarRemoveButton.Click += (_, _) => RemoveAvatar();
         _avatarZoomSlider.ValueChanged += (_, _) => OnCropZoomChanged();
 
@@ -118,64 +113,14 @@ public partial class MainWindow
 
         AddHandler(KeyDownEvent, OnAvatarKeyDown, RoutingStrategies.Tunnel);
 
-        // Animação do GIF: cada quadro tem o seu próprio tempo
-        _avatarTimer.Tick += (_, _) => NextAvatarFrame();
-
-        _ = LoadAvatarAsync();
+        ApplyAvatar(AvatarStore.Load());
     }
 
-    // ───────────────────────── Avatar no cartão ─────────────────────────
-
-    /// Carrega o avatar salvo sem travar a janela (um GIF leva um instante para preparar).
-    private async Task LoadAvatarAsync()
+    private void ApplyAvatar(Bitmap? avatar)
     {
-        AvatarImage? avatar;
-        try
-        {
-            avatar = await Task.Run(AvatarStore.Load);
-        }
-        catch (Exception)
-        {
-            avatar = AvatarStore.LoadDefault();
-        }
-        ApplyAvatar(avatar);
-    }
-
-    private void ApplyAvatar(AvatarImage? avatar)
-    {
-        _avatarTimer.Stop();
-        _avatar = avatar;
-        _avatarFrame = 0;
-
-        if (avatar is null)
-        {
-            _avatarImage.Fill = new SolidColorBrush(Color.Parse("#2E343C"));
-            return;
-        }
-
-        _avatarBrush.Source = avatar.Frames[0];
-        _avatarImage.Fill = _avatarBrush;
-        _avatarImage.InvalidateVisual();
-
-        if (avatar.IsAnimated)
-        {
-            _avatarTimer.Interval = avatar.Delays[0];
-            _avatarTimer.Start();
-        }
-    }
-
-    private void NextAvatarFrame()
-    {
-        if (_avatar is not { IsAnimated: true } avatar)
-        {
-            _avatarTimer.Stop();
-            return;
-        }
-
-        _avatarFrame = (_avatarFrame + 1) % avatar.Frames.Count;
-        _avatarBrush.Source = avatar.Frames[_avatarFrame];
-        _avatarTimer.Interval = avatar.Delays[_avatarFrame];
-        _avatarImage.InvalidateVisual();
+        _avatarImage.Fill = avatar is null
+            ? new SolidColorBrush(Color.Parse("#2E343C"))
+            : new ImageBrush(avatar) { Stretch = Stretch.UniformToFill };
     }
 
     private void OnAvatarKeyDown(object? sender, KeyEventArgs e)
@@ -193,7 +138,7 @@ public partial class MainWindow
 
         _avatarEditorOpen = true;
         ClearCrop();
-        SetAvatarMessage(null);
+        SetAvatarError(null);
         _avatarRemoveButton.IsVisible = AvatarStore.HasCustom;
 
         _avatarEditor.IsVisible = true;
@@ -216,7 +161,6 @@ public partial class MainWindow
         _avatarCropImage.Source = null;
         _cropSource?.Dispose();
         _cropSource = null;
-        _cropGifBytes = null;
         _cropDragFrom = null;
 
         _avatarDropZone.IsVisible = true;
@@ -226,11 +170,9 @@ public partial class MainWindow
         _avatarSaveButton.IsEnabled = false;
     }
 
-    /// Mensagem embaixo da imagem: aviso (cinza) ou erro (vermelho).
-    private void SetAvatarMessage(string? message, bool isError = false)
+    private void SetAvatarError(string? message)
     {
         _avatarEditorError.Text = message ?? "";
-        _avatarEditorError.Foreground = isError ? ErrorBrush : NoteBrush;
         _avatarEditorError.IsVisible = !string.IsNullOrEmpty(message);
     }
 
@@ -240,7 +182,7 @@ public partial class MainWindow
         {
             Title = "Escolha uma imagem para o avatar",
             AllowMultiple = false,
-            FileTypeFilter = new[] { FilePickerFileTypes.ImageAll },
+            FileTypeFilter = new[] { AvatarImageTypes },
         });
 
         if (files.Count > 0) await LoadCropFileAsync(files[0]);
@@ -271,39 +213,36 @@ public partial class MainWindow
                 bytes = memory.ToArray();
             }
 
-            var isGif = AvatarStore.IsGif(bytes);
-            if (isGif && bytes.Length > AvatarStore.MaxGifBytes)
+            if (AvatarStore.IsGif(bytes))
             {
-                SetAvatarMessage("Esse GIF é grande demais (máximo de 15 MB).", isError: true);
+                SetAvatarError("GIF não é aceito como avatar. Use PNG, JPG, BMP ou WEBP.");
                 return;
             }
 
-            // Para um GIF, o recorte mostra o primeiro quadro
             var bitmap = new Bitmap(new MemoryStream(bytes));
             if (bitmap.PixelSize.Width < 2 || bitmap.PixelSize.Height < 2)
             {
                 bitmap.Dispose();
-                SetAvatarMessage("Essa imagem é pequena demais.", isError: true);
+                SetAvatarError("Essa imagem é pequena demais.");
                 return;
             }
 
-            StartCrop(bitmap, isGif ? bytes : null);
-            SetAvatarMessage(isGif ? "GIF: a animação aparece no seu avatar depois de salvar." : null);
+            SetAvatarError(null);
+            StartCrop(bitmap);
         }
         catch (Exception)
         {
-            SetAvatarMessage("Não foi possível abrir essa imagem. Use PNG, JPG, GIF, BMP ou WEBP.", isError: true);
+            SetAvatarError("Não foi possível abrir essa imagem. Use PNG, JPG, BMP ou WEBP.");
         }
     }
 
     // ───────────────────────── Recorte ─────────────────────────
 
     /// Mostra a imagem na área de recorte, cobrindo o círculo e centralizada.
-    private void StartCrop(Bitmap bitmap, byte[]? gifBytes)
+    private void StartCrop(Bitmap bitmap)
     {
         _cropSource?.Dispose();
         _cropSource = bitmap;
-        _cropGifBytes = gifBytes;
         _avatarCropImage.Source = bitmap;
 
         var (w, h) = (bitmap.PixelSize.Width, bitmap.PixelSize.Height);
@@ -354,7 +293,7 @@ public partial class MainWindow
         Canvas.SetTop(_avatarCropImage, _cropY);
     }
 
-    private async Task SaveAvatarAsync()
+    private void SaveAvatar()
     {
         if (_cropSource is null) return;
 
@@ -365,27 +304,18 @@ public partial class MainWindow
             CropCircle / _cropScale,
             CropCircle / _cropScale);
 
-        _avatarSaveButton.IsEnabled = false;
         try
         {
-            if (_cropGifBytes is { } gif)
-            {
-                await Task.Run(() => AvatarStore.SaveGif(gif, crop));
-            }
-            else
-            {
-                AvatarStore.SaveStill(_cropSource, crop);
-            }
+            AvatarStore.Save(_cropSource, crop);
         }
         catch (Exception ex)
         {
-            SetAvatarMessage("Não foi possível salvar o avatar: " + ex.Message, isError: true);
-            _avatarSaveButton.IsEnabled = true;
+            SetAvatarError("Não foi possível salvar o avatar: " + ex.Message);
             return;
         }
 
+        ApplyAvatar(AvatarStore.Load());
         CloseAvatarEditor();
-        await LoadAvatarAsync();
     }
 
     private void RemoveAvatar()
@@ -396,7 +326,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            SetAvatarMessage("Não foi possível remover o avatar: " + ex.Message, isError: true);
+            SetAvatarError("Não foi possível remover o avatar: " + ex.Message);
             return;
         }
 
