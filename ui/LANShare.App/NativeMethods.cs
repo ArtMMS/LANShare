@@ -37,6 +37,9 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_host_kick(ulong id);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_set_avatar(IntPtr pngBase64);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_host_monitors();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -92,6 +95,9 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_client_submit_password(IntPtr password);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_client_set_avatar(IntPtr pngBase64);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_client_disconnect();
@@ -191,6 +197,10 @@ internal static class NativeMethods
 
     public static (bool Ok, string? Error) HostKick(ulong id) => ParseReply(lanshare_host_kick(id));
 
+    /// Avatar do Host (PNG em base64; null = sem avatar), enviado a todos na sala.
+    public static (bool Ok, string? Error) HostSetAvatar(string? pngBase64) =>
+        CallWithString(pngBase64 ?? "", lanshare_host_set_avatar);
+
     /// Tamanho máximo da miniatura de monitor/janela (igual ao THUMB_MAX do monitors.rs).
     public const int ThumbnailMaxWidth = 400;
     public const int ThumbnailMaxHeight = 240;
@@ -288,6 +298,10 @@ internal static class NativeMethods
 
     public static (bool Ok, string? Error) ClientSubmitPassword(string password) =>
         CallWithString(password, lanshare_client_submit_password);
+
+    /// O meu avatar (PNG em base64; null = sem avatar), enviado ao Host ao entrar numa sala.
+    public static (bool Ok, string? Error) ClientSetAvatar(string? pngBase64) =>
+        CallWithString(pngBase64 ?? "", lanshare_client_set_avatar);
 
     public static bool ClientDisconnect() => lanshare_client_disconnect() != 0;
 

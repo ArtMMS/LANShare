@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -19,6 +19,12 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Sem receber nada por este tempo, o outro lado é considerado desconectado.
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
+
+/// Id usado para o Host nos avatares (os Clients começam em 1).
+pub const HOST_USER_ID: u64 = 0;
+
+/// Tamanho máximo de um avatar na rede (PNG em base64).
+pub const MAX_AVATAR_LEN: usize = 256 * 1024;
 
 /// Tipos de mensagem na rede.
 const KIND_JSON: u8 = 0;
@@ -134,6 +140,12 @@ pub enum Message {
 
     /// Host -> Clients: alguém foi removido da sala pelo Host.
     UserKicked { user: UserInfo },
+
+    /// Client -> Host: o meu avatar (PNG em base64). Vazio = sem avatar (usar o padrão).
+    Avatar { png_base64: String },
+
+    /// Host -> Clients: o avatar de alguém (id 0 = o Host). Vazio = sem avatar.
+    UserAvatar { id: u64, png_base64: String },
 
     /// Host -> Clients: o Host parou de transmitir a tela (a conexão continua aberta).
     StreamStopped,
@@ -311,6 +323,13 @@ mod tests {
                 reason: "Voce foi removido pelo Host".to_string(),
             },
             Message::UserKicked { user: beto },
+            Message::Avatar {
+                png_base64: "iVBORw0KGgo=".to_string(),
+            },
+            Message::UserAvatar {
+                id: HOST_USER_ID,
+                png_base64: String::new(),
+            },
             Message::StreamStopped,
             Message::Ping { id: 7 },
             Message::Pong { id: 7 },

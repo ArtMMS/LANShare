@@ -142,6 +142,20 @@ pub extern "C" fn lanshare_host_kick(id: u64) -> *mut c_char {
     }
 }
 
+/// Define o avatar do Host (PNG em base64; vazio ou NULL = sem avatar) e avisa os Clients.
+#[no_mangle]
+pub extern "C" fn lanshare_host_set_avatar(png_base64: *const c_char) -> *mut c_char {
+    let avatar = read_c_string(png_base64).filter(|text| !text.is_empty());
+    let host = HOST.lock().unwrap();
+    match host.as_ref() {
+        None => reply_err("a sala não está aberta"),
+        Some(engine) => match engine.set_avatar(avatar) {
+            Ok(()) => reply_ok(),
+            Err(error) => reply_err(&error),
+        },
+    }
+}
+
 /// Monitores do computador, como JSON (principal primeiro):
 /// [{"index":0,"name":"Monitor 1 - DELL U2419H","model":"DELL U2419H","width":1920,"height":1080,"primary":true}].
 /// Não precisa da sala aberta.
@@ -409,6 +423,14 @@ pub extern "C" fn lanshare_client_submit_password(password: *const c_char) -> *m
         return reply_err("senha inválida");
     };
     with_client(|engine| engine.submit_password(password))
+}
+
+/// Define o meu avatar (PNG em base64; vazio ou NULL = sem avatar).
+/// Vai ao Host ao entrar numa sala (ou na hora, se já estiver numa).
+#[no_mangle]
+pub extern "C" fn lanshare_client_set_avatar(png_base64: *const c_char) -> *mut c_char {
+    let avatar = read_c_string(png_base64).filter(|text| !text.is_empty());
+    with_client(|engine| engine.set_avatar(avatar))
 }
 
 /// Desconecta da sala (ou cancela a tentativa). O fim chega no evento "disconnected".

@@ -60,6 +60,9 @@ pub enum HostEvent {
     /// Um Client foi removido pelo Host.
     UserKicked { id: u64, name: String, addr: String },
 
+    /// Um Client mandou (ou trocou) o avatar. Vazio = sem avatar (usar o padrão).
+    UserAvatar { id: u64, png_base64: String },
+
     /// Alguém tentou entrar e foi recusado (senha errada, sala cheia, versão incompatível...).
     UserRejected {
         name: String,

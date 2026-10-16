@@ -7,7 +7,7 @@ use crate::discovery;
 use crate::normalize_address;
 use crate::video::{FrameSlot, VideoPipeline};
 use lanshare_core::protocol::{
-    read_message, write_message, Message, UserInfo, VideoFrame, PROTOCOL_VERSION,
+    read_message, write_message, Message, UserInfo, VideoFrame, MAX_AVATAR_LEN, PROTOCOL_VERSION,
 };
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
@@ -44,6 +44,8 @@ fn send(events: &EventTx, event: Value) {
 struct Session {
     shutdown_tx: watch::Sender<bool>,
     password_tx: mpsc::UnboundedSender<String>,
+    /// Caixa de saída: o que for posto aqui vai para o Host (depois de entrar na sala).
+    outgoing_tx: mpsc::UnboundedSender<Message>,
 }
 
 /// O Client em execução. Tem o seu próprio runtime do tokio, então pode ser usado de qualquer thread.
@@ -54,6 +56,8 @@ pub struct ClientEngine {
     session: Arc<Mutex<Option<Session>>>,
     scanning: Arc<AtomicBool>,
     frame: FrameSlot,
+    /// O meu avatar (PNG em base64), enviado ao entrar numa sala. None = sem avatar.
+    avatar: Mutex<Option<String>>,
 }
 
 impl ClientEngine {
@@ -73,6 +77,7 @@ impl ClientEngine {
             session: Arc::new(Mutex::new(None)),
             scanning: Arc::new(AtomicBool::new(false)),
             frame: FrameSlot::default(),
+            avatar: Mutex::new(None),
         })
     }
 
@@ -83,6 +88,22 @@ impl ClientEngine {
             .unwrap_or_else(|e| e.into_inner())
             .try_recv()
             .ok()
+    }
+
+    /// Define (ou apaga, com None) o meu avatar. Se já estiver numa sala, avisa o Host na hora.
+    pub fn set_avatar(&self, png_base64: Option<String>) -> Result<(), String> {
+        if png_base64.as_ref().is_some_and(|a| a.len() > MAX_AVATAR_LEN) {
+            return Err("O avatar é grande demais para enviar.".to_string());
+        }
+
+        *self.avatar.lock().unwrap_or_else(|e| e.into_inner()) = png_base64.clone();
+
+        if let Some(session) = self.lock_session().as_ref() {
+            let _ = session.outgoing_tx.send(Message::Avatar {
+                png_base64: png_base64.unwrap_or_default(),
+            });
+        }
+        Ok(())
     }
 
     /// Procura salas na rede (~2 s, em segundo plano). O resultado chega no evento "rooms".
@@ -120,6 +141,13 @@ impl ClientEngine {
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (password_tx, password_rx) = mpsc::unbounded_channel();
+        let (outgoing_tx, outgoing_rx) = mpsc::unbounded_channel::<Message>();
+
+        // O avatar sai logo depois que o Host aceitar (a caixa de saída só é lida após o handshake)
+        let avatar = self.avatar.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(png_base64) = avatar {
+            let _ = outgoing_tx.send(Message::Avatar { png_base64 });
+        }
 
         {
             let mut session = self.lock_session();
@@ -129,6 +157,7 @@ impl ClientEngine {
             *session = Some(Session {
                 shutdown_tx,
                 password_tx,
+                outgoing_tx,
             });
         }
 
@@ -147,6 +176,7 @@ impl ClientEngine {
                 username,
                 shutdown_rx,
                 password_rx,
+                outgoing_rx,
                 events.clone(),
                 frame.clone(),
             )
@@ -262,6 +292,7 @@ async fn run_session(
     username: String,
     mut shutdown: watch::Receiver<bool>,
     mut password_rx: mpsc::UnboundedReceiver<String>,
+    outgoing_rx: mpsc::UnboundedReceiver<Message>,
     events: EventTx,
     frame: FrameSlot,
 ) -> SessionEnd {
@@ -322,9 +353,6 @@ async fn run_session(
     // Número da "geração" do vídeo: muda quando a transmissão para, para descartar imagens velhas
     let mut generation = frame.begin_session();
 
-    // O Client só envia Ping/Pong/Bye, mas a caixa de saída precisa existir
-    let (_outgoing_tx, outgoing_rx) = mpsc::unbounded_channel::<Message>();
-
     // O decodificador só nasce quando chegar o primeiro pacote de vídeo
     let mut video: Option<VideoPipeline> = None;
     let mut stats = VideoStats::new();
@@ -366,6 +394,10 @@ async fn run_session(
             Message::UserKicked { user } => send(
                 &cb_events,
                 json!({ "type": "user_kicked", "id": user.id, "name": user.name }),
+            ),
+            Message::UserAvatar { id, png_base64 } => send(
+                &cb_events,
+                json!({ "type": "user_avatar", "id": id, "png_base64": png_base64 }),
             ),
             Message::Kicked { reason } => {
                 send(&cb_events, json!({ "type": "kicked", "reason": reason }))

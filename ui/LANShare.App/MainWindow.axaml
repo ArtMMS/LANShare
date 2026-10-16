@@ -123,9 +123,9 @@
                                                TextWrapping="Wrap" IsVisible="False" />
                                 </StackPanel>
 
-                                <Button x:Name="SettingsButton" Grid.Column="2" Width="36" Height="36" Padding="7"
+                                <Button x:Name="SettingsButton" Grid.Column="2" Width="40" Height="40" Padding="7"
                                         VerticalAlignment="Center" ToolTip.Tip="Configurações (em breve)">
-                                    <Image Source="avares://LANShare/Assets/settings.png" Width="20" Height="20" />
+                                    <Image Source="avares://LANShare/Assets/settings.png" Width="26" Height="26" />
                                 </Button>
                             </Grid>
                         </Border>
@@ -178,7 +178,7 @@
 
                                 <TextBlock Text="USUÁRIOS NA SALA" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
                                 <ScrollViewer MaxHeight="220">
-                                    <StackPanel x:Name="UsersPanel" Spacing="6" />
+                                    <StackPanel x:Name="UsersPanel" Spacing="8" />
                                 </ScrollViewer>
                             </StackPanel>
                         </DockPanel>
@@ -200,7 +200,7 @@
 
                                     <TextBlock x:Name="ClientUsersHeader" Text="USUÁRIOS NA SALA" FontSize="11"
                                                Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
-                                    <StackPanel x:Name="ClientUsersPanel" Spacing="6" IsVisible="False" />
+                                    <StackPanel x:Name="ClientUsersPanel" Spacing="8" IsVisible="False" />
                                 </StackPanel>
                             </ScrollViewer>
                         </DockPanel>

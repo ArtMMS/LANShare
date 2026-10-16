@@ -170,6 +170,9 @@ impl EventPrinter {
                 print_roster_if_open(engine);
             }
 
+            // O terminal não mostra imagens
+            HostEvent::UserAvatar { .. } => {}
+
             HostEvent::UserRejected { name, reason, .. } => {
                 println!("[host] {name} recusado: {reason}");
             }

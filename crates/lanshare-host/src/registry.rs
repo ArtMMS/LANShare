@@ -39,10 +39,12 @@ struct Entry {
     info: ClientInfo,
     tx: UnboundedSender<Message>,
     video: VideoState,
+    /// Avatar dele (PNG em base64). None = sem avatar (os outros usam o padrão).
+    avatar: Option<String>,
 }
 
 struct Inner {
-    next_id: AtomicU64,           // contador de IDs, seguro entre tarefas
+    next_id: AtomicU64,           // contador de IDs, seguro entre tarefas (começa em 1; 0 é o Host)
     max_clients: Option<usize>,   // None = sem limite
     clients: Mutex<HashMap<ClientId, Entry>>,
     keyframe_requested: AtomicBool, // alguém precisa de um keyframe novo
@@ -99,6 +101,7 @@ impl Registry {
                     queued: Arc::new(AtomicUsize::new(0)),
                     waiting_keyframe: true,
                 },
+                avatar: None,
             },
         );
 
@@ -140,6 +143,25 @@ impl Registry {
                 id: c.id,
                 name: c.name,
             })
+            .collect()
+    }
+
+    /// Guarda (ou apaga, com None) o avatar de um Client.
+    pub fn set_avatar(&self, id: ClientId, avatar: Option<String>) {
+        if let Some(entry) = self.inner.clients.lock().unwrap().get_mut(&id) {
+            entry.avatar = avatar;
+        }
+    }
+
+    /// Avatares de todos os Clients que têm um, menos o `except` (se houver).
+    pub fn avatars(&self, except: Option<ClientId>) -> Vec<(ClientId, String)> {
+        self.inner
+            .clients
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(id, _)| Some(**id) != except)
+            .filter_map(|(id, entry)| entry.avatar.clone().map(|avatar| (*id, avatar)))
             .collect()
     }
 

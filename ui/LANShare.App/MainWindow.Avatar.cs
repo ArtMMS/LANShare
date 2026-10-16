@@ -3,19 +3,29 @@ using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 
 namespace LANShare.App;
 
-/// Cartão de perfil (avatar + nome + configurações) e o painel de troca de avatar.
+/// Cartão de perfil (avatar + nome + configurações), o painel de troca de avatar
+/// e os avatares dos outros usuários da sala.
 public partial class MainWindow
 {
     // Área de recorte: quadrado de 280 com o círculo de 240 no meio
     private const double CropView = 280;
     private const double CropCircle = 240;
     private const double CropInset = (CropView - CropCircle) / 2;
+
+    /// Id do Host nos avatares (os Clients começam em 1).
+    private const ulong HostUserId = 0;
+
+    /// Tamanho do avatar nas listas de usuários.
+    private const double ListAvatarSize = 28;
+
+    private static readonly IBrush EmptyAvatarBrush = new SolidColorBrush(Color.Parse("#2E343C"));
 
     /// Formatos aceitos como avatar (GIF fica de fora).
     private static readonly FilePickerFileType AvatarImageTypes = new("Imagens")
@@ -31,6 +41,10 @@ public partial class MainWindow
     private TextBlock _avatarEditorError = null!;
     private Button _avatarChooseButton = null!, _avatarRemoveButton = null!, _avatarCancelButton = null!,
         _avatarSaveButton = null!, _settingsButton = null!;
+
+    // O meu avatar, o padrão e os dos outros usuários da sala (por id; 0 = Host)
+    private Bitmap? _myAvatar, _defaultAvatar;
+    private readonly Dictionary<ulong, Bitmap> _peerAvatars = new();
 
     private bool _avatarEditorOpen;
 
@@ -113,14 +127,75 @@ public partial class MainWindow
 
         AddHandler(KeyDownEvent, OnAvatarKeyDown, RoutingStrategies.Tunnel);
 
+        _defaultAvatar = AvatarStore.LoadDefault();
         ApplyAvatar(AvatarStore.Load());
     }
 
+    /// Mostra o meu avatar no cartão e nas listas da sala.
     private void ApplyAvatar(Bitmap? avatar)
     {
-        _avatarImage.Fill = avatar is null
-            ? new SolidColorBrush(Color.Parse("#2E343C"))
-            : new ImageBrush(avatar) { Stretch = Stretch.UniformToFill };
+        _myAvatar = avatar ?? _defaultAvatar;
+        _avatarImage.Fill = AvatarBrush(_myAvatar);
+
+        if (_roomOpen) RefreshUsers();
+        if (_clientState == ClientState.Connected) RefreshClientUsers();
+    }
+
+    /// Manda o meu avatar atual para a sala (Host ou Client), se estiver em uma.
+    private void ShareMyAvatar()
+    {
+        var pngBase64 = AvatarStore.ExportForNetwork();
+        if (_roomOpen) NativeMethods.HostSetAvatar(pngBase64);
+        if (_clientActive) NativeMethods.ClientSetAvatar(pngBase64);
+    }
+
+    // ───────────────────────── Avatares dos outros ─────────────────────────
+
+    /// Guarda o avatar que chegou de alguém (vazio = voltar ao padrão).
+    private void SetPeerAvatar(ulong id, string? pngBase64)
+    {
+        var bitmap = AvatarStore.FromNetwork(pngBase64);
+        if (bitmap is null) _peerAvatars.Remove(id);
+        else _peerAvatars[id] = bitmap;
+    }
+
+    private Bitmap? PeerAvatar(ulong id) =>
+        _peerAvatars.TryGetValue(id, out var bitmap) ? bitmap : _defaultAvatar;
+
+    private static IBrush AvatarBrush(Bitmap? avatar) =>
+        avatar is null ? EmptyAvatarBrush : new ImageBrush(avatar) { Stretch = Stretch.UniformToFill };
+
+    /// Uma linha da lista da sala: avatar redondo + nome (+ um botão no fim, opcional).
+    private static Control UserRow(Bitmap? avatar, string name, Control? trailing = null)
+    {
+        var row = new DockPanel { LastChildFill = true };
+
+        if (trailing is not null)
+        {
+            DockPanel.SetDock(trailing, Dock.Right);
+            trailing.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(trailing);
+        }
+
+        var circle = new Ellipse
+        {
+            Width = ListAvatarSize,
+            Height = ListAvatarSize,
+            Fill = AvatarBrush(avatar),
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        DockPanel.SetDock(circle, Dock.Left);
+        row.Children.Add(circle);
+
+        row.Children.Add(new TextBlock
+        {
+            Text = name,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+
+        return row;
     }
 
     private void OnAvatarKeyDown(object? sender, KeyEventArgs e)
@@ -315,6 +390,7 @@ public partial class MainWindow
         }
 
         ApplyAvatar(AvatarStore.Load());
+        ShareMyAvatar();
         CloseAvatarEditor();
     }
 
@@ -330,7 +406,8 @@ public partial class MainWindow
             return;
         }
 
-        ApplyAvatar(AvatarStore.LoadDefault());
+        ApplyAvatar(_defaultAvatar);
+        ShareMyAvatar();
         CloseAvatarEditor();
     }
 }

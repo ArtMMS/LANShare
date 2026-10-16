@@ -11,7 +11,8 @@ use crate::preview::PreviewSlot;
 use crate::registry::{ClientInfo, Registry};
 use crate::stream::{StreamHandle, StreamSettings};
 use lanshare_core::protocol::{
-    read_message, write_message, Message, UserInfo, DEFAULT_PORT, PROTOCOL_VERSION,
+    read_message, write_message, Message, UserInfo, DEFAULT_PORT, HOST_USER_ID, MAX_AVATAR_LEN,
+    PROTOCOL_VERSION,
 };
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
@@ -65,6 +66,8 @@ struct Shared {
     events: EventSender,
     /// Nome de usuário do Host, mostrado na lista de usuários dos Clients.
     host_name: Arc<String>,
+    /// Avatar do Host (PNG em base64). None = sem avatar.
+    host_avatar: Arc<Mutex<Option<String>>>,
 }
 
 /// A sala aberta. Tem o seu próprio runtime do tokio, então pode ser usada de qualquer thread.
@@ -79,6 +82,8 @@ pub struct HostEngine {
     streaming: Arc<Mutex<Option<StreamHandle>>>,
     /// Miniatura do que está sendo transmitido (preview do Host).
     preview: PreviewSlot,
+    /// Avatar do Host, enviado a quem entra na sala.
+    host_avatar: Arc<Mutex<Option<String>>>,
 }
 
 impl HostEngine {
@@ -104,6 +109,7 @@ impl HostEngine {
         let kicker = Kicker::new();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let streaming: Arc<Mutex<Option<StreamHandle>>> = Arc::new(Mutex::new(None));
+        let host_avatar: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         let shared = Shared {
             registry: registry.clone(),
@@ -111,6 +117,7 @@ impl HostEngine {
             password: password.clone(),
             events: events.clone(),
             host_name: Arc::new(host_display_name()),
+            host_avatar: host_avatar.clone(),
         };
 
         events.emit(HostEvent::Started {
@@ -150,6 +157,7 @@ impl HostEngine {
             shutdown_tx,
             streaming,
             preview: PreviewSlot::default(),
+            host_avatar,
         })
     }
 
@@ -174,6 +182,22 @@ impl HostEngine {
                 connected_secs: c.connected_at.elapsed().as_secs(),
             })
             .collect()
+    }
+
+    /// Define (ou apaga, com None) o avatar do Host e avisa todos os Clients.
+    pub fn set_avatar(&self, png_base64: Option<String>) -> Result<(), String> {
+        if png_base64.as_ref().is_some_and(|a| a.len() > MAX_AVATAR_LEN) {
+            return Err("O avatar é grande demais para enviar.".to_string());
+        }
+
+        *self.host_avatar.lock().unwrap_or_else(|e| e.into_inner()) = png_base64.clone();
+
+        let notice = Message::UserAvatar {
+            id: HOST_USER_ID,
+            png_base64: png_base64.unwrap_or_default(),
+        };
+        self.registry.broadcast(&notice, None);
+        Ok(())
     }
 
     /// Remove um Client: avisa ele, avisa os outros e encerra a conexão dele.
@@ -374,6 +398,7 @@ async fn handle_client(
     // Caixa de saída desta conexão: quem quiser falar com este Client põe aqui
     let (out_tx, out_rx) = mpsc::unbounded_channel::<Message>();
     let kick_out_tx = out_tx.clone();
+    let avatar_out_tx = out_tx.clone();
 
     let client = match handshake(&mut stream, addr, &shared, out_tx).await {
         Ok(Some(client)) => client,
@@ -418,18 +443,54 @@ async fn handle_client(
     };
     shared.registry.broadcast(&joined, Some(id));
 
+    // Quem entra recebe os avatares de quem já está na sala (o Host e os outros Clients)
+    let host_avatar = shared
+        .host_avatar
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(avatar) = host_avatar {
+        let _ = avatar_out_tx.send(Message::UserAvatar {
+            id: HOST_USER_ID,
+            png_base64: avatar,
+        });
+    }
+    for (other, avatar) in shared.registry.avatars(Some(id)) {
+        let _ = avatar_out_tx.send(Message::UserAvatar {
+            id: other,
+            png_base64: avatar,
+        });
+    }
+    drop(avatar_out_tx);
+
     // Guardamos uma cópia para saber, no fim, se o Host inteiro está encerrando
     let shutdown_check = shutdown.clone();
 
-    // O ping de cada Client é medido aqui e vira um evento
-    let ping_events = shared.events.clone();
-    let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| {
-        if let ConnectionEvent::Rtt(rtt) = event {
-            ping_events.emit(HostEvent::Ping {
-                id,
-                rtt_ms: rtt.as_millis() as u64,
-            });
+    // O ping de cada Client vira um evento; o avatar dele é guardado e repassado aos outros
+    let conn_events = shared.events.clone();
+    let conn_registry = shared.registry.clone();
+    let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| match event {
+        ConnectionEvent::Rtt(rtt) => conn_events.emit(HostEvent::Ping {
+            id,
+            rtt_ms: rtt.as_millis() as u64,
+        }),
+        ConnectionEvent::Message(Message::Avatar { png_base64 }) => {
+            if png_base64.len() > MAX_AVATAR_LEN {
+                conn_events.warn(format!("Avatar do client #{id} ignorado (grande demais)."));
+                return;
+            }
+            let avatar = (!png_base64.is_empty()).then(|| png_base64.clone());
+            conn_registry.set_avatar(id, avatar);
+            conn_registry.broadcast(
+                &Message::UserAvatar {
+                    id,
+                    png_base64: png_base64.clone(),
+                },
+                Some(id),
+            );
+            conn_events.emit(HostEvent::UserAvatar { id, png_base64 });
         }
+        ConnectionEvent::Message(_) => {}
     })
     .await;
 

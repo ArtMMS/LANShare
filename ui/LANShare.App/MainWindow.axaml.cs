@@ -416,6 +416,7 @@ public partial class MainWindow : Window
             NativeMethods.HostStop();
             _roomOpen = false;
             _streaming = false;
+            _peerAvatars.Clear();
             StopTimerIfIdle();
             _usersPanel.Children.Clear();
             UpdateUi();
@@ -434,6 +435,8 @@ public partial class MainWindow : Window
         }
 
         _roomOpen = true;
+        _peerAvatars.Clear();
+        NativeMethods.HostSetAvatar(AvatarStore.ExportForNetwork()); // vai para quem entrar
         _timer.Start();
         UpdateUi();
     }
@@ -470,8 +473,15 @@ public partial class MainWindow : Window
                         changedUsers = true; // mostra o próprio Host na lista
                         break;
                     case "user_joined":
+                        changedUsers = true;
+                        break;
                     case "user_left":
                     case "user_kicked":
+                        _peerAvatars.Remove(e.GetProperty("id").GetUInt64());
+                        changedUsers = true;
+                        break;
+                    case "user_avatar":
+                        SetPeerAvatar(e.GetProperty("id").GetUInt64(), e.GetProperty("png_base64").GetString());
                         changedUsers = true;
                         break;
                     case "stream_started":
@@ -512,21 +522,17 @@ public partial class MainWindow : Window
         _usersPanel.Children.Clear();
         if (!_roomOpen) return;
 
-        _usersPanel.Children.Add(new TextBlock { Text = $"{_username} (você, host)" });
+        _usersPanel.Children.Add(UserRow(_myAvatar, $"{_username} (você, host)"));
 
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
         {
             var id = user.GetProperty("id").GetUInt64();
-            var name = user.GetProperty("name").GetString();
+            var name = user.GetProperty("name").GetString() ?? "?";
             var kick = new Button { Content = "Expulsar" };
             kick.Click += (_, _) => NativeMethods.HostKick(id);
 
-            var row = new DockPanel();
-            DockPanel.SetDock(kick, Dock.Right);
-            row.Children.Add(kick);
-            row.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center });
-            _usersPanel.Children.Add(row);
+            _usersPanel.Children.Add(UserRow(PeerAvatar(id), name, kick));
         }
     }
 
@@ -559,6 +565,7 @@ public partial class MainWindow : Window
         }
 
         _clientActive = true;
+        NativeMethods.ClientSetAvatar(AvatarStore.ExportForNetwork()); // vai ao Host ao entrar numa sala
         ResetClientSession();
         _roomsList.ItemsSource = null;
         _roomsSignature = null;
@@ -592,6 +599,7 @@ public partial class MainWindow : Window
         _clientState = ClientState.Idle;
         _clientUsers.Clear();
         _clientUsersPanel.Children.Clear();
+        _peerAvatars.Clear();
         _passwordPanel.IsVisible = false;
         _clientPasswordBox.Text = "";
         _hostName = "Host";
@@ -741,7 +749,16 @@ public partial class MainWindow : Window
 
                     case "user_left":
                     case "user_kicked":
-                        _clientUsers.Remove(e.GetProperty("id").GetUInt64());
+                    {
+                        var id = e.GetProperty("id").GetUInt64();
+                        _clientUsers.Remove(id);
+                        _peerAvatars.Remove(id);
+                        RefreshClientUsers();
+                        break;
+                    }
+
+                    case "user_avatar":
+                        SetPeerAvatar(e.GetProperty("id").GetUInt64(), e.GetProperty("png_base64").GetString());
                         RefreshClientUsers();
                         break;
 
@@ -889,14 +906,15 @@ public partial class MainWindow : Window
         return item;
     }
 
-    /// Lista da sala: primeiro o Host, depois os clients (você marcado).
+    /// Lista da sala: primeiro o Host, depois os clients (você marcado), cada um com o avatar.
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
-        _clientUsersPanel.Children.Add(new TextBlock { Text = $"{_hostName} (host)" });
+        _clientUsersPanel.Children.Add(UserRow(PeerAvatar(HostUserId), $"{_hostName} (host)"));
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
-            _clientUsersPanel.Children.Add(new TextBlock { Text = id == _myId ? $"{name} (você)" : name });
+            var mine = id == _myId;
+            _clientUsersPanel.Children.Add(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? $"{name} (você)" : name));
         }
     }
 

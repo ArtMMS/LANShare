@@ -11,6 +11,9 @@ internal static class AvatarStore
     /// Lado da imagem salva, em pixels.
     public const int Size = 256;
 
+    /// Lado da versão enviada pela rede (pequena: aparece só na lista da sala).
+    private const int NetworkSize = 96;
+
     private static readonly Uri DefaultAvatarUri = new("avares://LANShare/Assets/default_avatar.jpg");
 
     private static string Folder =>
@@ -90,6 +93,48 @@ internal static class AvatarStore
     {
         if (File.Exists(PngPath)) File.Delete(PngPath);
         DeleteOldGifFiles();
+    }
+
+    /// Versão pequena do meu avatar para mandar pela rede (PNG em base64).
+    /// Null = sem avatar escolhido (os outros mostram o padrão).
+    public static string? ExportForNetwork()
+    {
+        if (!HasCustom) return null;
+
+        try
+        {
+            using var source = Load();
+            if (source is null) return null;
+
+            using var target = new RenderTargetBitmap(new PixelSize(NetworkSize, NetworkSize), new Vector(96, 96));
+            using (var context = target.CreateDrawingContext())
+            {
+                context.DrawImage(source, new Rect(source.Size), new Rect(0, 0, NetworkSize, NetworkSize));
+            }
+
+            using var memory = new MemoryStream();
+            target.Save(memory);
+            return Convert.ToBase64String(memory.ToArray());
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// Lê um avatar que chegou pela rede. Null se vier vazio ou inválido (use o padrão).
+    public static Bitmap? FromNetwork(string? pngBase64)
+    {
+        if (string.IsNullOrEmpty(pngBase64)) return null;
+
+        try
+        {
+            return new Bitmap(new MemoryStream(Convert.FromBase64String(pngBase64)));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private static void DeleteOldGifFiles()
