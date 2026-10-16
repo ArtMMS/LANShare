@@ -16,14 +16,23 @@ public partial class MainWindow
     {
         _sidebar = Find<Border>("Sidebar");
 
-        // Tunnel: a janela vê o F11/Esc antes dos campos de texto
+        // Tunnel: a janela vê a tecla antes dos campos de texto
         AddHandler(KeyDownEvent, OnFullscreenKeyDown, RoutingStrategies.Tunnel);
+
+        // O atalho da tela cheia (e o resto das preferências) vem das configurações
+        InitSettings();
     }
 
     private void OnFullscreenKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F11)
+        // Com as configurações abertas, a tecla pode estar sendo gravada como atalho novo
+        if (_settingsOpen) return;
+
+        if (_preferences.FullscreenKeyValue is { } shortcut && e.Key == shortcut)
         {
+            // Digitando num campo, só teclas F1-F24 valem (uma letra continua sendo letra)
+            if (FocusManager?.GetFocusedElement() is TextBox && !IsFunctionKey(shortcut)) return;
+
             ToggleFullscreen();
             e.Handled = true;
         }
@@ -33,6 +42,8 @@ public partial class MainWindow
             e.Handled = true;
         }
     }
+
+    private static bool IsFunctionKey(Key key) => key >= Key.F1 && key <= Key.F24;
 
     /// Só o Client conectado pode usar a tela cheia (no Host ela fica desativada).
     private bool FullscreenAvailable =>

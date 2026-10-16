@@ -1,0 +1,201 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="LANShare.App.SettingsView"
+             MaxWidth="760" MaxHeight="600">
+
+    <UserControl.Styles>
+        <!-- Cartões de seção -->
+        <Style Selector="Border.settingsCard">
+            <Setter Property="Background" Value="#15191E" />
+            <Setter Property="BorderBrush" Value="#2E343C" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+        </Style>
+        <Style Selector="TextBlock.cardHeader">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="16,12" />
+        </Style>
+        <Style Selector="Border.divider">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Background" Value="#2E343C" />
+        </Style>
+        <Style Selector="TextBlock.hint">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Opacity" Value="0.6" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <!-- Escolha em blocos (1080p / 720p, 30 / 15 FPS) -->
+        <Style Selector="Button.segment">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="0,8" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Opacity" Value="0.65" />
+        </Style>
+        <Style Selector="Button.segment.selected">
+            <Setter Property="Background" Value="#2E343C" />
+            <Setter Property="Opacity" Value="1" />
+        </Style>
+        <Style Selector="Button.segment.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#353C45" />
+        </Style>
+
+        <!-- Botão da tecla do atalho -->
+        <Style Selector="Button.keyCap">
+            <Setter Property="Background" Value="#23282F" />
+            <Setter Property="BorderBrush" Value="#3A424C" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,6" />
+            <Setter Property="MinWidth" Value="110" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.keyCap.capturing /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="#4F7CFF" />
+            <Setter Property="Background" Value="#1F2A3A" />
+        </Style>
+
+        <Style Selector="Button#CloseButton">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button#CloseButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#2E343C" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="#1B1F24" BorderBrush="#4F7CFF" BorderThickness="1"
+            CornerRadius="12" BoxShadow="0 12 40 0 #80000000">
+        <DockPanel>
+
+            <!-- Título e botão de fechar -->
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,14,12,10">
+                <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="12"
+                            HorizontalAlignment="Center">
+                    <Image Source="avares://LANShare/Assets/settings.png" Width="28" Height="28" />
+                    <TextBlock Text="Configurações" FontSize="24" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+                <Button x:Name="CloseButton" Grid.Column="1" Width="36" Height="36" Padding="0"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                        ToolTip.Tip="Fechar (Esc)">
+                    <TextBlock Classes="icon" Text="&#xE711;" FontSize="14" />
+                </Button>
+            </Grid>
+
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <Grid ColumnDefinitions="*,16,*" Margin="20,4,20,20">
+
+                    <!-- Coluna da esquerda -->
+                    <StackPanel Grid.Column="0" Spacing="16">
+
+                        <Border Classes="settingsCard">
+                            <StackPanel>
+                                <TextBlock Classes="cardHeader" Text="Atalhos" />
+                                <Border Classes="divider" />
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
+                                        <TextBlock Text="Tela cheia" />
+                                        <TextBlock Classes="hint"
+                                                   Text="Clique e pressione uma tecla. Esc deixa sem atalho." />
+                                    </StackPanel>
+                                    <Button x:Name="ShortcutButton" Grid.Column="1" Classes="keyCap"
+                                            VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="settingsCard">
+                            <StackPanel>
+                                <TextBlock Classes="cardHeader" Text="Preferências de transmissão" />
+                                <Border Classes="divider" />
+                                <StackPanel Margin="16,12" Spacing="10">
+                                    <TextBlock Text="Resolução padrão" />
+                                    <Border Background="#0F1216" CornerRadius="8" Padding="4">
+                                        <Grid ColumnDefinitions="*,4,*">
+                                            <Button x:Name="Res1080Button" Grid.Column="0" Classes="segment"
+                                                    Content="1080p" />
+                                            <Button x:Name="Res720Button" Grid.Column="2" Classes="segment"
+                                                    Content="720p" />
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Text="FPS padrão" Margin="0,6,0,0" />
+                                    <Border Background="#0F1216" CornerRadius="8" Padding="4">
+                                        <Grid ColumnDefinitions="*,4,*">
+                                            <Button x:Name="Fps30Button" Grid.Column="0" Classes="segment"
+                                                    Content="30 FPS" />
+                                            <Button x:Name="Fps15Button" Grid.Column="2" Classes="segment"
+                                                    Content="15 FPS" />
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Classes="hint"
+                                               Text="Já vem selecionado ao abrir o app. Dá para mudar na lateral antes de cada transmissão." />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- Coluna da direita -->
+                    <StackPanel Grid.Column="2" Spacing="16">
+
+                        <Border Classes="settingsCard">
+                            <StackPanel>
+                                <TextBlock Classes="cardHeader" Text="Áudio &amp; Notificações" />
+                                <Border Classes="divider" />
+
+                                <StackPanel Margin="16,12" Spacing="6">
+                                    <TextBlock Text="Saída do áudio das transmissões" />
+                                    <ComboBox x:Name="AudioDeviceBox" HorizontalAlignment="Stretch"
+                                              SelectedIndex="0" IsEnabled="False">
+                                        <ComboBoxItem>Padrão do Windows</ComboBoxItem>
+                                    </ComboBox>
+                                    <TextBlock Classes="hint"
+                                               Text="Disponível quando o áudio da transmissão chegar." />
+                                </StackPanel>
+
+                                <Border Classes="divider" />
+
+                                <StackPanel Margin="16,12" Spacing="10">
+                                    <TextBlock Text="Sons de notificação" />
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="Quando um usuário entra ou sai" Opacity="0.85"
+                                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="SoundJoinLeaveSwitch" Grid.Column="1"
+                                                      OnContent="" OffContent="" MinWidth="0" />
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="Quando a transmissão começa" Opacity="0.85"
+                                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="SoundStreamSwitch" Grid.Column="1"
+                                                      OnContent="" OffContent="" MinWidth="0" />
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Classes="settingsCard">
+                            <StackPanel>
+                                <TextBlock Classes="cardHeader" Text="Atualizações" />
+                                <Border Classes="divider" />
+                                <StackPanel Margin="16,12" Spacing="4">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Text="Verificar atualizações automaticamente"
+                                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="AutoUpdateSwitch" Grid.Column="1"
+                                                      OnContent="" OffContent="" MinWidth="0" />
+                                    </Grid>
+                                    <TextBlock Classes="hint" Text="Ainda não disponível." />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

@@ -32,16 +32,17 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(16),
             IsHitTestVisible = false, // não atrapalha cliques na janela
+            ZIndex = 100,             // fica por cima até das configurações
         };
 
         // Por cima de tudo, no Grid raiz da janela
         if (Content is Panel root) root.Children.Add(_toastHost);
     }
 
-    /// Mostra um aviso e (opcionalmente) toca um som.
+    /// Mostra um aviso e toca o som (se ele estiver ligado nas configurações).
     private void Notify(string message, string glyph, Sound? sound = null)
     {
-        if (sound is { } s) Sounds.Play(s);
+        if (sound is { } s && SoundAllowed(s)) Sounds.Play(s);
 
         // Muitos avisos de uma vez: some o mais antigo
         while (_toastHost.Children.Count >= MaxToasts) _toastHost.Children.RemoveAt(0);
