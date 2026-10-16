@@ -70,27 +70,24 @@
 - [x] Detect available updates automatically
 - [x] Notify the user when an update is available
 - [x] Add an update/install notification
-- [ ] Download the new version
-- [ ] Install the update
-- [ ] Restart the application after updating
+- [x] Download the new version
+- [x] Install the update
+- [x] Restart the application after updating
 - [ ] Set english, portuguese and spanish version
+- [ ] Set language choose on settings
 
 ---
 
 # Distribution & Release
 
-## Windows Installer
+## Windows
 
 - [ ] Create Windows Installer (`LANShare-Setup.exe`)
-- [ ] Create portable version (`LANShare-win-x64.zip`)
 - [ ] Test clean installation on Windows
 - [ ] Test portable version on a clean Windows installation
 - [ ] Configure application metadata and version information
-- [ ] Create Start Menu shortcut
+- [ ] Create Start Menu & Desktop shortcut
 - [ ] Add application uninstaller
-- [ ] Code-sign the application
-- [ ] Code-sign the installer
-- [ ] Verify Windows SmartScreen reputation
 
 ## Website
 
