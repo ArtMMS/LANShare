@@ -81,7 +81,6 @@
 ## Website
 
 - [ ] Create LANShare download website
-- [ ] Add Windows Installer download
 - [ ] Add Portable version download
 - [ ] Display current version
 - [ ] Add system requirements
