@@ -38,15 +38,16 @@ internal static class UpdateChecker
         return client;
     }
 
-    /// Pergunta ao GitHub qual é a última versão e compara com a instalada. Nunca lança erro de rede.
+    /// Pergunta ao GitHub qual é a última versão estável e compara com a instalada. Nunca lança erro de rede.
     public static async Task<UpdateCheckResult> CheckAsync(CancellationToken cancel = default)
     {
         try
         {
             using var response = await Http.GetAsync(LatestReleaseUrl, cancel);
 
+            // O "latest" ignora pré-releases e rascunhos: 404 = nenhuma versão estável
             if (response.StatusCode == HttpStatusCode.NotFound)
-                return Failed("Nenhuma versão publicada no GitHub ainda.");
+                return Failed("Nenhuma versão estável publicada no GitHub ainda.");
             if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
                 return Failed("Limite de consultas ao GitHub atingido. Tente mais tarde.");
             if (!response.IsSuccessStatusCode)

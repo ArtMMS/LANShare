@@ -182,14 +182,20 @@
                             <StackPanel>
                                 <TextBlock Classes="cardHeader" Text="Atualizações" />
                                 <Border Classes="divider" />
-                                <StackPanel Margin="16,12" Spacing="4">
+                                <StackPanel Margin="16,12" Spacing="8">
                                     <Grid ColumnDefinitions="*,Auto">
                                         <TextBlock Text="Verificar atualizações automaticamente"
                                                    TextWrapping="Wrap" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="AutoUpdateSwitch" Grid.Column="1"
                                                       OnContent="" OffContent="" MinWidth="0" />
                                     </Grid>
-                                    <TextBlock Classes="hint" Text="Ainda não disponível." />
+                                    <TextBlock Classes="hint"
+                                               Text="Procura ao abrir o app. Desligado, só procura quando você clicar em Verificar agora." />
+
+                                    <Button x:Name="CheckUpdatesButton" Content="Verificar agora"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                            Margin="0,4,0,0" />
+                                    <TextBlock x:Name="UpdateStatusText" Classes="hint" IsVisible="False" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>

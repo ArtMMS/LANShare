@@ -68,8 +68,8 @@
 - [x] Check for new versions on GitHub
 - [x] Compare installed version with the latest version
 - [x] Detect available updates automatically
-- [ ] Notify the user when an update is available
-- [ ] Add an update/install notification
+- [x] Notify the user when an update is available
+- [x] Add an update/install notification
 - [ ] Download the new version
 - [ ] Install the update
 - [ ] Restart the application after updating
@@ -79,7 +79,7 @@
 
 # Distribution & Release
 
-## Windows
+## Windows Installer
 
 - [ ] Create Windows Installer (`LANShare-Setup.exe`)
 - [ ] Create portable version (`LANShare-win-x64.zip`)
@@ -100,18 +100,8 @@
 - [ ] Display current version
 - [ ] Add system requirements
 - [ ] Add installation instructions
-- [ ] Add changelog / release notes
 - [ ] Add GitHub repository link
 - [ ] Add discreet advertising
-
-## Releases
-
-- [ ] Define release process
-- [ ] Create versioned releases on GitHub
-- [ ] Upload installer to GitHub Releases
-- [ ] Upload portable version to GitHub Releases
-- [ ] Update website download links
-- [ ] Publish release notes
 
 ---
 

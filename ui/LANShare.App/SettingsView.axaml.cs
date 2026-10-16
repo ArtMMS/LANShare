@@ -15,14 +15,19 @@ public partial class SettingsView : UserControl
         Key.LeftAlt, Key.RightAlt, Key.LWin, Key.RWin,
     };
 
-    private readonly Button _closeButton, _shortcutButton, _res1080Button, _res720Button, _fps30Button, _fps15Button;
+    private readonly Button _closeButton, _shortcutButton, _res1080Button, _res720Button, _fps30Button, _fps15Button,
+        _checkUpdatesButton;
     private readonly ToggleSwitch _soundJoinLeaveSwitch, _soundStreamSwitch, _autoUpdateSwitch;
+    private readonly TextBlock _updateStatusText;
 
     private AppPreferences _prefs = new();
     private bool _loading;
 
     public event EventHandler? CloseRequested;
     public event EventHandler? PreferencesChanged;
+
+    /// Botão "Verificar agora" (a janela faz a checagem e devolve o resultado em SetUpdateCheckState).
+    public event EventHandler? CheckNowRequested;
 
     /// true = esperando o usuário apertar a nova tecla do atalho.
     public bool IsCapturingKey { get; private set; }
@@ -37,9 +42,11 @@ public partial class SettingsView : UserControl
         _res720Button = Find<Button>("Res720Button");
         _fps30Button = Find<Button>("Fps30Button");
         _fps15Button = Find<Button>("Fps15Button");
+        _checkUpdatesButton = Find<Button>("CheckUpdatesButton");
         _soundJoinLeaveSwitch = Find<ToggleSwitch>("SoundJoinLeaveSwitch");
         _soundStreamSwitch = Find<ToggleSwitch>("SoundStreamSwitch");
         _autoUpdateSwitch = Find<ToggleSwitch>("AutoUpdateSwitch");
+        _updateStatusText = Find<TextBlock>("UpdateStatusText");
 
         _closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
@@ -59,6 +66,8 @@ public partial class SettingsView : UserControl
             Change(p => p.SoundOnStreamStart = _soundStreamSwitch.IsChecked == true);
         _autoUpdateSwitch.IsCheckedChanged += (_, _) =>
             Change(p => p.AutoCheckUpdates = _autoUpdateSwitch.IsChecked == true);
+
+        _checkUpdatesButton.Click += (_, _) => CheckNowRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private T Find<T>(string name) where T : Control => this.FindControl<T>(name)!;
@@ -70,6 +79,15 @@ public partial class SettingsView : UserControl
         IsCapturingKey = false;
         _shortcutButton.Classes.Set("capturing", false);
         Refresh();
+    }
+
+    /// Resultado do "Verificar agora". `busy` = verificando (botão desativado).
+    internal void SetUpdateCheckState(bool busy, string? status)
+    {
+        _checkUpdatesButton.IsEnabled = !busy;
+        _checkUpdatesButton.Content = busy ? "Verificando..." : "Verificar agora";
+        _updateStatusText.Text = status ?? "";
+        _updateStatusText.IsVisible = !string.IsNullOrEmpty(status);
     }
 
     /// Nome da tecla como aparece no botão.

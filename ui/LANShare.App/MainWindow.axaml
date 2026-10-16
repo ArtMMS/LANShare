@@ -81,6 +81,11 @@
         <Style Selector="Border#AvatarDropZone:pointerover">
             <Setter Property="BorderBrush" Value="#4F7CFF" />
         </Style>
+
+        <!-- Link "Ver novidades" do cartão de atualização -->
+        <Style Selector="TextBlock#UpdateNotesLink:pointerover">
+            <Setter Property="TextDecorations" Value="Underline" />
+        </Style>
     </Window.Styles>
 
     <Grid>
@@ -102,8 +107,33 @@
                                    VerticalAlignment="Bottom" Margin="0,0,0,4" />
                     </StackPanel>
 
-                    <!-- Rodapé fixo (todas as telas): apoio + perfil -->
+                    <!-- Rodapé fixo (todas as telas): atualização + apoio + perfil -->
                     <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="0,12,0,0">
+
+                        <!-- Aviso de versão nova (só aparece quando o GitHub tem uma) -->
+                        <Border x:Name="UpdateCard" Background="#1F2A3A" BorderBrush="#4F7CFF"
+                                BorderThickness="1" CornerRadius="10" Padding="12" IsVisible="False">
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Classes="icon" Text="&#xE895;" FontSize="16" />
+                                    <TextBlock x:Name="UpdateTitle" Text="Nova versão disponível"
+                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <TextBlock x:Name="UpdateText" FontSize="12" Opacity="0.8" TextWrapping="Wrap" />
+                                <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Height="6"
+                                             IsVisible="False" />
+                                <Grid x:Name="UpdateButtons" ColumnDefinitions="*,8,*">
+                                    <Button x:Name="UpdateLaterButton" Grid.Column="0" Content="Depois"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                    <Button x:Name="UpdateNowButton" Grid.Column="2" Content="Atualizar"
+                                            Classes="accent"
+                                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                                </Grid>
+                                <TextBlock x:Name="UpdateNotesLink" Text="Ver novidades" FontSize="12"
+                                           Foreground="#7CA7FF" Cursor="Hand" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+
                         <Button Classes="support" Content="Apoie o LANShare"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Click="OnSupportClick" />
@@ -124,7 +154,7 @@
                                 </StackPanel>
 
                                 <Button x:Name="SettingsButton" Grid.Column="2" Width="40" Height="40" Padding="7"
-                                        VerticalAlignment="Center" ToolTip.Tip="Configurações (em breve)">
+                                        VerticalAlignment="Center" ToolTip.Tip="Configurações">
                                     <Image Source="avares://LANShare/Assets/settings.png" Width="26" Height="26" />
                                 </Button>
                             </Grid>
