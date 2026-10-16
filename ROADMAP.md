@@ -76,20 +76,6 @@
 
 ---
 
-# Distribution & Release
-
-## Website
-
-- [ ] Create LANShare download website
-- [ ] Add Portable version download
-- [ ] Display current version
-- [ ] Add system requirements
-- [ ] Add installation instructions
-- [ ] Add GitHub repository link
-- [ ] Add discreet advertising
-
----
-
 # Future Plans
 
 ## Audio Streaming

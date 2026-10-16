@@ -1,0 +1,12 @@
+name: Update website
+
+on:
+  release:
+    types: [published, edited, deleted]
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Cloudflare Pages build
+        run: curl -fsS -X POST "${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}"
