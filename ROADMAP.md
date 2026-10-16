@@ -65,14 +65,15 @@
 
 # V0.5 — Automatic Updates
 
-- [ ] Check for new versions on GitHub
-- [ ] Compare installed version with the latest version
-- [ ] Detect available updates automatically
+- [x] Check for new versions on GitHub
+- [x] Compare installed version with the latest version
+- [x] Detect available updates automatically
 - [ ] Notify the user when an update is available
 - [ ] Add an update/install notification
 - [ ] Download the new version
 - [ ] Install the update
 - [ ] Restart the application after updating
+- [ ] Set english, portuguese and spanish version
 
 ---
 

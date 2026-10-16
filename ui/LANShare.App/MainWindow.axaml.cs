@@ -13,9 +13,6 @@ namespace LANShare.App;
 
 public partial class MainWindow : Window
 {
-    /// Versão mostrada ao lado do nome do app.
-    private const string AppVersion = "v1.0";
-
     /// Client que entra no meio da transmissão não ouve o som de "transmissão iniciada".
     private static readonly TimeSpan StreamSoundGrace = TimeSpan.FromSeconds(3);
 
@@ -230,6 +227,9 @@ public partial class MainWindow : Window
             }
         }
 
+        // Procura versão nova no GitHub (só se estiver ligado nas configurações)
+        _ = CheckForUpdatesOnStartupAsync();
+
         Opened += (_, _) =>
         {
             if (_nameScreen.IsVisible) _nameInput.Focus();
@@ -249,7 +249,7 @@ public partial class MainWindow : Window
     /// Confere se a ponte C# ↔ Rust funciona. Devolve o nome salvo (null na primeira abertura).
     private string? ShowCoreStatus()
     {
-        _versionText.Text = AppVersion;
+        _versionText.Text = AppInfo.DisplayVersion;
         try
         {
             _ = NativeMethods.GetVersion(); // só confere que a DLL do Rust carregou
@@ -259,7 +259,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
-            _versionText.Text = $"{AppVersion} — motor Rust indisponível";
+            _versionText.Text = $"{AppInfo.DisplayVersion} — motor Rust indisponível";
             _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
             _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _profileNameBox.IsEnabled = false;
             return null;

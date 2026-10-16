@@ -1,0 +1,133 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+
+namespace LANShare.App;
+
+/// A última release publicada no GitHub.
+internal sealed record ReleaseInfo(
+    Version Version,
+    string Tag,
+    string PageUrl,
+    string? Notes,
+    string? DownloadUrl, // null = a release não tem o LANShare.exe anexado
+    long DownloadSize,
+    string? Sha256);     // hash informado pelo GitHub (pode não vir)
+
+internal enum UpdateStatus { UpToDate, UpdateAvailable, Failed }
+
+internal sealed record UpdateCheckResult(UpdateStatus Status, ReleaseInfo? Release, string? Error);
+
+/// Consulta a última release do LANShare no GitHub e compara com a versão instalada.
+internal static class UpdateChecker
+{
+    private const string LatestReleaseUrl = "https://api.github.com/repos/ArtMMS/LANShare/releases/latest";
+
+    /// Nome exato do arquivo que cada release deve ter anexado.
+    public const string AssetName = "LANShare.exe";
+
+    private static readonly HttpClient Http = CreateClient();
+
+    private static HttpClient CreateClient()
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        // A API do GitHub recusa pedidos sem User-Agent
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("LANShare", AppInfo.VersionText));
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+        return client;
+    }
+
+    /// Pergunta ao GitHub qual é a última versão e compara com a instalada. Nunca lança erro de rede.
+    public static async Task<UpdateCheckResult> CheckAsync(CancellationToken cancel = default)
+    {
+        try
+        {
+            using var response = await Http.GetAsync(LatestReleaseUrl, cancel);
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return Failed("Nenhuma versão publicada no GitHub ainda.");
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+                return Failed("Limite de consultas ao GitHub atingido. Tente mais tarde.");
+            if (!response.IsSuccessStatusCode)
+                return Failed($"O GitHub respondeu com erro {(int)response.StatusCode}.");
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancel);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancel);
+
+            var release = ParseRelease(doc.RootElement);
+            if (release is null) return Failed("A última versão do GitHub tem uma tag inválida.");
+
+            var status = release.Version > AppInfo.Version ? UpdateStatus.UpdateAvailable : UpdateStatus.UpToDate;
+            return new UpdateCheckResult(status, release, null);
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            return Failed("O GitHub demorou demais para responder.");
+        }
+        catch (HttpRequestException)
+        {
+            return Failed("Sem conexão com o GitHub.");
+        }
+        catch (JsonException)
+        {
+            return Failed("Resposta inválida do GitHub.");
+        }
+    }
+
+    /// "v0.5.1", "0.5.1", "v1.0-beta" -> 0.5.1 / 1.0.0. Null se não for uma versão.
+    public static Version? ParseTag(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return null;
+
+        var text = tag.Trim().TrimStart('v', 'V');
+        var cut = text.IndexOfAny(new[] { '-', '+', ' ' });
+        if (cut >= 0) text = text[..cut]; // ignora sufixos (-beta, +build)
+        if (!text.Contains('.')) text += ".0"; // "1" -> "1.0"
+
+        return Version.TryParse(text, out var version) ? AppInfo.Normalize(version) : null;
+    }
+
+    private static ReleaseInfo? ParseRelease(JsonElement root)
+    {
+        var tag = GetString(root, "tag_name");
+        var version = ParseTag(tag);
+        if (version is null) return null;
+
+        string? downloadUrl = null, sha256 = null;
+        long size = 0;
+
+        if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var asset in assets.EnumerateArray())
+            {
+                if (!string.Equals(GetString(asset, "name"), AssetName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                downloadUrl = GetString(asset, "browser_download_url");
+                size = asset.TryGetProperty("size", out var s) && s.TryGetInt64(out var n) ? n : 0;
+
+                // Formato do GitHub: "sha256:abc123..."
+                var digest = GetString(asset, "digest");
+                if (digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                    sha256 = digest["sha256:".Length..];
+                break;
+            }
+        }
+
+        return new ReleaseInfo(
+            version,
+            tag!,
+            GetString(root, "html_url") ?? "https://github.com/ArtMMS/LANShare/releases",
+            GetString(root, "body"),
+            downloadUrl,
+            size,
+            sha256);
+    }
+
+    private static string? GetString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static UpdateCheckResult Failed(string error) => new(UpdateStatus.Failed, null, error);
+}
