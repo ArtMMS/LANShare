@@ -16,6 +16,9 @@ public partial class MainWindow : Window
     /// Versão mostrada ao lado do nome do app.
     private const string AppVersion = "v1.0";
 
+    /// Client que entra no meio da transmissão não ouve o som de "transmissão iniciada".
+    private static readonly TimeSpan StreamSoundGrace = TimeSpan.FromSeconds(3);
+
     private enum Mode { Home, Host, Client }
     private enum ClientState { Idle, Connecting, Connected }
 
@@ -77,6 +80,7 @@ public partial class MainWindow : Window
     // Host
     private bool _roomOpen;
     private bool _streaming;
+    private bool _wasStreaming; // para avisar só quando a transmissão começa
 
     // Client
     private bool _clientActive;
@@ -90,6 +94,7 @@ public partial class MainWindow : Window
     private int _pingMs = -1;
     private double _videoFps, _videoMbps;
     private string? _videoSize;
+    private DateTime _connectedAt;
 
     public MainWindow()
     {
@@ -149,9 +154,10 @@ public partial class MainWindow : Window
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
-        // Painel de escolha do que transmitir e cartão de perfil (avatar)
+        // Painel de escolha do que transmitir, cartão de perfil (avatar) e avisos
         InitSourcePicker();
         InitAvatar();
+        InitNotifications();
 
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
@@ -473,11 +479,17 @@ public partial class MainWindow : Window
                         changedUsers = true; // mostra o próprio Host na lista
                         break;
                     case "user_joined":
+                        Notify($"{EventName(e)} entrou na sala.", JoinGlyph, Sound.UserJoined);
                         changedUsers = true;
                         break;
                     case "user_left":
+                        _peerAvatars.Remove(e.GetProperty("id").GetUInt64());
+                        Notify($"{EventName(e)} saiu da sala.", LeaveGlyph, Sound.UserLeft);
+                        changedUsers = true;
+                        break;
                     case "user_kicked":
                         _peerAvatars.Remove(e.GetProperty("id").GetUInt64());
+                        Notify($"{EventName(e)} foi removido da sala.", KickGlyph, Sound.UserLeft);
                         changedUsers = true;
                         break;
                     case "user_avatar":
@@ -509,6 +521,12 @@ public partial class MainWindow : Window
         if (changedUsers) RefreshUsers();
     }
 
+    /// Nome que veio num evento (ou "Alguém", se faltar).
+    private static string EventName(JsonElement e) =>
+        e.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString())
+            ? n.GetString()!
+            : "Alguém";
+
     /// Pede a miniatura mais recente ao Rust e desenha na área do vídeo.
     private void UpdatePreview()
     {
@@ -538,6 +556,11 @@ public partial class MainWindow : Window
 
     private void UpdateUi()
     {
+        // Aviso + som só no momento em que a transmissão começa (trocar de fonte não conta)
+        if (_streaming && !_wasStreaming)
+            Notify("Você iniciou a transmissão.", StreamGlyph, Sound.StreamStarted);
+        _wasStreaming = _streaming;
+
         _statusLabel.Text = _roomOpen ? (_streaming ? "Transmitindo" : "Sala aberta") : "Sala fechada";
         _roomButton.Content = _roomOpen ? "Fechar sala" : "Abrir sala";
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
@@ -723,6 +746,7 @@ public partial class MainWindow : Window
 
                     case "connected":
                         _clientState = ClientState.Connected;
+                        _connectedAt = DateTime.UtcNow;
                         _myId = e.GetProperty("client_id").GetUInt64();
                         _hostName = e.TryGetProperty("host_name", out var hn)
                                     && hn.ValueKind == JsonValueKind.String
@@ -744,6 +768,7 @@ public partial class MainWindow : Window
 
                     case "user_joined":
                         _clientUsers[e.GetProperty("id").GetUInt64()] = e.GetProperty("name").GetString() ?? "?";
+                        Notify($"{EventName(e)} entrou na sala.", JoinGlyph, Sound.UserJoined);
                         RefreshClientUsers();
                         break;
 
@@ -751,8 +776,13 @@ public partial class MainWindow : Window
                     case "user_kicked":
                     {
                         var id = e.GetProperty("id").GetUInt64();
+                        var kickedOut = e.GetProperty("type").GetString() == "user_kicked";
                         _clientUsers.Remove(id);
                         _peerAvatars.Remove(id);
+                        Notify(
+                            kickedOut ? $"{EventName(e)} foi removido da sala." : $"{EventName(e)} saiu da sala.",
+                            kickedOut ? KickGlyph : LeaveGlyph,
+                            Sound.UserLeft);
                         RefreshClientUsers();
                         break;
                     }
@@ -773,9 +803,15 @@ public partial class MainWindow : Window
                         break;
 
                     case "video_started":
+                    {
+                        // Primeira imagem de uma transmissão nova (não de uma troca de monitor/janela)
+                        var newStream = _videoSize is null;
                         _videoSize = $"{e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()}";
+                        if (newStream && DateTime.UtcNow - _connectedAt > StreamSoundGrace)
+                            Notify($"{_hostName} iniciou a transmissão.", StreamGlyph, Sound.StreamStarted);
                         RefreshClientInfo();
                         break;
+                    }
 
                     case "video_stats":
                         _videoFps = e.GetProperty("fps").GetDouble();

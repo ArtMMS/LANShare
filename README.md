@@ -3,8 +3,8 @@
 ![LANShare Logo](assets/logo.png)
 
 ![Status](https://img.shields.io/badge/status-in%20development-yellow)
-![Version](https://img.shields.io/badge/version-v0.4-orange)
-![Progress](https://img.shields.io/badge/progress-72%25-brightgreen)
+![Version](https://img.shields.io/badge/version-v0.5-green)
+![Progress](https://img.shields.io/badge/progress-84%25-lightblue)
 [![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 

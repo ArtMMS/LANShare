@@ -24,13 +24,16 @@
     <PackageReference Include="Avalonia" Version="12.*" />
     <PackageReference Include="Avalonia.Desktop" Version="12.*" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.*" />
+    <!-- Toca os sons (MP3) no Windows -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
-  <!-- Imagens embutidas no programa: ícone da janela, avatar padrão e ícone de configurações -->
+  <!-- Imagens e sons embutidos no programa -->
   <ItemGroup>
     <AvaloniaResource Include="..\..\assets\icon.ico" Link="Assets/icon.ico" />
     <AvaloniaResource Include="..\..\assets\default_avatar.jpg" Link="Assets/default_avatar.jpg" />
     <AvaloniaResource Include="..\..\assets\settings.png" Link="Assets/settings.png" />
+    <AvaloniaResource Include="..\..\assets\sounds\*.mp3" Link="Assets/sounds/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Compila o motor Rust antes de compilar o C# (precisa do cargo no PATH) -->
