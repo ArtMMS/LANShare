@@ -2,6 +2,7 @@
 //! (usado no painel de escolha do que transmitir).
 
 use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
+use lanshare_core::i18n::tr;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::error::Error;
@@ -24,7 +25,7 @@ pub struct MonitorInfo {
     pub index: usize,
     /// Ex.: "Monitor 1 - DELL U2419H".
     pub name: String,
-    /// Modelo informado pelo Windows (ou "Genérico").
+    /// Modelo informado pelo Windows (ou "Genérico", no idioma do app).
     pub model: String,
     pub width: u32,
     pub height: u32,
@@ -86,7 +87,7 @@ fn model_name(monitor: &Monitor) -> String {
         .map(|name| name.trim().to_string())
         // Sem o nome do modelo, alguns sistemas devolvem só o nome técnico (\\.\DISPLAY1)
         .filter(|name| !name.is_empty() && !name.starts_with(r"\\.\"))
-        .unwrap_or_else(|| "Genérico".to_string())
+        .unwrap_or_else(|| tr("Genérico", "Generic", "Genérico").to_string())
 }
 
 /// Captura uma imagem do monitor e a reduz para a miniatura.

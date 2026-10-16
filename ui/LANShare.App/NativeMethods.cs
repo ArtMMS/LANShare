@@ -14,6 +14,9 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void lanshare_free_string(IntPtr text);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_set_language(IntPtr code);
+
     // ── Configurações ──
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -114,6 +117,14 @@ internal static class NativeMethods
     /// Versão do motor Rust. O texto vem de memória estática do Rust, então não se libera.
     public static string GetVersion() =>
         Marshal.PtrToStringUTF8(lanshare_version()) ?? "?";
+
+    /// Idioma das mensagens do motor ("pt", "en" ou "es"). False se o Rust não aceitou o código.
+    public static bool SetLanguage(string code)
+    {
+        var ptr = Marshal.StringToCoTaskMemUTF8(code);
+        try { return lanshare_set_language(ptr) != 0; }
+        finally { Marshal.FreeCoTaskMem(ptr); }
+    }
 
     /// Lê um texto alocado pelo Rust e o libera. Null se o ponteiro for nulo.
     private static string? TakeString(IntPtr ptr)

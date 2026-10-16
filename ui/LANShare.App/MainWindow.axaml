@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="using:LANShare.App"
         x:Class="LANShare.App.MainWindow"
         Title="LANShare"
         Icon="avares://LANShare/Assets/icon.ico"
@@ -101,7 +102,7 @@
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,16">
                         <TextBlock x:Name="TitleText" Text="LANShare" FontSize="24" FontWeight="SemiBold"
                                    Cursor="Hand"
-                                   ToolTip.Tip="Abrir a página do LANShare no GitHub"
+                                   ToolTip.Tip="{l:Tr Title_Tooltip}"
                                    PointerPressed="OnTitlePointerPressed" />
                         <TextBlock x:Name="VersionText" FontSize="13" Opacity="0.6"
                                    VerticalAlignment="Bottom" Margin="0,0,0,4" />
@@ -116,25 +117,25 @@
                             <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <TextBlock Classes="icon" Text="&#xE895;" FontSize="16" />
-                                    <TextBlock x:Name="UpdateTitle" Text="Nova versão disponível"
+                                    <TextBlock x:Name="UpdateTitle" Text="{l:Tr Update_AvailableTitle}"
                                                FontWeight="SemiBold" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <TextBlock x:Name="UpdateText" FontSize="12" Opacity="0.8" TextWrapping="Wrap" />
                                 <ProgressBar x:Name="UpdateProgress" Minimum="0" Maximum="100" Height="6"
                                              IsVisible="False" />
                                 <Grid x:Name="UpdateButtons" ColumnDefinitions="*,8,*">
-                                    <Button x:Name="UpdateLaterButton" Grid.Column="0" Content="Depois"
+                                    <Button x:Name="UpdateLaterButton" Grid.Column="0" Content="{l:Tr Update_Later}"
                                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                                    <Button x:Name="UpdateNowButton" Grid.Column="2" Content="Atualizar"
+                                    <Button x:Name="UpdateNowButton" Grid.Column="2" Content="{l:Tr Update_Now}"
                                             Classes="accent"
                                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                                 </Grid>
-                                <TextBlock x:Name="UpdateNotesLink" Text="Ver novidades" FontSize="12"
+                                <TextBlock x:Name="UpdateNotesLink" Text="{l:Tr Update_Notes}" FontSize="12"
                                            Foreground="#7CA7FF" Cursor="Hand" HorizontalAlignment="Center" />
                             </StackPanel>
                         </Border>
 
-                        <Button Classes="support" Content="Apoie o LANShare"
+                        <Button Classes="support" Content="{l:Tr Support_Button}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Click="OnSupportClick" />
 
@@ -142,19 +143,19 @@
                             <Grid ColumnDefinitions="Auto,*,Auto">
                                 <Border x:Name="AvatarButton" Width="44" Height="44" Cursor="Hand"
                                         Background="Transparent" VerticalAlignment="Center"
-                                        ToolTip.Tip="Alterar avatar">
+                                        ToolTip.Tip="{l:Tr Avatar_ChangeTooltip}">
                                     <Ellipse x:Name="AvatarImage" Width="44" Height="44" />
                                 </Border>
 
                                 <StackPanel Grid.Column="1" Margin="10,0,6,0" VerticalAlignment="Center">
                                     <TextBox x:Name="ProfileNameBox" Classes="inline" MaxLength="24"
-                                             ToolTip.Tip="Clique para editar o nome" />
+                                             ToolTip.Tip="{l:Tr Profile_EditNameTooltip}" />
                                     <TextBlock x:Name="ProfileNameError" Foreground="#FF6B6B" FontSize="12"
                                                TextWrapping="Wrap" IsVisible="False" />
                                 </StackPanel>
 
                                 <Button x:Name="SettingsButton" Grid.Column="2" Width="40" Height="40" Padding="7"
-                                        VerticalAlignment="Center" ToolTip.Tip="Configurações">
+                                        VerticalAlignment="Center" ToolTip.Tip="{l:Tr Settings_Title}">
                                     <Image Source="avares://LANShare/Assets/settings.png" Width="26" Height="26" />
                                 </Button>
                             </Grid>
@@ -166,10 +167,10 @@
 
                         <!-- ── Início ── -->
                         <StackPanel x:Name="HomePanel" Spacing="8">
-                            <TextBlock Text="COMEÇAR" FontSize="11" Opacity="0.5" />
-                            <Button x:Name="CreateRoomButton" Content="Criar sala"
+                            <TextBlock Text="{l:Tr Home_Start}" FontSize="11" Opacity="0.5" />
+                            <Button x:Name="CreateRoomButton" Content="{l:Tr Home_CreateRoom}"
                                     HorizontalAlignment="Stretch" />
-                            <Button x:Name="JoinRoomButton" Content="Entrar em sala"
+                            <Button x:Name="JoinRoomButton" Content="{l:Tr Home_JoinRoom}"
                                     HorizontalAlignment="Stretch" />
                         </StackPanel>
 
@@ -187,26 +188,26 @@
                                         <ComboBoxItem>30 FPS</ComboBoxItem>
                                     </ComboBox>
                                 </StackPanel>
-                                <Button x:Name="StartStreamButton" Content="Iniciar transmissão"
+                                <Button x:Name="StartStreamButton" Content="{l:Tr Stream_Start}"
                                         HorizontalAlignment="Stretch" IsEnabled="False" />
-                                <Button x:Name="StopStreamButton" Content="Parar transmissão"
+                                <Button x:Name="StopStreamButton" Content="{l:Tr Stream_Stop}"
                                         HorizontalAlignment="Stretch" IsEnabled="False" />
 
                                 <!-- Só aparece com a sala fechada (com ela aberta, "Fechar sala" já volta ao início) -->
-                                <Button x:Name="HostBackButton" Content="Voltar ao início"
+                                <Button x:Name="HostBackButton" Content="{l:Tr Common_BackHome}"
                                         HorizontalAlignment="Stretch" Margin="0,8,0,0" />
                             </StackPanel>
 
                             <StackPanel Spacing="6">
-                                <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
-                                <TextBlock x:Name="StatusLabel" Text="Sala fechada" />
+                                <TextBlock Text="{l:Tr Host_StatusHeader}" FontSize="11" Opacity="0.5" />
+                                <TextBlock x:Name="StatusLabel" Text="{l:Tr Host_RoomClosed}" />
 
-                                <TextBlock Text="CONEXÃO" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                <TextBox x:Name="RoomNameBox" PlaceholderText="Nome da sala (opcional)" />
-                                <TextBox x:Name="PasswordBox" PlaceholderText="Senha (opcional)" PasswordChar="●" />
-                                <Button x:Name="RoomButton" Content="Abrir sala" HorizontalAlignment="Stretch" />
+                                <TextBlock Text="{l:Tr Host_ConnectionHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                <TextBox x:Name="RoomNameBox" PlaceholderText="{l:Tr Host_RoomNamePlaceholder}" />
+                                <TextBox x:Name="PasswordBox" PlaceholderText="{l:Tr Host_PasswordPlaceholder}" PasswordChar="●" />
+                                <Button x:Name="RoomButton" Content="{l:Tr Host_OpenRoom}" HorizontalAlignment="Stretch" />
 
-                                <TextBlock Text="USUÁRIOS NA SALA" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                <TextBlock Text="{l:Tr Room_UsersHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
                                 <ScrollViewer MaxHeight="220">
                                     <StackPanel x:Name="UsersPanel" Spacing="8" />
                                 </ScrollViewer>
@@ -217,18 +218,18 @@
                         <DockPanel x:Name="ClientPanel" LastChildFill="True" IsVisible="False">
 
                             <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
-                                <Button x:Name="ClientDisconnectButton" Content="Desconectar"
+                                <Button x:Name="ClientDisconnectButton" Content="{l:Tr Client_Disconnect}"
                                         HorizontalAlignment="Stretch" IsVisible="False" />
-                                <Button x:Name="ClientBackButton" Content="Voltar ao início"
+                                <Button x:Name="ClientBackButton" Content="{l:Tr Common_BackHome}"
                                         HorizontalAlignment="Stretch" />
                             </StackPanel>
 
                             <ScrollViewer>
                                 <StackPanel Spacing="6" Margin="0,0,8,0">
-                                    <TextBlock Text="STATUS" FontSize="11" Opacity="0.5" />
-                                    <TextBlock x:Name="ClientStatusLabel" Text="Desconectado" />
+                                    <TextBlock Text="{l:Tr Host_StatusHeader}" FontSize="11" Opacity="0.5" />
+                                    <TextBlock x:Name="ClientStatusLabel" Text="{l:Tr Client_Disconnected}" />
 
-                                    <TextBlock x:Name="ClientUsersHeader" Text="USUÁRIOS NA SALA" FontSize="11"
+                                    <TextBlock x:Name="ClientUsersHeader" Text="{l:Tr Room_UsersHeader}" FontSize="11"
                                                Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
                                     <StackPanel x:Name="ClientUsersPanel" Spacing="8" IsVisible="False" />
                                 </StackPanel>
@@ -249,17 +250,17 @@
                         <Grid x:Name="ClientLobby" ColumnDefinitions="3*,2*" Margin="32" IsVisible="False">
 
                             <DockPanel Grid.Column="0" Margin="0,0,16,0">
-                                <TextBlock DockPanel.Dock="Top" Classes="section" Text="SALAS NA REDE" />
+                                <TextBlock DockPanel.Dock="Top" Classes="section" Text="{l:Tr Client_RoomsSection}" />
                                 <Border Classes="card">
                                     <DockPanel>
                                         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
-                                            <TextBlock Classes="cardTitle" Text="Salas na rede atual"
+                                            <TextBlock Classes="cardTitle" Text="{l:Tr Client_RoomsTitle}"
                                                        VerticalAlignment="Center" />
                                             <Button Grid.Column="1" x:Name="RefreshRoomsButton"
                                                     Padding="12,6" VerticalAlignment="Center">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <TextBlock Classes="icon" Text="&#xE72C;" />
-                                                    <TextBlock Text="Atualizar" />
+                                                    <TextBlock Text="{l:Tr Client_Refresh}" />
                                                 </StackPanel>
                                             </Button>
                                         </Grid>
@@ -272,16 +273,16 @@
                             </DockPanel>
 
                             <StackPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Top">
-                                <TextBlock Classes="section" Text="CONEXÃO POR IP" />
+                                <TextBlock Classes="section" Text="{l:Tr Client_IpSection}" />
                                 <Border Classes="card">
                                     <StackPanel Spacing="12">
-                                        <TextBlock Classes="cardTitle" Text="Ou entre por IP" />
+                                        <TextBlock Classes="cardTitle" Text="{l:Tr Client_IpTitle}" />
                                         <TextBox x:Name="ClientAddressBox"
-                                                 PlaceholderText="IP da sala (ex.: 192.168.0.10)" />
+                                                 PlaceholderText="{l:Tr Client_IpPlaceholder}" />
                                         <Button x:Name="ClientConnectButton" HorizontalAlignment="Stretch"
                                                 HorizontalContentAlignment="Center">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <TextBlock Text="Conectar" />
+                                                <TextBlock Text="{l:Tr Client_Connect}" />
                                                 <TextBlock Classes="icon" Text="&#xE71B;" />
                                             </StackPanel>
                                         </Button>
@@ -294,20 +295,20 @@
                         <Border x:Name="ClientConnecting" Classes="card" Width="380"
                                 HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="False">
                             <StackPanel Spacing="12">
-                                <TextBlock x:Name="ConnectingTitle" Classes="cardTitle" Text="Conectando..."
+                                <TextBlock x:Name="ConnectingTitle" Classes="cardTitle" Text="{l:Tr Client_Connecting}"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="ConnectingText" Opacity="0.7" TextWrapping="Wrap" />
 
                                 <!-- Só aparece quando o Host pede senha -->
                                 <StackPanel x:Name="PasswordPanel" Spacing="8" IsVisible="False">
-                                    <TextBlock x:Name="PasswordHint" Text="Esta sala tem senha." />
-                                    <TextBox x:Name="ClientPasswordBox" PlaceholderText="Senha da sala"
+                                    <TextBlock x:Name="PasswordHint" Text="{l:Tr Client_RoomHasPassword}" />
+                                    <TextBox x:Name="ClientPasswordBox" PlaceholderText="{l:Tr Client_PasswordPlaceholder}"
                                              PasswordChar="●" />
-                                    <Button x:Name="PasswordConfirmButton" Content="Entrar"
+                                    <Button x:Name="PasswordConfirmButton" Content="{l:Tr Client_Enter}"
                                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                                 </StackPanel>
 
-                                <Button x:Name="ConnectingCancelButton" Content="Cancelar"
+                                <Button x:Name="ConnectingCancelButton" Content="{l:Tr Common_Cancel}"
                                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                             </StackPanel>
                         </Border>
@@ -351,13 +352,13 @@
                                 <Button x:Name="MonitorsTabButton" Grid.Column="0" Classes="pickerTab active">
                                     <StackPanel Orientation="Horizontal" Spacing="10">
                                         <TextBlock Classes="icon" Text="&#xE7F4;" VerticalAlignment="Center" />
-                                        <TextBlock Text="Monitores inteiros" VerticalAlignment="Center" />
+                                        <TextBlock Text="{l:Tr Picker_MonitorsTab}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                                 <Button x:Name="WindowsTabButton" Grid.Column="1" Classes="pickerTab">
                                     <StackPanel Orientation="Horizontal" Spacing="10">
                                         <TextBlock Classes="icon" Text="&#xE7C4;" VerticalAlignment="Center" />
-                                        <TextBlock Text="Janela específica" VerticalAlignment="Center" />
+                                        <TextBlock Text="{l:Tr Picker_WindowsTab}" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </Button>
                             </Grid>
@@ -390,10 +391,10 @@
                     </Border>
 
                     <Grid ColumnDefinitions="*,12,*">
-                        <Button x:Name="PickerCancelButton" Grid.Column="0" Content="Cancelar"
+                        <Button x:Name="PickerCancelButton" Grid.Column="0" Content="{l:Tr Common_Cancel}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
-                        <Button x:Name="PickerConfirmButton" Grid.Column="2" Content="Iniciar transmissão"
+                        <Button x:Name="PickerConfirmButton" Grid.Column="2" Content="{l:Tr Stream_Start}"
                                 Classes="accent"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
@@ -410,7 +411,7 @@
                     BoxShadow="0 12 40 0 #80000000">
                 <StackPanel Spacing="16">
 
-                    <TextBlock Text="Alterar avatar" FontSize="20" FontWeight="SemiBold"
+                    <TextBlock Text="{l:Tr Avatar_Title}" FontSize="20" FontWeight="SemiBold"
                                HorizontalAlignment="Center" />
 
                     <Grid Width="280" Height="280" HorizontalAlignment="Center">
@@ -421,8 +422,8 @@
                             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
                                 <TextBlock Classes="icon" Text="&#xEB9F;" FontSize="36" Opacity="0.7"
                                            HorizontalAlignment="Center" />
-                                <TextBlock Text="Clique para escolher uma imagem" HorizontalAlignment="Center" />
-                                <TextBlock Text="ou arraste ela para cá" Opacity="0.6"
+                                <TextBlock Text="{l:Tr Avatar_ClickToChoose}" HorizontalAlignment="Center" />
+                                <TextBlock Text="{l:Tr Avatar_OrDrag}" Opacity="0.6"
                                            HorizontalAlignment="Center" />
                             </StackPanel>
                         </Border>
@@ -457,7 +458,7 @@
                                    VerticalAlignment="Center" />
                     </Grid>
 
-                    <Button x:Name="AvatarChooseButton" Content="Escolher outra imagem"
+                    <Button x:Name="AvatarChooseButton" Content="{l:Tr Avatar_ChooseAnother}"
                             HorizontalAlignment="Center" IsVisible="False" />
 
                     <TextBlock x:Name="AvatarEditorError" Foreground="#FF6B6B" FontSize="12"
@@ -465,15 +466,15 @@
 
                     <StackPanel Spacing="8">
                         <Grid ColumnDefinitions="*,8,*">
-                            <Button x:Name="AvatarCancelButton" Grid.Column="0" Content="Cancelar"
+                            <Button x:Name="AvatarCancelButton" Grid.Column="0" Content="{l:Tr Common_Cancel}"
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                     Padding="0,10" />
-                            <Button x:Name="AvatarSaveButton" Grid.Column="2" Content="Salvar"
+                            <Button x:Name="AvatarSaveButton" Grid.Column="2" Content="{l:Tr Common_Save}"
                                     Classes="accent" IsEnabled="False"
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                     Padding="0,10" />
                         </Grid>
-                        <Button x:Name="AvatarRemoveButton" Content="Remover avatar"
+                        <Button x:Name="AvatarRemoveButton" Content="{l:Tr Avatar_Remove}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Foreground="#FF8A8A" Background="Transparent" />
                     </StackPanel>
@@ -484,18 +485,18 @@
         <!-- Tela de nome de usuário (primeira abertura, por cima de tudo, dentro do app) -->
         <Border x:Name="NameScreen" Background="#111418" IsVisible="False">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="340" Spacing="10">
-                <TextBlock Text="Seja bem-vindo ao LANShare"
+                <TextBlock Text="{l:Tr Name_Welcome}"
                            FontSize="22" FontWeight="SemiBold"
                            HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
-                <TextBlock Text="Para começar, insira seu nome de usuário"
+                <TextBlock Text="{l:Tr Name_Prompt}"
                            Opacity="0.8" HorizontalAlignment="Center" TextAlignment="Center"
                            TextWrapping="Wrap" Margin="0,0,0,8" />
-                <TextBox x:Name="NameInput" PlaceholderText="Digite seu nome de usuário..." MaxLength="24" />
+                <TextBox x:Name="NameInput" PlaceholderText="{l:Tr Name_Placeholder}" MaxLength="24" />
                 <TextBlock x:Name="NameError" Foreground="#FF6B6B" FontSize="12"
                            TextWrapping="Wrap" IsVisible="False" />
-                <Button x:Name="NameConfirmButton" Content="Confirmar"
+                <Button x:Name="NameConfirmButton" Content="{l:Tr Common_Confirm}"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-                <Button Content="Cancelar" IsEnabled="False"
+                <Button Content="{l:Tr Common_Cancel}" IsEnabled="False"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             </StackPanel>
         </Border>

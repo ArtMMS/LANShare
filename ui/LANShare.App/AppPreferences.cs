@@ -8,6 +8,10 @@ namespace LANShare.App;
 /// (O settings.json continua sendo do motor Rust, só com o nome de usuário.)
 internal sealed class AppPreferences
 {
+    /// Idioma do app: "pt", "en" ou "es". Null = idioma do Windows (inglês se não for pt/es).
+    /// Só vale depois de reiniciar o app.
+    public string? Language { get; set; }
+
     /// Tecla da tela cheia (nome da tecla no Avalonia). Null = sem atalho.
     public string? FullscreenKey { get; set; } = nameof(Key.F11);
 
@@ -83,5 +87,6 @@ internal sealed class AppPreferences
     {
         if (StreamHeight is not (720 or 1080)) StreamHeight = 1080;
         if (StreamFps is not (15 or 30)) StreamFps = 30;
+        if (Loc.FromCode(Language) is null) Language = null;
     }
 }

@@ -1,5 +1,6 @@
 //! Laço de uma conexão já aceita: Ping/Pong, Bye, mensagens e detecção de desconexão.
 
+use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     read_message, write_message, Message, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT,
 };
@@ -26,8 +27,24 @@ pub enum DisconnectReason {
 impl fmt::Display for DisconnectReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PeerLeft => write!(f, "saiu normalmente (enviou Bye)"),
-            Self::Timeout => write!(f, "parou de responder (timeout)"),
+            Self::PeerLeft => write!(
+                f,
+                "{}",
+                tr(
+                    "saiu normalmente (enviou Bye)",
+                    "left normally (sent Bye)",
+                    "salió normalmente (envió Bye)"
+                )
+            ),
+            Self::Timeout => write!(
+                f,
+                "{}",
+                tr(
+                    "parou de responder (timeout)",
+                    "stopped responding (timeout)",
+                    "dejó de responder (timeout)"
+                )
+            ),
             // Fim de arquivo ou reset (erro 10054 no Windows): o outro lado sumiu sem Bye
             Self::ConnectionLost(e)
                 if matches!(
@@ -37,10 +54,30 @@ impl fmt::Display for DisconnectReason {
                         | io::ErrorKind::ConnectionAborted
                 ) =>
             {
-                write!(f, "conexao fechada sem aviso")
+                write!(
+                    f,
+                    "{}",
+                    tr(
+                        "conexão fechada sem aviso",
+                        "connection closed without warning",
+                        "conexión cerrada sin aviso"
+                    )
+                )
             }
-            Self::ConnectionLost(e) => write!(f, "conexao perdida: {e}"),
-            Self::LocalExit => write!(f, "encerrado por este programa"),
+            Self::ConnectionLost(e) => write!(
+                f,
+                "{}: {e}",
+                tr("conexão perdida", "connection lost", "conexión perdida")
+            ),
+            Self::LocalExit => write!(
+                f,
+                "{}",
+                tr(
+                    "encerrado por este programa",
+                    "closed by this program",
+                    "cerrado por este programa"
+                )
+            ),
         }
     }
 }

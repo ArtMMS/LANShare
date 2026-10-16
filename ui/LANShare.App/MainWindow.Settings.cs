@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -28,6 +29,7 @@ public partial class MainWindow
         };
         _settingsView.CloseRequested += (_, _) => CloseSettings();
         _settingsView.PreferencesChanged += (_, _) => ApplyStreamDefaults();
+        _settingsView.RestartRequested += (_, _) => RestartForLanguage();
 
         _settingsOverlay = new Border
         {
@@ -46,7 +48,7 @@ public partial class MainWindow
         if (Content is Panel root) root.Children.Add(_settingsOverlay);
 
         var settingsButton = Find<Button>("SettingsButton");
-        ToolTip.SetTip(settingsButton, "Configurações");
+        ToolTip.SetTip(settingsButton, Loc.T("Settings_Title"));
         settingsButton.Click += (_, _) => OpenSettings();
 
         AddHandler(KeyDownEvent, OnSettingsKeyDown, RoutingStrategies.Tunnel);
@@ -92,6 +94,34 @@ public partial class MainWindow
         if (_streaming) return;
         _resolutionBox.SelectedIndex = _preferences.StreamHeight == 720 ? 0 : 1;
         _fpsBox.SelectedIndex = _preferences.StreamFps == 15 ? 0 : 1;
+    }
+
+    /// "Reiniciar agora" depois de trocar o idioma: abre o LANShare de novo e fecha este.
+    /// Com sala aberta ou conectado não reinicia (derrubaria todo mundo).
+    private void RestartForLanguage()
+    {
+        if (_roomOpen || _clientState != ClientState.Idle)
+        {
+            _settingsView.SetRestartMessage(Loc.T("Settings_RestartBlocked"));
+            return;
+        }
+
+        try
+        {
+            var exe = Environment.ProcessPath ?? throw new InvalidOperationException("ProcessPath");
+            Process.Start(new ProcessStartInfo(exe)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = System.IO.Path.GetDirectoryName(exe)!,
+            });
+        }
+        catch (Exception ex)
+        {
+            _settingsView.SetRestartMessage(Loc.F("Settings_RestartFailed", ex.Message));
+            return;
+        }
+
+        Close();
     }
 
     /// O som desse tipo de aviso está ligado nas configurações?

@@ -73,21 +73,10 @@
 - [x] Download the new version
 - [x] Install the update
 - [x] Restart the application after updating
-- [ ] Set english, portuguese and spanish version
-- [ ] Set language choose on settings
 
 ---
 
 # Distribution & Release
-
-## Windows
-
-- [ ] Create Windows Installer (`LANShare-Setup.exe`)
-- [ ] Test clean installation on Windows
-- [ ] Test portable version on a clean Windows installation
-- [ ] Configure application metadata and version information
-- [ ] Create Start Menu & Desktop shortcut
-- [ ] Add application uninstaller
 
 ## Website
 

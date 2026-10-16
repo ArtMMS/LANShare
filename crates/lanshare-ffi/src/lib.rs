@@ -5,6 +5,7 @@
 //! pelo C# com `lanshare_free_string`.
 
 use lanshare_client::ClientEngine;
+use lanshare_core::i18n::{self, tr, Language};
 use lanshare_core::settings::{self, Settings};
 use lanshare_host::monitors::{self, Thumbnail};
 use lanshare_host::{app_windows, CaptureTarget, HostConfig, HostEngine, StreamSettings};
@@ -37,6 +38,19 @@ pub extern "C" fn lanshare_free_string(text: *mut c_char) {
     }
 }
 
+/// Define o idioma das mensagens do motor: "pt", "en" ou "es".
+/// Retorna 1 se o idioma foi aceito, 0 se não (fica o anterior).
+#[no_mangle]
+pub extern "C" fn lanshare_set_language(code: *const c_char) -> i32 {
+    match read_c_string(code).and_then(|text| Language::from_code(&text)) {
+        Some(language) => {
+            i18n::set_language(language);
+            1
+        }
+        None => 0,
+    }
+}
+
 // ───────────────────────────── Configurações ─────────────────────────────
 
 /// Nome de usuário salvo: {"username":"Ana"} ou {"username":null} (primeira abertura).
@@ -51,7 +65,7 @@ pub extern "C" fn lanshare_settings_get_username() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn lanshare_settings_set_username(name: *const c_char) -> *mut c_char {
     let Some(text) = read_c_string(name) else {
-        return reply_err("Nome inválido.");
+        return reply_err(tr("Nome inválido.", "Invalid name.", "Nombre no válido."));
     };
 
     // Sem caracteres de controle, sem espaços nas pontas, no máximo MAX_USERNAME_LEN
@@ -65,14 +79,25 @@ pub extern "C" fn lanshare_settings_set_username(name: *const c_char) -> *mut c_
         .to_string();
 
     if username.is_empty() {
-        return reply_err("O nome não pode ficar vazio.");
+        return reply_err(tr(
+            "O nome não pode ficar vazio.",
+            "The name cannot be empty.",
+            "El nombre no puede quedar vacío.",
+        ));
     }
 
     match settings::save(&Settings {
         username: username.clone(),
     }) {
         Ok(()) => to_c(serde_json::json!({ "ok": true, "username": username }).to_string()),
-        Err(error) => reply_err(&format!("Não foi possível salvar o nome: {error}")),
+        Err(error) => reply_err(&format!(
+            "{}: {error}",
+            tr(
+                "Não foi possível salvar o nome",
+                "Could not save the name",
+                "No se pudo guardar el nombre"
+            )
+        )),
     }
 }
 
@@ -84,7 +109,11 @@ pub extern "C" fn lanshare_settings_set_username(name: *const c_char) -> *mut c_
 pub extern "C" fn lanshare_host_start(config_json: *const c_char) -> *mut c_char {
     let mut host = HOST.lock().unwrap();
     if host.is_some() {
-        return reply_err("a sala já está aberta");
+        return reply_err(tr(
+            "A sala já está aberta.",
+            "The room is already open.",
+            "La sala ya está abierta.",
+        ));
     }
 
     let text = if config_json.is_null() {
@@ -96,7 +125,12 @@ pub extern "C" fn lanshare_host_start(config_json: *const c_char) -> *mut c_char
     };
     let config: HostConfig = match serde_json::from_str(&text) {
         Ok(config) => config,
-        Err(error) => return reply_err(&format!("configuração inválida: {error}")),
+        Err(error) => {
+            return reply_err(&format!(
+                "{}: {error}",
+                tr("Configuração inválida", "Invalid settings", "Configuración no válida")
+            ))
+        }
     };
 
     match HostEngine::start(config) {
@@ -104,7 +138,14 @@ pub extern "C" fn lanshare_host_start(config_json: *const c_char) -> *mut c_char
             *host = Some(engine);
             reply_ok()
         }
-        Err(error) => reply_err(&format!("não foi possível abrir a sala: {error}")),
+        Err(error) => reply_err(&format!(
+            "{}: {error}",
+            tr(
+                "Não foi possível abrir a sala",
+                "Could not open the room",
+                "No se pudo abrir la sala"
+            )
+        )),
     }
 }
 
@@ -134,7 +175,7 @@ pub extern "C" fn lanshare_host_users() -> *mut c_char {
 pub extern "C" fn lanshare_host_kick(id: u64) -> *mut c_char {
     let host = HOST.lock().unwrap();
     match host.as_ref() {
-        None => reply_err("a sala não está aberta"),
+        None => reply_err(room_not_open()),
         Some(engine) => match engine.kick(id) {
             Ok(name) => to_c(serde_json::json!({ "ok": true, "name": name }).to_string()),
             Err(error) => reply_err(&error),
@@ -148,7 +189,7 @@ pub extern "C" fn lanshare_host_set_avatar(png_base64: *const c_char) -> *mut c_
     let avatar = read_c_string(png_base64).filter(|text| !text.is_empty());
     let host = HOST.lock().unwrap();
     match host.as_ref() {
-        None => reply_err("a sala não está aberta"),
+        None => reply_err(room_not_open()),
         Some(engine) => match engine.set_avatar(avatar) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
@@ -329,7 +370,7 @@ fn monitor_target(monitor: i32) -> CaptureTarget {
 fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
     let host = HOST.lock().unwrap();
     match host.as_ref() {
-        None => reply_err("a sala não está aberta"),
+        None => reply_err(room_not_open()),
         Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, target) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
@@ -340,7 +381,7 @@ fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
 fn switch_source(target: CaptureTarget) -> *mut c_char {
     let host = HOST.lock().unwrap();
     match host.as_ref() {
-        None => reply_err("a sala não está aberta"),
+        None => reply_err(room_not_open()),
         Some(engine) => match engine.switch_source(target) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
@@ -388,7 +429,11 @@ unsafe fn write_thumbnail(
 pub extern "C" fn lanshare_client_start() -> *mut c_char {
     let mut client = lock_client();
     if client.is_some() {
-        return reply_err("o modo cliente já está ativo");
+        return reply_err(tr(
+            "O modo cliente já está ativo.",
+            "Client mode is already active.",
+            "El modo cliente ya está activo.",
+        ));
     }
 
     match ClientEngine::start() {
@@ -396,7 +441,14 @@ pub extern "C" fn lanshare_client_start() -> *mut c_char {
             *client = Some(engine);
             reply_ok()
         }
-        Err(error) => reply_err(&format!("não foi possível iniciar o cliente: {error}")),
+        Err(error) => reply_err(&format!(
+            "{}: {error}",
+            tr(
+                "Não foi possível iniciar o modo cliente",
+                "Could not start client mode",
+                "No se pudo iniciar el modo cliente"
+            )
+        )),
     }
 }
 
@@ -411,7 +463,7 @@ pub extern "C" fn lanshare_client_scan() -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn lanshare_client_connect(address: *const c_char) -> *mut c_char {
     let Some(address) = read_c_string(address) else {
-        return reply_err("endereço inválido");
+        return reply_err(tr("Endereço inválido.", "Invalid address.", "Dirección no válida."));
     };
     with_client(|engine| engine.connect(&address))
 }
@@ -420,7 +472,7 @@ pub extern "C" fn lanshare_client_connect(address: *const c_char) -> *mut c_char
 #[no_mangle]
 pub extern "C" fn lanshare_client_submit_password(password: *const c_char) -> *mut c_char {
     let Some(password) = read_c_string(password) else {
-        return reply_err("senha inválida");
+        return reply_err(tr("Senha inválida.", "Invalid password.", "Contraseña no válida."));
     };
     with_client(|engine| engine.submit_password(password))
 }
@@ -499,7 +551,11 @@ fn lock_client() -> MutexGuard<'static, Option<ClientEngine>> {
 fn with_client(action: impl FnOnce(&ClientEngine) -> Result<(), String>) -> *mut c_char {
     let client = lock_client();
     match client.as_ref() {
-        None => reply_err("o modo cliente não está ativo"),
+        None => reply_err(tr(
+            "O modo cliente não está ativo.",
+            "Client mode is not active.",
+            "El modo cliente no está activo.",
+        )),
         Some(engine) => match action(engine) {
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
@@ -508,6 +564,14 @@ fn with_client(action: impl FnOnce(&ClientEngine) -> Result<(), String>) -> *mut
 }
 
 // ───────────────────────────── Ajudantes ─────────────────────────────
+
+fn room_not_open() -> &'static str {
+    tr(
+        "A sala não está aberta.",
+        "The room is not open.",
+        "La sala no está abierta.",
+    )
+}
 
 fn read_c_string(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {

@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:LANShare.App"
              x:Class="LANShare.App.SettingsView"
              MaxWidth="760" MaxHeight="600">
 
@@ -76,31 +77,31 @@
                 <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="12"
                             HorizontalAlignment="Center">
                     <Image Source="avares://LANShare/Assets/settings.png" Width="28" Height="28" />
-                    <TextBlock Text="Configurações" FontSize="24" FontWeight="SemiBold"
+                    <TextBlock Text="{l:Tr Settings_Title}" FontSize="24" FontWeight="SemiBold"
                                VerticalAlignment="Center" />
                 </StackPanel>
                 <Button x:Name="CloseButton" Grid.Column="1" Width="36" Height="36" Padding="0"
                         HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                        ToolTip.Tip="Fechar (Esc)">
+                        ToolTip.Tip="{l:Tr Settings_CloseTooltip}">
                     <TextBlock Classes="icon" Text="&#xE711;" FontSize="14" />
                 </Button>
             </Grid>
 
             <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                <Grid ColumnDefinitions="*,16,*" Margin="20,4,20,20">
+                <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,16,Auto" Margin="20,4,20,20">
 
                     <!-- Coluna da esquerda -->
                     <StackPanel Grid.Column="0" Spacing="16">
 
                         <Border Classes="settingsCard">
                             <StackPanel>
-                                <TextBlock Classes="cardHeader" Text="Atalhos" />
+                                <TextBlock Classes="cardHeader" Text="{l:Tr Settings_Shortcuts}" />
                                 <Border Classes="divider" />
                                 <Grid ColumnDefinitions="*,Auto" Margin="16,12">
                                     <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
-                                        <TextBlock Text="Tela cheia" />
+                                        <TextBlock Text="{l:Tr Settings_Fullscreen}" />
                                         <TextBlock Classes="hint"
-                                                   Text="Clique e pressione uma tecla. Esc deixa sem atalho." />
+                                                   Text="{l:Tr Settings_ShortcutHint}" />
                                     </StackPanel>
                                     <Button x:Name="ShortcutButton" Grid.Column="1" Classes="keyCap"
                                             VerticalAlignment="Center" />
@@ -110,10 +111,10 @@
 
                         <Border Classes="settingsCard">
                             <StackPanel>
-                                <TextBlock Classes="cardHeader" Text="Preferências de transmissão" />
+                                <TextBlock Classes="cardHeader" Text="{l:Tr Settings_StreamPrefs}" />
                                 <Border Classes="divider" />
                                 <StackPanel Margin="16,12" Spacing="10">
-                                    <TextBlock Text="Resolução padrão" />
+                                    <TextBlock Text="{l:Tr Settings_DefaultResolution}" />
                                     <Border Background="#0F1216" CornerRadius="8" Padding="4">
                                         <Grid ColumnDefinitions="*,4,*">
                                             <Button x:Name="Res1080Button" Grid.Column="0" Classes="segment"
@@ -123,7 +124,7 @@
                                         </Grid>
                                     </Border>
 
-                                    <TextBlock Text="FPS padrão" Margin="0,6,0,0" />
+                                    <TextBlock Text="{l:Tr Settings_DefaultFps}" Margin="0,6,0,0" />
                                     <Border Background="#0F1216" CornerRadius="8" Padding="4">
                                         <Grid ColumnDefinitions="*,4,*">
                                             <Button x:Name="Fps30Button" Grid.Column="0" Classes="segment"
@@ -134,7 +135,7 @@
                                     </Border>
 
                                     <TextBlock Classes="hint"
-                                               Text="Já vem selecionado ao abrir o app. Dá para mudar na lateral antes de cada transmissão." />
+                                               Text="{l:Tr Settings_StreamHint}" />
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -145,31 +146,31 @@
 
                         <Border Classes="settingsCard">
                             <StackPanel>
-                                <TextBlock Classes="cardHeader" Text="Áudio &amp; Notificações" />
+                                <TextBlock Classes="cardHeader" Text="{l:Tr Settings_AudioNotifications}" />
                                 <Border Classes="divider" />
 
                                 <StackPanel Margin="16,12" Spacing="6">
-                                    <TextBlock Text="Saída do áudio das transmissões" />
+                                    <TextBlock Text="{l:Tr Settings_AudioOutput}" />
                                     <ComboBox x:Name="AudioDeviceBox" HorizontalAlignment="Stretch"
                                               SelectedIndex="0" IsEnabled="False">
-                                        <ComboBoxItem>Padrão do Windows</ComboBoxItem>
+                                        <ComboBoxItem Content="{l:Tr Settings_WindowsDefault}" />
                                     </ComboBox>
                                     <TextBlock Classes="hint"
-                                               Text="Disponível quando o áudio da transmissão chegar." />
+                                               Text="{l:Tr Settings_AudioSoon}" />
                                 </StackPanel>
 
                                 <Border Classes="divider" />
 
                                 <StackPanel Margin="16,12" Spacing="10">
-                                    <TextBlock Text="Sons de notificação" />
+                                    <TextBlock Text="{l:Tr Settings_NotificationSounds}" />
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Text="Quando um usuário entra ou sai" Opacity="0.85"
+                                        <TextBlock Text="{l:Tr Settings_SoundJoinLeave}" Opacity="0.85"
                                                    TextWrapping="Wrap" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="SoundJoinLeaveSwitch" Grid.Column="1"
                                                       OnContent="" OffContent="" MinWidth="0" />
                                     </Grid>
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Text="Quando a transmissão começa" Opacity="0.85"
+                                        <TextBlock Text="{l:Tr Settings_SoundStream}" Opacity="0.85"
                                                    TextWrapping="Wrap" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="SoundStreamSwitch" Grid.Column="1"
                                                       OnContent="" OffContent="" MinWidth="0" />
@@ -180,19 +181,19 @@
 
                         <Border Classes="settingsCard">
                             <StackPanel>
-                                <TextBlock Classes="cardHeader" Text="Atualizações" />
+                                <TextBlock Classes="cardHeader" Text="{l:Tr Settings_Updates}" />
                                 <Border Classes="divider" />
                                 <StackPanel Margin="16,12" Spacing="8">
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Text="Verificar atualizações automaticamente"
+                                        <TextBlock Text="{l:Tr Settings_AutoUpdate}"
                                                    TextWrapping="Wrap" VerticalAlignment="Center" />
                                         <ToggleSwitch x:Name="AutoUpdateSwitch" Grid.Column="1"
                                                       OnContent="" OffContent="" MinWidth="0" />
                                     </Grid>
                                     <TextBlock Classes="hint"
-                                               Text="Procura ao abrir o app. Desligado, só procura quando você clicar em Verificar agora." />
+                                               Text="{l:Tr Settings_AutoUpdateHint}" />
 
-                                    <Button x:Name="CheckUpdatesButton" Content="Verificar agora"
+                                    <Button x:Name="CheckUpdatesButton" Content="{l:Tr Settings_CheckNow}"
                                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                             Margin="0,4,0,0" />
                                     <TextBlock x:Name="UpdateStatusText" Classes="hint" IsVisible="False" />
@@ -200,6 +201,39 @@
                             </StackPanel>
                         </Border>
                     </StackPanel>
+
+                    <!-- Idioma (largura inteira, no fim do painel) -->
+                    <Border Grid.Row="2" Grid.ColumnSpan="3" Classes="settingsCard">
+                        <StackPanel>
+                            <TextBlock Classes="cardHeader" Text="{l:Tr Settings_Language}" />
+                            <Border Classes="divider" />
+                            <StackPanel Margin="16,12" Spacing="10">
+                                <Border Background="#0F1216" CornerRadius="8" Padding="4">
+                                    <Grid ColumnDefinitions="*,4,*,4,*">
+                                        <Button x:Name="LangPtButton" Grid.Column="0" Classes="segment"
+                                                Content="Português" />
+                                        <Button x:Name="LangEnButton" Grid.Column="2" Classes="segment"
+                                                Content="English" />
+                                        <Button x:Name="LangEsButton" Grid.Column="4" Classes="segment"
+                                                Content="Español" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock x:Name="LanguageHint" Classes="hint"
+                                           Text="{l:Tr Settings_LanguageHint}" />
+
+                                <!-- Só aparece quando o idioma escolhido é diferente do que está em uso -->
+                                <Grid x:Name="RestartRow" ColumnDefinitions="*,Auto" IsVisible="False">
+                                    <TextBlock x:Name="RestartText" Text="{l:Tr Settings_RestartPending}"
+                                               Foreground="#7CA7FF" TextWrapping="Wrap"
+                                               VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <Button x:Name="RestartButton" Grid.Column="1" Classes="accent"
+                                            Content="{l:Tr Settings_RestartNow}" Padding="16,8"
+                                            VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </ScrollViewer>
         </DockPanel>

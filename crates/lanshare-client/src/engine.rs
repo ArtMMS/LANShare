@@ -6,8 +6,10 @@
 use crate::discovery;
 use crate::normalize_address;
 use crate::video::{FrameSlot, VideoPipeline};
+use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, VideoFrame, MAX_AVATAR_LEN, PROTOCOL_VERSION,
+    REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
@@ -93,7 +95,12 @@ impl ClientEngine {
     /// Define (ou apaga, com None) o meu avatar. Se já estiver numa sala, avisa o Host na hora.
     pub fn set_avatar(&self, png_base64: Option<String>) -> Result<(), String> {
         if png_base64.as_ref().is_some_and(|a| a.len() > MAX_AVATAR_LEN) {
-            return Err("O avatar é grande demais para enviar.".to_string());
+            return Err(tr(
+                "O avatar é grande demais para enviar.",
+                "The avatar is too large to send.",
+                "El avatar es demasiado grande para enviar.",
+            )
+            .to_string());
         }
 
         *self.avatar.lock().unwrap_or_else(|e| e.into_inner()) = png_base64.clone();
@@ -109,7 +116,12 @@ impl ClientEngine {
     /// Procura salas na rede (~2 s, em segundo plano). O resultado chega no evento "rooms".
     pub fn scan_rooms(&self) -> Result<(), String> {
         if self.scanning.swap(true, Ordering::SeqCst) {
-            return Err("Já está procurando salas.".to_string());
+            return Err(tr(
+                "Já está procurando salas.",
+                "Already searching for rooms.",
+                "Ya se están buscando salas.",
+            )
+            .to_string());
         }
 
         let scanning = self.scanning.clone();
@@ -122,7 +134,14 @@ impl ClientEngine {
                 }),
                 Err(erro) => json!({
                     "type": "scan_failed",
-                    "error": format!("Não foi possível procurar salas: {erro}"),
+                    "error": format!(
+                        "{}: {erro}",
+                        tr(
+                            "Não foi possível procurar salas",
+                            "Could not search for rooms",
+                            "No se pudieron buscar salas"
+                        )
+                    ),
                 }),
             };
             scanning.store(false, Ordering::SeqCst);
@@ -135,7 +154,12 @@ impl ClientEngine {
     pub fn connect(&self, address: &str) -> Result<(), String> {
         let address = address.trim();
         if address.is_empty() {
-            return Err("Informe o endereço da sala.".to_string());
+            return Err(tr(
+                "Informe o endereço da sala.",
+                "Enter the room address.",
+                "Introduce la dirección de la sala.",
+            )
+            .to_string());
         }
         let address = normalize_address(address);
 
@@ -152,7 +176,12 @@ impl ClientEngine {
         {
             let mut session = self.lock_session();
             if session.is_some() {
-                return Err("Já existe uma conexão em andamento.".to_string());
+                return Err(tr(
+                    "Já existe uma conexão em andamento.",
+                    "There is already a connection in progress.",
+                    "Ya hay una conexión en curso.",
+                )
+                .to_string());
             }
             *session = Some(Session {
                 shutdown_tx,
@@ -197,8 +226,20 @@ impl ClientEngine {
             Some(s) => s
                 .password_tx
                 .send(password)
-                .map_err(|_| "A conexão já foi encerrada.".to_string()),
-            None => Err("Não há conexão em andamento.".to_string()),
+                .map_err(|_| {
+                    tr(
+                        "A conexão já foi encerrada.",
+                        "The connection has already ended.",
+                        "La conexión ya terminó.",
+                    )
+                    .to_string()
+                }),
+            None => Err(tr(
+                "Não há conexão em andamento.",
+                "There is no connection in progress.",
+                "No hay ninguna conexión en curso.",
+            )
+            .to_string()),
         }
     }
 
@@ -260,7 +301,7 @@ impl SessionEnd {
         match self {
             Self::Cancelled => json!({
                 "type": "disconnected",
-                "reason": "Conexão cancelada.",
+                "reason": tr("Conexão cancelada.", "Connection cancelled.", "Conexión cancelada."),
                 "local": true,
             }),
             Self::Failed(error) => json!({ "type": "connect_failed", "error": error }),
@@ -282,8 +323,28 @@ enum Handshake {
         users: Vec<UserInfo>,
         host_name: String,
     },
-    Rejected(String),
+    Rejected { reason: String, code: String },
     Cancelled,
+}
+
+/// Motivo da recusa no idioma do app. Código desconhecido (Host antigo) = o texto que veio do Host.
+fn rejection_text(code: &str, reason: String) -> String {
+    let text = match code {
+        REJECT_ROOM_FULL => tr("sala cheia", "the room is full", "la sala está llena"),
+        REJECT_WRONG_PASSWORD => tr("senha incorreta", "wrong password", "contraseña incorrecta"),
+        REJECT_PASSWORD_TIMEOUT => tr(
+            "tempo esgotado esperando a senha",
+            "timed out waiting for the password",
+            "tiempo agotado esperando la contraseña",
+        ),
+        REJECT_PROTOCOL_MISMATCH => tr(
+            "a sala usa uma versão incompatível do LANShare",
+            "the room uses an incompatible version of LANShare",
+            "la sala usa una versión incompatible de LANShare",
+        ),
+        _ => return reason,
+    };
+    text.to_string()
 }
 
 /// Conecta, entra na sala e mantém a conexão até ela acabar.
@@ -304,11 +365,26 @@ async fn run_session(
     };
     let mut stream = match connected {
         Ok(Ok(stream)) => stream,
-        Ok(Err(erro)) => return SessionEnd::Failed(format!("Não foi possível conectar: {erro}")),
+        Ok(Err(erro)) => {
+            return SessionEnd::Failed(format!(
+                "{}: {erro}",
+                tr(
+                    "Não foi possível conectar",
+                    "Could not connect",
+                    "No se pudo conectar"
+                )
+            ))
+        }
         Err(_) => {
             return SessionEnd::Failed(format!(
-                "Tempo esgotado ({} s). Confira o IP, o Firewall do Host e se a sala está aberta.",
-                CONNECT_TIMEOUT.as_secs()
+                "{} ({} s). {}",
+                tr("Tempo esgotado", "Timed out", "Tiempo agotado"),
+                CONNECT_TIMEOUT.as_secs(),
+                tr(
+                    "Confira o IP, o Firewall do Host e se a sala está aberta.",
+                    "Check the IP, the Host's firewall and whether the room is open.",
+                    "Revisa la IP, el firewall del Host y si la sala está abierta."
+                )
             ))
         }
     };
@@ -331,9 +407,16 @@ async fn run_session(
             users,
             host_name,
         }) => (client_id, display_name, users, host_name),
-        Ok(Handshake::Rejected(reason)) => return SessionEnd::Rejected(reason),
+        Ok(Handshake::Rejected { reason, code }) => {
+            return SessionEnd::Rejected(rejection_text(&code, reason))
+        }
         Ok(Handshake::Cancelled) => return SessionEnd::Cancelled,
-        Err(erro) => return SessionEnd::Failed(format!("Falha na conexão: {erro}")),
+        Err(erro) => {
+            return SessionEnd::Failed(format!(
+                "{}: {erro}",
+                tr("Falha na conexão", "Connection failed", "Fallo en la conexión")
+            ))
+        }
     };
 
     send(
@@ -399,9 +482,18 @@ async fn run_session(
                 &cb_events,
                 json!({ "type": "user_avatar", "id": id, "png_base64": png_base64 }),
             ),
-            Message::Kicked { reason } => {
-                send(&cb_events, json!({ "type": "kicked", "reason": reason }))
-            }
+            // O motivo que vem da rede está no idioma do Host: usa o texto no idioma deste app
+            Message::Kicked { .. } => send(
+                &cb_events,
+                json!({
+                    "type": "kicked",
+                    "reason": tr(
+                        "Você foi removido pelo Host.",
+                        "You were removed by the Host.",
+                        "El Host te ha expulsado de la sala.",
+                    ),
+                }),
+            ),
             _ => {}
         },
     })
@@ -468,12 +560,21 @@ async fn handshake(
                 write_message(stream, &Message::Password { password }).await?;
             }
 
-            Message::Rejected { reason } => return Ok(Handshake::Rejected(reason)),
+            Message::Rejected { reason, code } => {
+                return Ok(Handshake::Rejected { reason, code })
+            }
 
             outra => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("resposta inesperada do Host: {outra:?}"),
+                    format!(
+                        "{}: {outra:?}",
+                        tr(
+                            "resposta inesperada do Host",
+                            "unexpected reply from the Host",
+                            "respuesta inesperada del Host"
+                        )
+                    ),
                 ))
             }
         }

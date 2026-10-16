@@ -10,9 +10,11 @@ use crate::kick::Kicker;
 use crate::preview::PreviewSlot;
 use crate::registry::{ClientInfo, Registry};
 use crate::stream::{StreamHandle, StreamSettings};
+use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, DEFAULT_PORT, HOST_USER_ID, MAX_AVATAR_LEN,
-    PROTOCOL_VERSION,
+    PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL,
+    REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
 use lanshare_net::{run_connection, ConnectionEvent};
@@ -187,7 +189,12 @@ impl HostEngine {
     /// Define (ou apaga, com None) o avatar do Host e avisa todos os Clients.
     pub fn set_avatar(&self, png_base64: Option<String>) -> Result<(), String> {
         if png_base64.as_ref().is_some_and(|a| a.len() > MAX_AVATAR_LEN) {
-            return Err("O avatar é grande demais para enviar.".to_string());
+            return Err(tr(
+                "O avatar é grande demais para enviar.",
+                "The avatar is too large to send.",
+                "El avatar es demasiado grande para enviar.",
+            )
+            .to_string());
         }
 
         *self.host_avatar.lock().unwrap_or_else(|e| e.into_inner()) = png_base64.clone();
@@ -204,13 +211,24 @@ impl HostEngine {
     /// Devolve o nome de quem foi removido, ou o motivo de não ter dado certo.
     pub fn kick(&self, id: u64) -> Result<String, String> {
         let Some(target) = self.registry.list().into_iter().find(|c| c.id == id) else {
-            return Err(format!("Nao existe client com id #{id}."));
+            return Err(format!(
+                "{} #{id}.",
+                tr(
+                    "Não existe usuário com o id",
+                    "There is no user with id",
+                    "No existe ningún usuario con el id"
+                )
+            ));
         };
 
         // O Kicker usa tokio::spawn, que precisa estar dentro do runtime
         let _guard = self.runtime.enter();
         if !self.kicker.kick(id, "Voce foi removido pelo Host") {
-            return Err(format!("{} (#{id}) ja esta saindo.", target.name));
+            return Err(format!(
+                "{} (#{id}) {}",
+                target.name,
+                tr("já está saindo.", "is already leaving.", "ya está saliendo.")
+            ));
         }
 
         // Avisa todos os outros (o expulso já recebeu o aviso dele)
@@ -237,12 +255,22 @@ impl HostEngine {
         target: CaptureTarget,
     ) -> Result<(), String> {
         if !matches!(settings.height, 720 | 1080) || !matches!(settings.fps, 15 | 30) {
-            return Err("Resolucao ou FPS invalidos (use 720 ou 1080, e 15 ou 30).".to_string());
+            return Err(tr(
+                "Resolução ou FPS inválidos (use 720 ou 1080, e 15 ou 30).",
+                "Invalid resolution or FPS (use 720 or 1080, and 15 or 30).",
+                "Resolución o FPS no válidos (usa 720 o 1080, y 15 o 30).",
+            )
+            .to_string());
         }
 
         let mut streaming = self.lock_streaming();
         if streaming.as_ref().is_some_and(|s| s.is_running()) {
-            return Err("A tela ja esta sendo compartilhada.".to_string());
+            return Err(tr(
+                "A tela já está sendo compartilhada.",
+                "The screen is already being shared.",
+                "La pantalla ya se está compartiendo.",
+            )
+            .to_string());
         }
 
         *streaming = Some(StreamHandle::start_on(
@@ -260,7 +288,12 @@ impl HostEngine {
         let streaming = self.lock_streaming();
         match streaming.as_ref() {
             Some(handle) if handle.is_running() => handle.switch_source(target),
-            _ => Err("Nao ha transmissao em andamento.".to_string()),
+            _ => Err(tr(
+                "Não há transmissão em andamento.",
+                "There is no stream in progress.",
+                "No hay ninguna transmisión en curso.",
+            )
+            .to_string()),
         }
     }
 
@@ -540,7 +573,15 @@ async fn handshake(
             if protocol_version != PROTOCOL_VERSION {
                 let motivo =
                     format!("versao do protocolo incompativel (host usa v{PROTOCOL_VERSION})");
-                return refuse(stream, addr, shared, &device_name, motivo).await;
+                return refuse(
+                    stream,
+                    addr,
+                    shared,
+                    &device_name,
+                    motivo,
+                    REJECT_PROTOCOL_MISMATCH,
+                )
+                .await;
             }
 
             // Senha primeiro: quem não passa nunca chega a ser registrado
@@ -550,7 +591,15 @@ async fn handshake(
 
             // Tenta registrar; None = sala cheia
             let Some(client) = shared.registry.try_add(&device_name, addr, out_tx) else {
-                return refuse(stream, addr, shared, &device_name, "sala cheia".to_string()).await;
+                return refuse(
+                    stream,
+                    addr,
+                    shared,
+                    &device_name,
+                    "sala cheia".to_string(),
+                    REJECT_ROOM_FULL,
+                )
+                .await;
             };
 
             // O nome final pode ser diferente do pedido (limpeza ou repetido)
@@ -609,6 +658,7 @@ async fn check_password(
                     shared,
                     name,
                     "tempo esgotado esperando a senha".to_string(),
+                    REJECT_PASSWORD_TIMEOUT,
                 )
                 .await?;
                 return Ok(false);
@@ -637,24 +687,41 @@ async fn check_password(
         }
     }
 
-    refuse(stream, addr, shared, name, "senha incorreta".to_string()).await?;
+    refuse(
+        stream,
+        addr,
+        shared,
+        name,
+        "senha incorreta".to_string(),
+        REJECT_WRONG_PASSWORD,
+    )
+    .await?;
     Ok(false)
 }
 
 /// Responde "recusado" ao Client e avisa por evento.
+/// `reason` vai em português (Clients antigos mostram ele); `code` deixa o Client traduzir.
 async fn refuse(
     stream: &mut TcpStream,
     addr: SocketAddr,
     shared: &Shared,
     name: &str,
     reason: String,
+    code: &str,
 ) -> io::Result<Option<ClientInfo>> {
     shared.events.emit(HostEvent::UserRejected {
         name: name.to_string(),
         addr: addr.to_string(),
         reason: reason.clone(),
     });
-    write_message(stream, &Message::Rejected { reason }).await?;
+    write_message(
+        stream,
+        &Message::Rejected {
+            reason,
+            code: code.to_string(),
+        },
+    )
+    .await?;
     Ok(None)
 }
 

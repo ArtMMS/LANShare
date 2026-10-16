@@ -44,7 +44,7 @@ internal static class UpdateInstaller
         ReleaseInfo release, IProgress<(long Received, long Total)> progress, CancellationToken cancel = default)
     {
         if (release.DownloadUrl is null || ExePath is null)
-            throw new UpdateException("Esta versão não tem o LANShare.exe para baixar.");
+            throw new UpdateException(Loc.T("UpdateErr_NoAsset"));
 
         var target = ExePath + ".new";
         TryDelete(target);
@@ -53,7 +53,7 @@ internal static class UpdateInstaller
         {
             using var response = await Http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel);
             if (!response.IsSuccessStatusCode)
-                throw new UpdateException($"O GitHub respondeu com erro {(int)response.StatusCode}.");
+                throw new UpdateException(Loc.F("UpdateErr_HttpStatus", (int)response.StatusCode));
 
             var total = response.Content.Headers.ContentLength ?? release.DownloadSize;
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -86,7 +86,7 @@ internal static class UpdateInstaller
     /// Troca o exe atual pelo baixado e abre a versão nova. Quem chama fecha o app em seguida.
     public static void InstallAndRestart(string downloadedPath)
     {
-        var exe = ExePath ?? throw new UpdateException("Não foi possível localizar o LANShare.exe.");
+        var exe = ExePath ?? throw new UpdateException(Loc.T("UpdateErr_ExeNotFound"));
         var old = exe + ".old";
 
         try
@@ -105,11 +105,11 @@ internal static class UpdateInstaller
         }
         catch (UnauthorizedAccessException ex)
         {
-            throw new UpdateException("Sem permissão para substituir o LANShare.exe nesta pasta.", ex);
+            throw new UpdateException(Loc.T("UpdateErr_NoPermissionReplace"), ex);
         }
         catch (IOException ex)
         {
-            throw new UpdateException("Não foi possível substituir o LANShare.exe: " + ex.Message, ex);
+            throw new UpdateException(Loc.F("UpdateErr_ReplaceFailed", ex.Message), ex);
         }
 
         try
@@ -122,7 +122,7 @@ internal static class UpdateInstaller
         }
         catch (Exception ex)
         {
-            throw new UpdateException("A versão nova foi instalada, mas não abriu sozinha. Abra o LANShare de novo.", ex);
+            throw new UpdateException(Loc.T("UpdateErr_NotStarted"), ex);
         }
     }
 
@@ -148,26 +148,26 @@ internal static class UpdateInstaller
     private static void Verify(string path, ReleaseInfo release, long received, byte[] sha256)
     {
         if (release.DownloadSize > 0 && received != release.DownloadSize)
-            throw new UpdateException("O arquivo baixado está incompleto.");
+            throw new UpdateException(Loc.T("UpdateErr_Incomplete"));
 
         if (release.Sha256 is { } expected
             && !Convert.ToHexString(sha256).Equals(expected, StringComparison.OrdinalIgnoreCase))
-            throw new UpdateException("O arquivo baixado está corrompido (hash diferente).");
+            throw new UpdateException(Loc.T("UpdateErr_HashMismatch"));
 
         // Todo programa do Windows começa com "MZ"
         using var file = File.OpenRead(path);
         Span<byte> head = stackalloc byte[2];
         if (file.Read(head) != 2 || head[0] != (byte)'M' || head[1] != (byte)'Z')
-            throw new UpdateException("O arquivo baixado não é um programa válido.");
+            throw new UpdateException(Loc.T("UpdateErr_NotExe"));
     }
 
     private static UpdateException Friendly(Exception ex) => ex switch
     {
         UpdateException update => update,
-        OperationCanceledException => new UpdateException("O download demorou demais.", ex),
-        HttpRequestException => new UpdateException("Sem conexão com o GitHub.", ex),
-        UnauthorizedAccessException => new UpdateException("Sem permissão para gravar na pasta do LANShare.", ex),
-        IOException => new UpdateException("Erro ao salvar o arquivo: " + ex.Message, ex),
+        OperationCanceledException => new UpdateException(Loc.T("UpdateErr_DownloadTimeout"), ex),
+        HttpRequestException => new UpdateException(Loc.T("UpdateErr_NoConnection"), ex),
+        UnauthorizedAccessException => new UpdateException(Loc.T("UpdateErr_NoPermissionWrite"), ex),
+        IOException => new UpdateException(Loc.F("UpdateErr_SaveFailed", ex.Message), ex),
         _ => new UpdateException(ex.Message, ex),
     };
 

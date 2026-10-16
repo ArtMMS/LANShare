@@ -292,7 +292,7 @@ async fn handshake(
                 write_message(stream, &Message::Password { password }).await?;
             }
 
-            Message::Rejected { reason } => {
+            Message::Rejected { reason, .. } => {
                 println!("[client] Host recusou: {reason}");
                 return Ok(None);
             }

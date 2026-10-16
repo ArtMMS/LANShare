@@ -42,7 +42,7 @@ public partial class MainWindow
         {
             // Um pouco depois, para a janela já estar na tela
             DispatcherTimer.RunOnce(
-                () => Notify($"LANShare atualizado para {AppInfo.DisplayVersion}.", UpdateGlyph),
+                () => Notify(Loc.F("Update_Updated", AppInfo.DisplayVersion), UpdateGlyph),
                 TimeSpan.FromSeconds(1));
         }
 
@@ -55,7 +55,7 @@ public partial class MainWindow
         if (result is { Status: UpdateStatus.UpdateAvailable, Release: { } release })
         {
             ShowUpdateCard(release);
-            Notify($"Nova versão disponível: {release.Tag}.", UpdateGlyph);
+            Notify(Loc.F("Update_NewVersionNotify", release.Tag), UpdateGlyph);
         }
     }
 
@@ -88,12 +88,12 @@ public partial class MainWindow
     /// "Verificar agora": funciona mesmo com a checagem automática desligada e sempre mostra o resultado.
     private async Task CheckNowAsync()
     {
-        _settingsView.SetUpdateCheckState(busy: true, "Verificando...");
+        _settingsView.SetUpdateCheckState(busy: true, Loc.T("Update_Checking"));
 
         var result = await RunUpdateCheckAsync();
         if (result is null)
         {
-            _settingsView.SetUpdateCheckState(busy: false, "Já existe uma verificação em andamento. Tente de novo em instantes.");
+            _settingsView.SetUpdateCheckState(busy: false, Loc.T("Update_AlreadyChecking"));
             return;
         }
 
@@ -102,13 +102,13 @@ public partial class MainWindow
         {
             case UpdateStatus.UpdateAvailable:
                 ShowUpdateCard(result.Release!);
-                message = $"Nova versão disponível: {result.Release!.Tag}. Veja o aviso na lateral.";
+                message = Loc.F("Update_AvailableSeeSidebar", result.Release!.Tag);
                 break;
             case UpdateStatus.UpToDate:
-                message = $"Você está na versão mais recente ({AppInfo.DisplayVersion}).";
+                message = Loc.F("Update_UpToDate", AppInfo.DisplayVersion);
                 break;
             default:
-                message = "Não foi possível verificar: " + result.Error;
+                message = Loc.F("Update_CheckFailed", result.Error);
                 break;
         }
 
@@ -177,19 +177,19 @@ public partial class MainWindow
         string text;
         if (_updatePhase == UpdatePhase.ReadyToInstall)
         {
-            _updateTitle.Text = "Pronto para instalar";
-            _updateNowButton.Content = "Instalar";
-            text = $"{release.Tag} já foi baixada. O LANShare vai reiniciar.";
+            _updateTitle.Text = Loc.T("Update_ReadyTitle");
+            _updateNowButton.Content = Loc.T("Update_Install");
+            text = Loc.F("Update_ReadyText", release.Tag);
         }
         else
         {
-            _updateTitle.Text = "Nova versão disponível";
-            _updateNowButton.Content = "Atualizar";
-            text = $"{release.Tag} está disponível. Você usa {AppInfo.DisplayVersion}.";
+            _updateTitle.Text = Loc.T("Update_AvailableTitle");
+            _updateNowButton.Content = Loc.T("Update_Now");
+            text = Loc.F("Update_AvailableText", release.Tag, AppInfo.DisplayVersion);
         }
 
         if (_updateError is not null) text += "\n" + _updateError;
-        if (UpdateBlocked) text += "\nFeche a sala ou desconecte para atualizar.";
+        if (UpdateBlocked) text += "\n" + Loc.T("Update_Blocked");
 
         _updateText.Text = text;
         _updateProgress.IsVisible = false;
@@ -222,15 +222,15 @@ public partial class MainWindow
         // Rodando pelo `dotnet run`: não há um LANShare.exe publicado para trocar
         if (!UpdateInstaller.CanSelfUpdate)
         {
-            Notify("A instalação automática só funciona no LANShare.exe publicado. Abrindo a página da versão.", UpdateGlyph);
+            Notify(Loc.T("Update_OnlyPublished"), UpdateGlyph);
             OpenLink(release.PageUrl);
             return;
         }
 
         _updatePhase = UpdatePhase.Downloading;
         _updateError = null;
-        _updateTitle.Text = $"Baixando {release.Tag}...";
-        _updateText.Text = "Iniciando o download...";
+        _updateTitle.Text = Loc.F("Update_Downloading", release.Tag);
+        _updateText.Text = Loc.T("Update_StartingDownload");
         _updateProgress.Value = 0;
         _updateProgress.IsIndeterminate = release.DownloadSize <= 0;
         RefreshUpdateCard();
@@ -242,11 +242,11 @@ public partial class MainWindow
             {
                 _updateProgress.IsIndeterminate = false;
                 _updateProgress.Value = p.Received * 100.0 / p.Total;
-                _updateText.Text = $"{Megabytes(p.Received)} de {Megabytes(p.Total)} ({p.Received * 100 / p.Total}%)";
+                _updateText.Text = Loc.F("Update_ProgressOf", Megabytes(p.Received), Megabytes(p.Total), p.Received * 100 / p.Total);
             }
             else
             {
-                _updateText.Text = $"{Megabytes(p.Received)} baixados";
+                _updateText.Text = Loc.F("Update_Downloaded", Megabytes(p.Received));
             }
         });
 
@@ -257,7 +257,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _updatePhase = UpdatePhase.Available;
-            _updateError = "Falha no download: " + ex.Message;
+            _updateError = Loc.F("Update_DownloadFailed", ex.Message);
             RefreshUpdateCard();
             return;
         }
@@ -278,8 +278,8 @@ public partial class MainWindow
     {
         _updatePhase = UpdatePhase.Installing;
         _updateError = null;
-        _updateTitle.Text = "Instalando...";
-        _updateText.Text = "O LANShare vai reiniciar.";
+        _updateTitle.Text = Loc.T("Update_Installing");
+        _updateText.Text = Loc.T("Update_WillRestart");
         _updateProgress.IsIndeterminate = true;
         RefreshUpdateCard();
 
@@ -292,7 +292,7 @@ public partial class MainWindow
             _updatePhase = UpdatePhase.Available;
             _downloadedPath = null;
             _updateProgress.IsIndeterminate = false;
-            _updateError = "Falha ao instalar: " + ex.Message;
+            _updateError = Loc.F("Update_InstallFailed", ex.Message);
             RefreshUpdateCard();
             return;
         }

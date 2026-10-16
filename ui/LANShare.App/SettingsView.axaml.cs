@@ -16,9 +16,13 @@ public partial class SettingsView : UserControl
     };
 
     private readonly Button _closeButton, _shortcutButton, _res1080Button, _res720Button, _fps30Button, _fps15Button,
-        _checkUpdatesButton;
+        _checkUpdatesButton, _restartButton;
     private readonly ToggleSwitch _soundJoinLeaveSwitch, _soundStreamSwitch, _autoUpdateSwitch;
-    private readonly TextBlock _updateStatusText;
+    private readonly TextBlock _updateStatusText, _restartText;
+    private readonly Grid _restartRow;
+
+    /// Botões de idioma, na mesma ordem de Loc.All.
+    private readonly Button[] _languageButtons;
 
     private AppPreferences _prefs = new();
     private bool _loading;
@@ -28,6 +32,9 @@ public partial class SettingsView : UserControl
 
     /// Botão "Verificar agora" (a janela faz a checagem e devolve o resultado em SetUpdateCheckState).
     public event EventHandler? CheckNowRequested;
+
+    /// Botão "Reiniciar agora" (aparece depois de trocar o idioma).
+    public event EventHandler? RestartRequested;
 
     /// true = esperando o usuário apertar a nova tecla do atalho.
     public bool IsCapturingKey { get; private set; }
@@ -47,6 +54,10 @@ public partial class SettingsView : UserControl
         _soundStreamSwitch = Find<ToggleSwitch>("SoundStreamSwitch");
         _autoUpdateSwitch = Find<ToggleSwitch>("AutoUpdateSwitch");
         _updateStatusText = Find<TextBlock>("UpdateStatusText");
+        _restartButton = Find<Button>("RestartButton");
+        _restartText = Find<TextBlock>("RestartText");
+        _restartRow = Find<Grid>("RestartRow");
+        _languageButtons = new[] { Find<Button>("LangPtButton"), Find<Button>("LangEnButton"), Find<Button>("LangEsButton") };
 
         _closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
@@ -68,6 +79,23 @@ public partial class SettingsView : UserControl
             Change(p => p.AutoCheckUpdates = _autoUpdateSwitch.IsChecked == true);
 
         _checkUpdatesButton.Click += (_, _) => CheckNowRequested?.Invoke(this, EventArgs.Empty);
+
+        // Idioma: salva na hora, mas só vale depois de reiniciar o app
+        for (var i = 0; i < _languageButtons.Length; i++)
+        {
+            var language = Loc.All[i];
+            _languageButtons[i].Click += (_, _) => Change(p => p.Language = Loc.CodeOf(language));
+        }
+        _restartButton.Click += (_, _) => RestartRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// Idioma escolhido nas preferências (sem escolha = o que está em uso).
+    private AppLanguage ChosenLanguage => Loc.FromCode(_prefs.Language) ?? Loc.Current;
+
+    /// Mensagem na linha do reinício (ex.: "feche a sala antes"). Null = o aviso padrão.
+    internal void SetRestartMessage(string? message)
+    {
+        _restartText.Text = message ?? Loc.T("Settings_RestartPending");
     }
 
     private T Find<T>(string name) where T : Control => this.FindControl<T>(name)!;
@@ -85,7 +113,7 @@ public partial class SettingsView : UserControl
     internal void SetUpdateCheckState(bool busy, string? status)
     {
         _checkUpdatesButton.IsEnabled = !busy;
-        _checkUpdatesButton.Content = busy ? "Verificando..." : "Verificar agora";
+        _checkUpdatesButton.Content = Loc.T(busy ? "Update_Checking" : "Settings_CheckNow");
         _updateStatusText.Text = status ?? "";
         _updateStatusText.IsVisible = !string.IsNullOrEmpty(status);
     }
@@ -93,13 +121,13 @@ public partial class SettingsView : UserControl
     /// Nome da tecla como aparece no botão.
     internal static string KeyLabel(Key? key)
     {
-        if (key is not { } k) return "Nenhuma";
+        if (key is not { } k) return Loc.T("Key_None");
 
         return k switch
         {
             >= Key.D0 and <= Key.D9 => ((int)k - (int)Key.D0).ToString(),
             >= Key.NumPad0 and <= Key.NumPad9 => $"Num {(int)k - (int)Key.NumPad0}",
-            Key.Space => "Espaço",
+            Key.Space => Loc.T("Key_Space"),
             Key.Enter => "Enter",
             Key.Back => "Backspace",
             Key.PageUp => "Page Up",
@@ -133,6 +161,15 @@ public partial class SettingsView : UserControl
         _soundStreamSwitch.IsChecked = _prefs.SoundOnStreamStart;
         _autoUpdateSwitch.IsChecked = _prefs.AutoCheckUpdates;
 
+        var chosen = ChosenLanguage;
+        for (var i = 0; i < _languageButtons.Length; i++)
+            _languageButtons[i].Classes.Set("selected", Loc.All[i] == chosen);
+
+        // Escolheu outro idioma: pede reinício. Voltou ao atual: o aviso some.
+        var pending = chosen != Loc.Current;
+        if (pending && !_restartRow.IsVisible) SetRestartMessage(null);
+        _restartRow.IsVisible = pending;
+
         _loading = false;
     }
 
@@ -141,7 +178,7 @@ public partial class SettingsView : UserControl
     private void StartCapture()
     {
         IsCapturingKey = true;
-        _shortcutButton.Content = "Pressione uma tecla...";
+        _shortcutButton.Content = Loc.T("Settings_PressKey");
         _shortcutButton.Classes.Set("capturing", true);
     }
 

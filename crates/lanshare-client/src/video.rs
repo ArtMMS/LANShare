@@ -3,6 +3,7 @@
 
 use crate::decoder::{Decoder, Picture};
 use crate::engine::EventTx;
+use lanshare_core::i18n::tr;
 use lanshare_core::protocol::VideoFrame;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -174,7 +175,14 @@ fn run(
         Err(erro) => {
             let _ = events.send(json!({
                 "type": "video_error",
-                "error": format!("Não foi possível iniciar o decodificador de vídeo: {erro}"),
+                "error": format!(
+                    "{}: {erro}",
+                    tr(
+                        "Não foi possível iniciar o decodificador de vídeo",
+                        "Could not start the video decoder",
+                        "No se pudo iniciar el decodificador de vídeo"
+                    )
+                ),
             }));
             return;
         }

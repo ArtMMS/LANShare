@@ -47,32 +47,32 @@ internal static class UpdateChecker
 
             // O "latest" ignora pré-releases e rascunhos: 404 = nenhuma versão estável
             if (response.StatusCode == HttpStatusCode.NotFound)
-                return Failed("Nenhuma versão estável publicada no GitHub ainda.");
+                return Failed(Loc.T("UpdateErr_NoStable"));
             if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-                return Failed("Limite de consultas ao GitHub atingido. Tente mais tarde.");
+                return Failed(Loc.T("UpdateErr_RateLimit"));
             if (!response.IsSuccessStatusCode)
-                return Failed($"O GitHub respondeu com erro {(int)response.StatusCode}.");
+                return Failed(Loc.F("UpdateErr_HttpStatus", (int)response.StatusCode));
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancel);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancel);
 
             var release = ParseRelease(doc.RootElement);
-            if (release is null) return Failed("A última versão do GitHub tem uma tag inválida.");
+            if (release is null) return Failed(Loc.T("UpdateErr_BadTag"));
 
             var status = release.Version > AppInfo.Version ? UpdateStatus.UpdateAvailable : UpdateStatus.UpToDate;
             return new UpdateCheckResult(status, release, null);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
-            return Failed("O GitHub demorou demais para responder.");
+            return Failed(Loc.T("UpdateErr_Timeout"));
         }
         catch (HttpRequestException)
         {
-            return Failed("Sem conexão com o GitHub.");
+            return Failed(Loc.T("UpdateErr_NoConnection"));
         }
         catch (JsonException)
         {
-            return Failed("Resposta inválida do GitHub.");
+            return Failed(Loc.T("UpdateErr_BadResponse"));
         }
     }
 

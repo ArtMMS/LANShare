@@ -2,10 +2,9 @@
 
 ![LANShare Logo](assets/logo.png)
 
-![Status](https://img.shields.io/badge/status-in%20development-yellow)
-![Version](https://img.shields.io/badge/version-v0.5-green)
-![Progress](https://img.shields.io/badge/progress-84%25-lightblue)
-[![License](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
+![Status](https://img.shields.io/badge/status-active%20development-green)
+![Version](https://img.shields.io/badge/version-v1.0-lightblue)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
 LANShare is a local network application designed to share a computer's screen with other devices in real time. It aims to provide low-latency screen streaming over a LAN connection, with support for multiple users, multiple monitors, and specific window sharing.
@@ -21,8 +20,7 @@ The project is being developed with performance, stability, and ease of use in m
 
 <p align="center"> <a href="https://github.com/ArtMMS/LANShare/releases/download/v0.4.0/LANShare-v0.4.0.rar"> <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v0.4.0-0078D4?style=for-the-badge" alt="Download LANShare v0.4.0"> </a> </p>
 
-- **Version:** v0.4.0
-- **Release:** Early Development Build
+- **Version:** v1.0
 - **Platform:** Windows 11
 
 ---

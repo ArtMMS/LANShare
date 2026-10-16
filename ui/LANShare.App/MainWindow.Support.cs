@@ -33,7 +33,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            _infoText.Text = "Não foi possível abrir o link: " + ex.Message;
+            _infoText.Text = Loc.F("Link_OpenError", ex.Message);
         }
     }
 }

@@ -26,6 +26,13 @@ pub const HOST_USER_ID: u64 = 0;
 /// Tamanho máximo de um avatar na rede (PNG em base64).
 pub const MAX_AVATAR_LEN: usize = 256 * 1024;
 
+/// Motivos de recusa (campo `code` do Rejected). O Client mostra o texto no idioma dele;
+/// o `reason` em texto continua indo para Clients de versões antigas.
+pub const REJECT_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
+pub const REJECT_ROOM_FULL: &str = "room_full";
+pub const REJECT_WRONG_PASSWORD: &str = "wrong_password";
+pub const REJECT_PASSWORD_TIMEOUT: &str = "password_timeout";
+
 /// Tipos de mensagem na rede.
 const KIND_JSON: u8 = 0;
 const KIND_VIDEO: u8 = 1;
@@ -126,8 +133,13 @@ pub enum Message {
         host_name: String,
     },
 
-    /// Host -> Client: recusado, com o motivo.
-    Rejected { reason: String },
+    /// Host -> Client: recusado, com o motivo (texto) e o código do motivo (REJECT_*).
+    Rejected {
+        reason: String,
+        /// Vazio quando o Host é de uma versão que ainda não envia o código.
+        #[serde(default)]
+        code: String,
+    },
 
     /// Host -> Clients: alguém entrou na sala.
     UserJoined { user: UserInfo },
@@ -316,6 +328,7 @@ mod tests {
             },
             Message::Rejected {
                 reason: "sala cheia".to_string(),
+                code: REJECT_ROOM_FULL.to_string(),
             },
             Message::UserJoined { user: beto.clone() },
             Message::UserLeft { user: ana },
@@ -352,6 +365,20 @@ mod tests {
         let message: Message = serde_json::from_str(json).unwrap();
         match message {
             Message::Welcome { host_name, .. } => assert!(host_name.is_empty()),
+            outra => panic!("mensagem inesperada: {outra:?}"),
+        }
+    }
+
+    // Um Rejected de um Host antigo (sem code) ainda é entendido.
+    #[test]
+    fn rejected_sem_code_ainda_funciona() {
+        let json = r#"{"Rejected":{"reason":"sala cheia"}}"#;
+        let message: Message = serde_json::from_str(json).unwrap();
+        match message {
+            Message::Rejected { reason, code } => {
+                assert_eq!(reason, "sala cheia");
+                assert!(code.is_empty());
+            }
             outra => panic!("mensagem inesperada: {outra:?}"),
         }
     }

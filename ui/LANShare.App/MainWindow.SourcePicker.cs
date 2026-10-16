@@ -179,8 +179,8 @@ public partial class MainWindow
 
         var empty = monitors ? _monitorTiles.Count == 0 : _windowTiles.Count == 0;
         _pickerStatus.Text = !empty ? "" : monitors
-            ? "Nenhum monitor encontrado."
-            : "Nenhuma janela aberta para transmitir.";
+            ? Loc.T("Picker_NoMonitors")
+            : Loc.T("Picker_NoWindows");
         _pickerStatus.IsVisible = empty;
 
         UpdatePickerConfirm();
@@ -190,7 +190,7 @@ public partial class MainWindow
     /// Texto e estado do botão de confirmar (Iniciar ou Alterar, conforme a transmissão).
     private void UpdatePickerConfirm()
     {
-        _pickerConfirmButton.Content = _streaming ? "Alterar transmissão" : "Iniciar transmissão";
+        _pickerConfirmButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
         _pickerConfirmButton.IsEnabled = ActivePickerList.SelectedItem is not null;
     }
 
@@ -225,12 +225,12 @@ public partial class MainWindow
             : NativeMethods.HostSwitchMonitor(tile.MonitorIndex);
         if (!ok)
         {
-            _infoText.Text = error ?? "Não foi possível alterar a transmissão.";
+            _infoText.Text = error ?? Loc.T("Stream_ChangeError");
             return;
         }
 
         RememberSource(tile);
-        _infoText.Text = tile.IsWindow ? "Transmissão alterada para a janela." : "Transmissão alterada para o monitor.";
+        _infoText.Text = Loc.T(tile.IsWindow ? "Stream_ChangedWindow" : "Stream_ChangedMonitor");
     }
 
     private void RememberSource(SourceTile tile)
@@ -247,12 +247,12 @@ public partial class MainWindow
         var (ok, error) = NativeMethods.HostStartStreamWindow(height, fps, windowId);
         if (!ok)
         {
-            _infoText.Text = error ?? "Erro ao iniciar a transmissão.";
+            _infoText.Text = error ?? Loc.T("Stream_StartError");
             return;
         }
 
         _streaming = true;
-        _infoText.Text = "Capturando a janela. A imagem é enviada quando um usuário entrar.";
+        _infoText.Text = Loc.T("Stream_CapturingWindow");
         UpdateUi();
     }
 
@@ -393,7 +393,7 @@ public partial class MainWindow
             var index = m.GetProperty("index").GetInt32();
             items.Add(BuildMonitorTile(
                 index,
-                m.GetProperty("name").GetString() ?? $"Monitor {index + 1}",
+                m.GetProperty("name").GetString() ?? Loc.F("Picker_MonitorN", index + 1),
                 m.GetProperty("width").GetInt32(),
                 m.GetProperty("height").GetInt32(),
                 m.GetProperty("primary").GetBoolean()));
@@ -409,7 +409,7 @@ public partial class MainWindow
         {
             items.Add(BuildWindowTile(
                 w.GetProperty("id").GetUInt64(),
-                w.GetProperty("title").GetString() ?? "Janela",
+                w.GetProperty("title").GetString() ?? Loc.T("Picker_WindowDefault"),
                 w.GetProperty("minimized").GetBoolean()));
         }
         return items;
@@ -442,7 +442,7 @@ public partial class MainWindow
                 VerticalAlignment = VerticalAlignment.Center,
                 Child = new TextBlock
                 {
-                    Text = "Principal",
+                    Text = Loc.T("Picker_Primary"),
                     FontSize = 10,
                     FontWeight = FontWeight.SemiBold,
                     Foreground = Brushes.White,
@@ -484,7 +484,7 @@ public partial class MainWindow
             Children = { smallIcon, titleText },
         };
 
-        var detail = TileDetail(minimized ? "Minimizada" : "");
+        var detail = TileDetail(minimized ? Loc.T("Picker_Minimized") : "");
         var details = new StackPanel
         {
             HorizontalAlignment = HorizontalAlignment.Center,

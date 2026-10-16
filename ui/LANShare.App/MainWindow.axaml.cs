@@ -253,14 +253,15 @@ public partial class MainWindow : Window
         try
         {
             _ = NativeMethods.GetVersion(); // só confere que a DLL do Rust carregou
+            NativeMethods.SetLanguage(Loc.Code); // mensagens do motor no idioma do app
             var saved = NativeMethods.GetUsername();
             _coreOk = true;
             return saved;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
-            _versionText.Text = $"{AppInfo.DisplayVersion} — motor Rust indisponível";
-            _placeholderText.Text = "Problema com a lanshare_ffi.dll. Rode: cargo build --release -p lanshare-ffi";
+            _versionText.Text = Loc.F("Core_Unavailable", AppInfo.DisplayVersion);
+            _placeholderText.Text = Loc.T("Core_DllProblem");
             _createRoomButton.IsEnabled = _joinRoomButton.IsEnabled = _profileNameBox.IsEnabled = false;
             return null;
         }
@@ -284,7 +285,7 @@ public partial class MainWindow : Window
         var (ok, name, error) = NativeMethods.SetUsername(_nameInput.Text);
         if (!ok)
         {
-            SetInlineError(_nameError, error ?? "Nome inválido.");
+            SetInlineError(_nameError, error ?? Loc.T("Name_Invalid"));
             return;
         }
 
@@ -340,7 +341,7 @@ public partial class MainWindow : Window
         if (!ok)
         {
             box.Text = _username; // volta ao nome anterior
-            SetInlineError(error, message ?? "Nome inválido.");
+            SetInlineError(error, message ?? Loc.T("Name_Invalid"));
             DispatcherTimer.RunOnce(() => SetInlineError(error, null), TimeSpan.FromSeconds(3));
             return;
         }
@@ -366,9 +367,9 @@ public partial class MainWindow : Window
 
         HidePreview(mode switch
         {
-            Mode.Host => "Abra a sala para começar.",
-            Mode.Client => "Escolha uma sala para entrar.",
-            _ => "Escolha uma opção ao lado para começar.",
+            Mode.Host => Loc.T("Host_OpenToStart"),
+            Mode.Client => Loc.T("Client_ChooseRoom"),
+            _ => Loc.T("Home_ChooseOption"),
         });
         _infoText.Text = "";
         UpdateProfileState();
@@ -409,7 +410,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _infoText.Text = "Erro: " + ex.Message;
+            _infoText.Text = Loc.F("Common_Error", ex.Message);
         }
     }
 
@@ -436,7 +437,7 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.HostStart(_passwordBox.Text, null, _roomNameBox.Text);
         if (!ok)
         {
-            _placeholderText.Text = error ?? "Erro ao abrir a sala.";
+            _placeholderText.Text = error ?? Loc.T("Host_OpenError");
             return;
         }
 
@@ -455,12 +456,12 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.HostStartStreamOn(height, fps, monitorIndex);
         if (!ok)
         {
-            _infoText.Text = error ?? "Erro ao iniciar a transmissão.";
+            _infoText.Text = error ?? Loc.T("Stream_StartError");
             return;
         }
 
         _streaming = true;
-        _infoText.Text = "Capturando a tela. A imagem é enviada quando um usuário entrar.";
+        _infoText.Text = Loc.T("Stream_CapturingScreen");
         UpdateUi();
     }
 
@@ -475,21 +476,21 @@ public partial class MainWindow : Window
                 switch (e.GetProperty("type").GetString())
                 {
                     case "started":
-                        _placeholderText.Text = "Sala aberta. Clique em Iniciar transmissão.";
+                        _placeholderText.Text = Loc.T("Host_RoomOpenHint");
                         changedUsers = true; // mostra o próprio Host na lista
                         break;
                     case "user_joined":
-                        Notify($"{EventName(e)} entrou na sala.", JoinGlyph, Sound.UserJoined);
+                        Notify(Loc.F("Notify_Joined", EventName(e)), JoinGlyph, Sound.UserJoined);
                         changedUsers = true;
                         break;
                     case "user_left":
                         _peerAvatars.Remove(e.GetProperty("id").GetUInt64());
-                        Notify($"{EventName(e)} saiu da sala.", LeaveGlyph, Sound.UserLeft);
+                        Notify(Loc.F("Notify_Left", EventName(e)), LeaveGlyph, Sound.UserLeft);
                         changedUsers = true;
                         break;
                     case "user_kicked":
                         _peerAvatars.Remove(e.GetProperty("id").GetUInt64());
-                        Notify($"{EventName(e)} foi removido da sala.", KickGlyph, Sound.UserLeft);
+                        Notify(Loc.F("Notify_Kicked", EventName(e)), KickGlyph, Sound.UserLeft);
                         changedUsers = true;
                         break;
                     case "user_avatar":
@@ -497,21 +498,24 @@ public partial class MainWindow : Window
                         changedUsers = true;
                         break;
                     case "stream_started":
-                        _infoText.Text =
-                            $"Transmitindo {e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()} " +
-                            $"@ {e.GetProperty("fps").GetInt32()} FPS";
+                        _infoText.Text = Loc.F(
+                            "Stream_Started",
+                            e.GetProperty("width").GetInt32(),
+                            e.GetProperty("height").GetInt32(),
+                            e.GetProperty("fps").GetInt32());
                         break;
                     case "stream_stats":
-                        _infoText.Text =
-                            $"Transmitindo — {e.GetProperty("mbps").GetDouble():F1} Mbps, " +
-                            $"{e.GetProperty("clients").GetInt32()} usuário(s)";
+                        _infoText.Text = Loc.F(
+                            "Stream_Stats",
+                            e.GetProperty("mbps").GetDouble(),
+                            e.GetProperty("clients").GetInt32());
                         break;
                     case "stream_stopped":
                         _streaming = false;
                         _infoText.Text = e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
-                            ? "Transmissão interrompida: " + err.GetString()
+                            ? Loc.F("Stream_Interrupted", err.GetString())
                             : "";
-                        HidePreview("Transmissão parada.");
+                        HidePreview(Loc.T("Stream_Stopped"));
                         UpdateUi();
                         break;
                 }
@@ -525,7 +529,7 @@ public partial class MainWindow : Window
     private static string EventName(JsonElement e) =>
         e.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString())
             ? n.GetString()!
-            : "Alguém";
+            : Loc.T("Common_Someone");
 
     /// Pede a miniatura mais recente ao Rust e desenha na área do vídeo.
     private void UpdatePreview()
@@ -540,14 +544,14 @@ public partial class MainWindow : Window
         _usersPanel.Children.Clear();
         if (!_roomOpen) return;
 
-        _usersPanel.Children.Add(UserRow(_myAvatar, $"{_username} (você, host)"));
+        _usersPanel.Children.Add(UserRow(_myAvatar, Loc.F("Users_YouHost", _username)));
 
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
         {
             var id = user.GetProperty("id").GetUInt64();
             var name = user.GetProperty("name").GetString() ?? "?";
-            var kick = new Button { Content = "Expulsar" };
+            var kick = new Button { Content = Loc.T("Users_Kick") };
             kick.Click += (_, _) => NativeMethods.HostKick(id);
 
             _usersPanel.Children.Add(UserRow(PeerAvatar(id), name, kick));
@@ -558,16 +562,18 @@ public partial class MainWindow : Window
     {
         // Aviso + som só no momento em que a transmissão começa (trocar de fonte não conta)
         if (_streaming && !_wasStreaming)
-            Notify("Você iniciou a transmissão.", StreamGlyph, Sound.StreamStarted);
+            Notify(Loc.T("Notify_YouStarted"), StreamGlyph, Sound.StreamStarted);
         _wasStreaming = _streaming;
 
-        _statusLabel.Text = _roomOpen ? (_streaming ? "Transmitindo" : "Sala aberta") : "Sala fechada";
-        _roomButton.Content = _roomOpen ? "Fechar sala" : "Abrir sala";
+        _statusLabel.Text = _roomOpen
+            ? Loc.T(_streaming ? "Host_Streaming" : "Host_RoomOpen")
+            : Loc.T("Host_RoomClosed");
+        _roomButton.Content = Loc.T(_roomOpen ? "Host_CloseRoom" : "Host_OpenRoom");
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
 
         // Transmitindo, o mesmo botão troca o monitor/janela sem parar a transmissão
         _startStreamButton.IsEnabled = _roomOpen;
-        _startStreamButton.Content = _streaming ? "Alterar transmissão" : "Iniciar transmissão";
+        _startStreamButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
         _stopStreamButton.IsEnabled = _roomOpen && _streaming;
 
         _hostBackButton.IsVisible = !_roomOpen; // com a sala aberta, "Fechar sala" já volta ao início
@@ -583,7 +589,7 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.ClientStart();
         if (!ok)
         {
-            HidePreview(error ?? "Erro ao iniciar o modo cliente.");
+            HidePreview(error ?? Loc.T("Client_StartError"));
             return;
         }
 
@@ -635,7 +641,7 @@ public partial class MainWindow : Window
     private void ScanRooms()
     {
         if (!_clientActive) return;
-        if (_roomCount == 0) SetRoomsStatus("Procurando salas...");
+        if (_roomCount == 0) SetRoomsStatus(Loc.T("Client_Searching"));
         NativeMethods.ClientScan(); // se já estiver procurando, o Rust ignora
     }
 
@@ -653,7 +659,7 @@ public partial class MainWindow : Window
         var typed = _clientAddressBox.Text?.Trim();
         if (string.IsNullOrEmpty(typed))
         {
-            _infoText.Text = "Digite o IP da sala ou dê um duplo clique em uma sala da lista.";
+            _infoText.Text = Loc.T("Client_TypeIp");
             return;
         }
 
@@ -667,7 +673,7 @@ public partial class MainWindow : Window
 
         if (!room.Compatible)
         {
-            _infoText.Text = "Esta sala usa uma versão incompatível do LANShare.";
+            _infoText.Text = Loc.T("Client_IncompatibleRoom");
             return;
         }
         StartConnection(room.Address);
@@ -682,14 +688,14 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.ClientConnect(address);
         if (!ok)
         {
-            _infoText.Text = error ?? "Erro ao conectar.";
+            _infoText.Text = error ?? Loc.T("Client_ConnectError");
             return;
         }
 
         _clientState = ClientState.Connecting;
         _infoText.Text = "";
-        _connectingTitle.Text = "Conectando...";
-        _connectingText.Text = $"Conectando a {address}...";
+        _connectingTitle.Text = Loc.T("Client_Connecting");
+        _connectingText.Text = Loc.F("Client_ConnectingTo", address);
         _passwordPanel.IsVisible = false;
         UpdateClientUi();
     }
@@ -702,14 +708,14 @@ public partial class MainWindow : Window
         var (ok, error) = NativeMethods.ClientSubmitPassword(password);
         if (!ok)
         {
-            _infoText.Text = error ?? "Erro ao enviar a senha.";
+            _infoText.Text = error ?? Loc.T("Client_PasswordSendError");
             return;
         }
 
         _clientPasswordBox.Text = "";
         _passwordPanel.IsVisible = false;
-        _connectingTitle.Text = "Conectando...";
-        _connectingText.Text = "Verificando a senha...";
+        _connectingTitle.Text = Loc.T("Client_Connecting");
+        _connectingText.Text = Loc.T("Client_CheckingPassword");
     }
 
     private void PollClientEvents()
@@ -726,19 +732,19 @@ public partial class MainWindow : Window
                         break;
 
                     case "scan_failed":
-                        SetRoomsStatus(e.GetProperty("error").GetString() ?? "Erro ao procurar salas.");
+                        SetRoomsStatus(e.GetProperty("error").GetString() ?? Loc.T("Client_ScanError"));
                         break;
 
                     case "connecting":
-                        _connectingText.Text = $"Conectando a {e.GetProperty("address").GetString()}...";
+                        _connectingText.Text = Loc.F("Client_ConnectingTo", e.GetProperty("address").GetString());
                         break;
 
                     case "password_required":
-                        _connectingTitle.Text = "Sala protegida";
+                        _connectingTitle.Text = Loc.T("Client_ProtectedRoom");
                         _connectingText.Text = "";
                         _passwordHint.Text = e.GetProperty("retry").GetBoolean()
-                            ? "Senha incorreta. Tente novamente."
-                            : "Esta sala tem senha.";
+                            ? Loc.T("Client_WrongPassword")
+                            : Loc.T("Client_RoomHasPassword");
                         _clientPasswordBox.Text = "";
                         _passwordPanel.IsVisible = true;
                         _clientPasswordBox.Focus();
@@ -760,7 +766,7 @@ public partial class MainWindow : Window
                         _videoFps = _videoMbps = 0;
                         _videoSize = null;
                         _passwordPanel.IsVisible = false;
-                        HidePreview("Conectado. Aguardando a transmissão do Host.");
+                        HidePreview(Loc.T("Client_WaitingStream"));
                         RefreshClientUsers();
                         UpdateClientUi();
                         RefreshClientInfo();
@@ -768,7 +774,7 @@ public partial class MainWindow : Window
 
                     case "user_joined":
                         _clientUsers[e.GetProperty("id").GetUInt64()] = e.GetProperty("name").GetString() ?? "?";
-                        Notify($"{EventName(e)} entrou na sala.", JoinGlyph, Sound.UserJoined);
+                        Notify(Loc.F("Notify_Joined", EventName(e)), JoinGlyph, Sound.UserJoined);
                         RefreshClientUsers();
                         break;
 
@@ -780,7 +786,7 @@ public partial class MainWindow : Window
                         _clientUsers.Remove(id);
                         _peerAvatars.Remove(id);
                         Notify(
-                            kickedOut ? $"{EventName(e)} foi removido da sala." : $"{EventName(e)} saiu da sala.",
+                            Loc.F(kickedOut ? "Notify_Kicked" : "Notify_Left", EventName(e)),
                             kickedOut ? KickGlyph : LeaveGlyph,
                             Sound.UserLeft);
                         RefreshClientUsers();
@@ -793,7 +799,7 @@ public partial class MainWindow : Window
                         break;
 
                     case "kicked":
-                        _kickedReason = e.GetProperty("reason").GetString() ?? "Você foi removido pelo Host.";
+                        _kickedReason = e.GetProperty("reason").GetString() ?? Loc.T("Client_KickedDefault");
                         _infoText.Text = _kickedReason;
                         break;
 
@@ -808,7 +814,7 @@ public partial class MainWindow : Window
                         var newStream = _videoSize is null;
                         _videoSize = $"{e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()}";
                         if (newStream && DateTime.UtcNow - _connectedAt > StreamSoundGrace)
-                            Notify($"{_hostName} iniciou a transmissão.", StreamGlyph, Sound.StreamStarted);
+                            Notify(Loc.F("Notify_HostStarted", _hostName), StreamGlyph, Sound.StreamStarted);
                         RefreshClientInfo();
                         break;
                     }
@@ -823,26 +829,26 @@ public partial class MainWindow : Window
                         // O Host parou de transmitir: a conexão continua, só a imagem acaba
                         _videoFps = _videoMbps = 0;
                         _videoSize = null;
-                        HidePreview("Transmissão parada.");
+                        HidePreview(Loc.T("Stream_Stopped"));
                         RefreshClientInfo();
                         break;
 
                     case "video_error":
-                        _infoText.Text = e.GetProperty("error").GetString() ?? "Erro no vídeo.";
+                        _infoText.Text = e.GetProperty("error").GetString() ?? Loc.T("Client_VideoError");
                         break;
 
                     case "rejected":
-                        EndClientSession("Entrada recusada: " + e.GetProperty("reason").GetString());
+                        EndClientSession(Loc.F("Client_Rejected", e.GetProperty("reason").GetString()));
                         break;
 
                     case "connect_failed":
-                        EndClientSession(e.GetProperty("error").GetString() ?? "Não foi possível conectar.");
+                        EndClientSession(e.GetProperty("error").GetString() ?? Loc.T("Client_ConnectFailed"));
                         break;
 
                     case "disconnected":
                         var local = e.TryGetProperty("local", out var l) && l.ValueKind == JsonValueKind.True;
                         var message = _kickedReason
-                            ?? (local ? "" : "Desconectado: " + e.GetProperty("reason").GetString());
+                            ?? (local ? "" : Loc.F("Client_DisconnectedReason", e.GetProperty("reason").GetString()));
                         EndClientSession(message);
                         break;
                 }
@@ -866,7 +872,7 @@ public partial class MainWindow : Window
         foreach (var r in rooms.EnumerateArray())
         {
             entries.Add(new RoomEntry(
-                r.GetProperty("name").GetString() ?? "Sala",
+                r.GetProperty("name").GetString() ?? Loc.T("Room_DefaultName"),
                 r.GetProperty("address").GetString() ?? "",
                 r.GetProperty("users").GetInt32(),
                 r.TryGetProperty("max_users", out var max) && max.ValueKind == JsonValueKind.Number
@@ -877,7 +883,7 @@ public partial class MainWindow : Window
         }
 
         _roomCount = entries.Count;
-        SetRoomsStatus(entries.Count == 0 ? "Nenhuma sala encontrada na rede." : "");
+        SetRoomsStatus(entries.Count == 0 ? Loc.T("Client_NoRooms") : "");
 
         // Só refaz a lista se algo mudou (para não perder a seleção a cada busca)
         var signature = string.Join("|", entries.Select(x =>
@@ -912,7 +918,9 @@ public partial class MainWindow : Window
     /// Cartão de uma sala: nome, endereço, usuários e senha.
     private static ListBoxItem BuildRoomItem(RoomEntry room)
     {
-        var people = room.MaxUsers is { } max ? $"{room.Users}/{max} na sala" : $"{room.Users} na sala";
+        var people = room.MaxUsers is { } max
+            ? Loc.F("Room_UsersMax", room.Users, max)
+            : Loc.F("Room_Users", room.Users);
 
         var details = new StackPanel { Spacing = 4 };
         details.Children.Add(new TextBlock
@@ -924,8 +932,8 @@ public partial class MainWindow : Window
         });
         details.Children.Add(new TextBlock { Text = room.Address, FontSize = 12, Opacity = 0.7 });
         details.Children.Add(InfoLine("\uE716", people));
-        if (room.HasPassword) details.Children.Add(InfoLine("\uE72E", "com senha"));
-        if (!room.Compatible) details.Children.Add(InfoLine("\uE7BA", "versão incompatível"));
+        if (room.HasPassword) details.Children.Add(InfoLine("\uE72E", Loc.T("Room_WithPassword")));
+        if (!room.Compatible) details.Children.Add(InfoLine("\uE7BA", Loc.T("Room_Incompatible")));
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         grid.Children.Add(details);
@@ -946,11 +954,11 @@ public partial class MainWindow : Window
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
-        _clientUsersPanel.Children.Add(UserRow(PeerAvatar(HostUserId), $"{_hostName} (host)"));
+        _clientUsersPanel.Children.Add(UserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName)));
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
             var mine = id == _myId;
-            _clientUsersPanel.Children.Add(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? $"{name} (você)" : name));
+            _clientUsersPanel.Children.Add(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name));
         }
     }
 
@@ -959,7 +967,7 @@ public partial class MainWindow : Window
     {
         if (_clientState != ClientState.Connected || _kickedReason is not null) return;
 
-        var parts = new List<string> { "Conectado" };
+        var parts = new List<string> { Loc.T("Client_Connected") };
         if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
         if (_videoSize is not null) parts.Add($"{_videoSize} @ {_videoFps:F0} FPS, {_videoMbps:F1} Mbps");
         _infoText.Text = string.Join(" — ", parts);
@@ -978,14 +986,14 @@ public partial class MainWindow : Window
 
         _clientStatusLabel.Text = _clientState switch
         {
-            ClientState.Idle => "Desconectado",
-            ClientState.Connecting => "Conectando...",
-            _ => "Conectado",
+            ClientState.Idle => Loc.T("Client_Disconnected"),
+            ClientState.Connecting => Loc.T("Client_Connecting"),
+            _ => Loc.T("Client_Connected"),
         };
 
         _clientUsersHeader.IsVisible = _clientUsersPanel.IsVisible = connected;
         _clientDisconnectButton.IsVisible = connected;
-        _clientBackButton.Content = idle ? "Voltar ao início" : "Sair da sala e voltar";
+        _clientBackButton.Content = Loc.T(idle ? "Common_BackHome" : "Client_LeaveAndBack");
 
         UpdateProfileState();
         UpdateStage();

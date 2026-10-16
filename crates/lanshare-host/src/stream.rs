@@ -6,6 +6,7 @@ use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
 use crate::preview::PreviewSlot;
 use crate::registry::Registry;
+use lanshare_core::i18n::tr;
 use rayon::prelude::*;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -91,11 +92,23 @@ impl StreamHandle {
         let (reply, answer) = mpsc::sync_channel(1);
         self.switch_tx
             .send(SwitchRequest { target, reply })
-            .map_err(|_| "A transmissao ja terminou.".to_string())?;
+            .map_err(|_| {
+                tr(
+                    "A transmissão já terminou.",
+                    "The stream has already ended.",
+                    "La transmisión ya terminó.",
+                )
+                .to_string()
+            })?;
 
-        answer
-            .recv_timeout(SWITCH_TIMEOUT)
-            .map_err(|_| "A troca demorou demais. Tente de novo.".to_string())?
+        answer.recv_timeout(SWITCH_TIMEOUT).map_err(|_| {
+            tr(
+                "A troca demorou demais. Tente de novo.",
+                "The switch took too long. Try again.",
+                "El cambio tardó demasiado. Inténtalo de nuevo.",
+            )
+            .to_string()
+        })?
     }
 
     /// false se a transmissão já terminou sozinha (por erro).
@@ -171,7 +184,14 @@ fn run(
                     }
                     Ok(())
                 }
-                Err(erro) => Err(format!("Nao foi possivel trocar a transmissao: {erro}")),
+                Err(erro) => Err(format!(
+                    "{}: {erro}",
+                    tr(
+                        "Não foi possível trocar a transmissão",
+                        "Could not switch the stream",
+                        "No se pudo cambiar la transmisión"
+                    )
+                )),
             };
             let _ = request.reply.send(result);
         }
@@ -181,8 +201,16 @@ fn run(
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => {
                 let reason = match current {
-                    CaptureTarget::Window(_) => "a janela compartilhada foi fechada",
-                    _ => "a captura de tela foi encerrada",
+                    CaptureTarget::Window(_) => tr(
+                        "a janela compartilhada foi fechada",
+                        "the shared window was closed",
+                        "la ventana compartida se cerró",
+                    ),
+                    _ => tr(
+                        "a captura de tela foi encerrada",
+                        "the screen capture ended",
+                        "la captura de pantalla terminó",
+                    ),
                 };
                 return Err(reason.into());
             }

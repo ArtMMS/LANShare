@@ -28,7 +28,7 @@ public partial class MainWindow
     private static readonly IBrush EmptyAvatarBrush = new SolidColorBrush(Color.Parse("#2E343C"));
 
     /// Formatos aceitos como avatar (GIF fica de fora).
-    private static readonly FilePickerFileType AvatarImageTypes = new("Imagens")
+    private static readonly FilePickerFileType AvatarImageTypes = new(Loc.T("Avatar_FileType"))
     {
         Patterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.webp" },
     };
@@ -255,7 +255,7 @@ public partial class MainWindow
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Escolha uma imagem para o avatar",
+            Title = Loc.T("Avatar_PickerTitle"),
             AllowMultiple = false,
             FileTypeFilter = new[] { AvatarImageTypes },
         });
@@ -290,7 +290,7 @@ public partial class MainWindow
 
             if (AvatarStore.IsGif(bytes))
             {
-                SetAvatarError("GIF não é aceito como avatar. Use PNG, JPG, BMP ou WEBP.");
+                SetAvatarError(Loc.T("Avatar_NoGif"));
                 return;
             }
 
@@ -298,7 +298,7 @@ public partial class MainWindow
             if (bitmap.PixelSize.Width < 2 || bitmap.PixelSize.Height < 2)
             {
                 bitmap.Dispose();
-                SetAvatarError("Essa imagem é pequena demais.");
+                SetAvatarError(Loc.T("Avatar_TooSmall"));
                 return;
             }
 
@@ -307,7 +307,7 @@ public partial class MainWindow
         }
         catch (Exception)
         {
-            SetAvatarError("Não foi possível abrir essa imagem. Use PNG, JPG, BMP ou WEBP.");
+            SetAvatarError(Loc.T("Avatar_OpenError"));
         }
     }
 
@@ -385,7 +385,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            SetAvatarError("Não foi possível salvar o avatar: " + ex.Message);
+            SetAvatarError(Loc.F("Avatar_SaveError", ex.Message));
             return;
         }
 
@@ -402,7 +402,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            SetAvatarError("Não foi possível remover o avatar: " + ex.Message);
+            SetAvatarError(Loc.F("Avatar_RemoveError", ex.Message));
             return;
         }
 

@@ -31,6 +31,7 @@ use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, CoUninitialize,
 use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_UI4};
 
 use crate::capture::{CapturedFrame, ScreenCapture};
+use lanshare_core::i18n::tr;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
@@ -136,7 +137,15 @@ impl HwEncoder {
     ) -> Result<Self, BoxError> {
         let (width, height) = scaled_size(src_width, src_height, target_height);
         if width < 2 || height < 2 {
-            return Err(format!("resolucao {src_width}x{src_height} nao suportada").into());
+            return Err(format!(
+                "{} {src_width}x{src_height}",
+                tr(
+                    "resolução não suportada:",
+                    "unsupported resolution:",
+                    "resolución no compatible:"
+                )
+            )
+            .into());
         }
 
         let runtime = MfRuntime::new()?;
@@ -201,7 +210,12 @@ impl HwEncoder {
     /// (o encoder de hardware pode entregar a saída um pouco depois da entrada).
     pub fn encode(&mut self, frame: &CapturedFrame) -> Result<Vec<Vec<u8>>, BoxError> {
         if frame.width != self.src_width || frame.height != self.src_height {
-            return Err("a resolucao mudou no meio da captura (ainda nao suportado)".into());
+            return Err(tr(
+                "a resolução mudou no meio da captura (ainda não suportado)",
+                "the resolution changed during capture (not supported yet)",
+                "la resolución cambió durante la captura (aún no compatible)",
+            )
+            .into());
         }
 
         let mut packets = Vec::new();
@@ -507,7 +521,12 @@ fn find_hardware_encoder() -> Result<IMFTransform, BoxError> {
     }
 
     if count == 0 {
-        return Err("nenhum encoder H.264 de hardware encontrado neste PC".into());
+        return Err(tr(
+            "nenhum encoder H.264 de hardware encontrado neste PC",
+            "no hardware H.264 encoder found on this PC",
+            "no se encontró ningún codificador H.264 por hardware en este PC",
+        )
+        .into());
     }
 
     let entries = unsafe { std::slice::from_raw_parts_mut(activates, count as usize) };
@@ -522,7 +541,14 @@ fn find_hardware_encoder() -> Result<IMFTransform, BoxError> {
     }
     unsafe { CoTaskMemFree(Some(activates as *const std::ffi::c_void)) };
 
-    found.ok_or_else(|| "nao foi possivel ativar o encoder de hardware".into())
+    found.ok_or_else(|| {
+        tr(
+            "não foi possível ativar o encoder de hardware",
+            "could not activate the hardware encoder",
+            "no se pudo activar el codificador por hardware",
+        )
+        .into()
+    })
 }
 
 /// Copia os bytes de um sample de saída para um Vec.
