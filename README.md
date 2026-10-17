@@ -3,7 +3,7 @@
 ![LANShare Logo](assets/logo.png)
 
 ![Status](https://img.shields.io/badge/status-active%20development-green)
-![Version](https://img.shields.io/badge/version-v1.1-lightblue)
+![Version](https://img.shields.io/badge/version-v1.2-lightblue)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
@@ -20,8 +20,8 @@ The project is being developed with performance, stability, and ease of use in m
 
 
 <p align="center">
-  <a href="https://github.com/ArtMMS/LANShare/releases/download/v1.1.0/LANShare.zip">
-    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.1.0-0078D4?style=for-the-badge" alt="Download LANShare v1.1.0">
+  <a href="https://github.com/ArtMMS/LANShare/releases/download/v1.2.0/LANShare.zip">
+    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.2.0-0078D4?style=for-the-badge" alt="Download LANShare v1.2.0">
   </a>
   <a href="https://lanshareapp.com/">
     <img src="https://img.shields.io/badge/🌐%20Official%20Website-8A2BE2?style=for-the-badge" alt="Official Website">
