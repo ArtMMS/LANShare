@@ -12,6 +12,7 @@ namespace LANShare.App;
 /// Volume do som da transmissão (só no Client): botão no canto inferior esquerdo do vídeo
 /// e, ao clicar, um painel com o slider vertical e o mudo. O volume fica salvo nas preferências.
 /// Em tela cheia o botão (e o cursor) somem quando o mouse fica parado, como num player de vídeo.
+/// O botão 🎉 dos efeitos sonoros (MainWindow.Soundboard.cs) some e volta junto com ele.
 public partial class MainWindow
 {
     /// Em tela cheia, depois deste tempo sem mexer o mouse, o botão e o cursor somem.
@@ -26,11 +27,12 @@ public partial class MainWindow
     private const double VolumeButtonSize = 44;
     private const double VolumeEdgeMargin = 16;
 
-    private const string VolumeMutedGlyph = "";
-    private const string Volume0Glyph = "";
-    private const string Volume1Glyph = "";
-    private const string Volume2Glyph = "";
-    private const string Volume3Glyph = "";
+    // Ícones da fonte Segoe Fluent Icons / Segoe MDL2 Assets
+    private const string VolumeMutedGlyph = "\uE74F";
+    private const string Volume0Glyph = "\uE992";
+    private const string Volume1Glyph = "\uE993";
+    private const string Volume2Glyph = "\uE994";
+    private const string Volume3Glyph = "\uE995";
 
     private static readonly IBrush VolumeBackground = new SolidColorBrush(Color.Parse("#E01B1F24"));
     private static readonly IBrush VolumeBackgroundHover = new SolidColorBrush(Color.Parse("#F02A3038"));
@@ -50,7 +52,7 @@ public partial class MainWindow
     /// O botão de volume faz sentido agora? (Client conectado.)
     private bool VolumeAvailable => _mode == Mode.Client && _clientState == ClientState.Connected;
 
-    /// Chamado uma vez no construtor (antes do InitFullscreen).
+    /// Chamado uma vez no construtor (antes do InitSoundboard e do InitFullscreen).
     private void InitVolume()
     {
         _volumeButtonIcon = VolumeGlyph(20);
@@ -189,6 +191,7 @@ public partial class MainWindow
         _volumeHideTimer.Interval = VolumeAutoHide;
         _volumeHideTimer.Tick += (_, _) => HideVolumeForIdle();
 
+        // Também salva o volume dos efeitos sonoros (MainWindow.Soundboard.cs)
         _volumeSaveTimer.Interval = VolumeSaveDelay;
         _volumeSaveTimer.Tick += (_, _) =>
         {
@@ -263,6 +266,7 @@ public partial class MainWindow
     }
 
     /// Mostra ou esconde o botão conforme a conexão (chamado pelo UpdateClientUi e pelo ShowMode).
+    /// Também atualiza o botão 🎉 dos efeitos sonoros.
     private void UpdateVolumeControls()
     {
         if (!VolumeAvailable)
@@ -270,6 +274,7 @@ public partial class MainWindow
             SetVolumePanel(false);
             _volumeButton.IsVisible = false;
             _volumeHideTimer.Stop();
+            _volumeHiddenByIdle = false;
             RestoreCursor();
         }
         else
@@ -278,6 +283,8 @@ public partial class MainWindow
             if (_fullscreen) _volumeHideTimer.Start();
         }
 
+        UpdateSoundboardControls();
+
         // A tela cheia também só vale com o Client conectado
         UpdateFullscreenAvailability();
     }
@@ -285,6 +292,8 @@ public partial class MainWindow
     private void SetVolumePanel(bool open)
     {
         if (open && !VolumeAvailable) open = false;
+        if (open) SetSoundboardPanel(false); // um painel por vez
+
         _volumePanelOpen = open;
         _volumePanel.IsVisible = open;
 
@@ -313,9 +322,11 @@ public partial class MainWindow
             _volumeHideTimer.Stop();
             _volumeButton.IsVisible = VolumeAvailable;
         }
+
+        UpdateSoundboardControls();
     }
 
-    /// O mouse mexeu: em tela cheia, mostra o botão e o cursor de novo e recomeça a contagem.
+    /// O mouse mexeu: em tela cheia, mostra os botões e o cursor de novo e recomeça a contagem.
     private void OnVolumeMouseActivity()
     {
         if (!_fullscreen || !VolumeAvailable) return;
@@ -324,6 +335,7 @@ public partial class MainWindow
         {
             _volumeHiddenByIdle = false;
             _volumeButton.IsVisible = true;
+            _sfxButton.IsVisible = SoundboardAvailable;
             RestoreCursor();
         }
 
@@ -331,15 +343,16 @@ public partial class MainWindow
         _volumeHideTimer.Start();
     }
 
-    /// Tela cheia sem mexer o mouse: esconde o botão e o cursor (só se o painel estiver fechado).
+    /// Tela cheia sem mexer o mouse: esconde os botões e o cursor (só com os painéis fechados).
     private void HideVolumeForIdle()
     {
         _volumeHideTimer.Stop();
-        if (!_fullscreen || !VolumeAvailable || _volumePanelOpen) return;
-        if (_volumeButton.IsPointerOver) return; // o mouse está parado em cima do botão
+        if (!_fullscreen || !VolumeAvailable || _volumePanelOpen || _sfxPanelOpen) return;
+        if (_volumeButton.IsPointerOver || _sfxButton.IsPointerOver) return; // o mouse está parado em cima de um botão
 
         _volumeHiddenByIdle = true;
         _volumeButton.IsVisible = false;
+        _sfxButton.IsVisible = false;
         Cursor = new Cursor(StandardCursorType.None);
     }
 

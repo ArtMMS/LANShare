@@ -157,6 +157,7 @@ public partial class MainWindow : Window
         InitAvatar();
         InitNotifications();
         InitVolume(); // antes do InitFullscreen: o Esc fecha o painel de volume antes de sair da tela cheia
+        InitSoundboard(); // idem: o Esc fecha o painel de efeitos sonoros antes de sair da tela cheia
 
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
@@ -375,7 +376,7 @@ public partial class MainWindow : Window
         });
         _infoText.Text = "";
         UpdateProfileState();
-        UpdateVolumeControls();
+        UpdateVolumeControls(); // também atualiza o botão 🎉 dos efeitos sonoros
     }
 
     /// Decide o que aparece na área grande: salas, conexão, imagem ou mensagem.
@@ -583,6 +584,7 @@ public partial class MainWindow : Window
 
         if (_pickerOpen) UpdatePickerConfirm();
         UpdateProfileState();
+        UpdateSoundboardControls(); // o botão 🎉 aparece com a sala aberta
     }
 
     // ───────────────────────── Client ─────────────────────────
@@ -1017,7 +1019,7 @@ public partial class MainWindow : Window
 
         UpdateProfileState();
         UpdateStage();
-        UpdateVolumeControls(); // o botão de volume só existe com o Client conectado
+        UpdateVolumeControls(); // os botões de volume e 🎉 só existem com o Client conectado
     }
 
     // ───────────────────────── Imagem (Host e Client) ─────────────────────────

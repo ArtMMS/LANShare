@@ -19,9 +19,9 @@ internal sealed class AppPreferences
     public int StreamHeight { get; set; } = 1080;
     public int StreamFps { get; set; } = 30;
 
-    /// Saída do som das transmissões que o Client assiste: o id do dispositivo no Windows.
-    /// Null = padrão do Windows (acompanha se o padrão mudar). Se o dispositivo salvo
-    /// não estiver conectado, o som sai pelo padrão, mas a escolha continua salva.
+    /// Saída do som das transmissões que o Client assiste (e dos efeitos sonoros): o id do
+    /// dispositivo no Windows. Null = padrão do Windows (acompanha se o padrão mudar). Se o
+    /// dispositivo salvo não estiver conectado, o som sai pelo padrão, mas a escolha continua salva.
     public string? AudioOutputDevice { get; set; }
 
     /// Volume do som das transmissões no Client, de 0 a 100. Começa na metade.
@@ -30,10 +30,13 @@ internal sealed class AppPreferences
     /// Som das transmissões no mudo (o volume continua guardado para quando voltar).
     public bool StreamMuted { get; set; }
 
+    /// Volume dos efeitos sonoros (soundboard) que chegam para este usuário, de 0 a 100.
+    public int SfxVolume { get; set; } = 70;
+
     public bool SoundOnUserJoinLeave { get; set; } = true;
     public bool SoundOnStreamStart { get; set; } = true;
 
-    /// Ainda não usado: vale quando as atualizações automáticas chegarem.
+    /// Procurar versão nova no GitHub ao abrir o app.
     public bool AutoCheckUpdates { get; set; } = true;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -98,5 +101,6 @@ internal sealed class AppPreferences
         if (Loc.FromCode(Language) is null) Language = null;
         if (string.IsNullOrWhiteSpace(AudioOutputDevice)) AudioOutputDevice = null;
         StreamVolume = Math.Clamp(StreamVolume, 0, 100);
+        SfxVolume = Math.Clamp(SfxVolume, 0, 100);
     }
 }

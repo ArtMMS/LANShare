@@ -202,6 +202,44 @@ internal static class Loc
         ["Client_ConnectFailed"] = new[] { "Não foi possível conectar.", "Could not connect.", "No se pudo conectar." },
         ["Client_DisconnectedReason"] = new[] { "Desconectado: {0}", "Disconnected: {0}", "Desconectado: {0}" },
 
+        // ── Efeitos sonoros (soundboard) ──
+        ["Sfx_Title"] = new[] { "Efeitos sonoros", "Sound effects", "Efectos de sonido" },
+        ["Sfx_Add"] = new[] { "Adicionar som", "Add sound", "Añadir sonido" },
+        ["Sfx_Adding"] = new[] { "Adicionando...", "Adding...", "Añadiendo..." },
+        ["Sfx_Empty"] = new[]
+        {
+            "Nenhum som ainda. Adicione um .mp3, .wav ou .ogg de até 5 segundos (ou arraste o arquivo para cá).",
+            "No sounds yet. Add an .mp3, .wav or .ogg of up to 5 seconds (or drag the file here).",
+            "Todavía no hay sonidos. Añade un .mp3, .wav u .ogg de hasta 5 segundos (o arrastra el archivo aquí).",
+        },
+        ["Sfx_VolumeTooltip"] = new[] { "Volume dos efeitos sonoros", "Sound effects volume", "Volumen de los efectos de sonido" },
+        ["Sfx_PlayLocal"] = new[] { "Ouvir só para mim", "Play only for me", "Escuchar solo yo" },
+        ["Sfx_Rename"] = new[] { "Renomear", "Rename", "Cambiar nombre" },
+        ["Sfx_Remove"] = new[] { "Remover", "Remove", "Quitar" },
+        ["Sfx_RenamePlaceholder"] = new[] { "Nome do som", "Sound name", "Nombre del sonido" },
+        ["Sfx_FileType"] = new[] { "Sons", "Sounds", "Sonidos" },
+        ["Sfx_PickerTitle"] = new[] { "Escolha um som (até 5 segundos)", "Choose a sound (up to 5 seconds)", "Elige un sonido (hasta 5 segundos)" },
+        ["Sfx_DefaultName"] = new[] { "Som", "Sound", "Sonido" },
+        ["Sfx_TooLong"] = new[]
+        {
+            "Esse som tem {0:F1} s. O máximo é 5 segundos.",
+            "This sound is {0:F1} s long. The maximum is 5 seconds.",
+            "Este sonido dura {0:F1} s. El máximo es 5 segundos.",
+        },
+        ["Sfx_TooBig"] = new[] { "O arquivo é grande demais (máximo de 2 MB).", "The file is too large (2 MB max).", "El archivo es demasiado grande (máximo 2 MB)." },
+        ["Sfx_Unsupported"] = new[] { "Formato não suportado. Use MP3, WAV ou OGG.", "Unsupported format. Use MP3, WAV or OGG.", "Formato no compatible. Usa MP3, WAV u OGG." },
+        ["Sfx_OpenError"] = new[]
+        {
+            "Não foi possível abrir esse som. Use MP3, WAV ou OGG.",
+            "Could not open this sound. Use MP3, WAV or OGG.",
+            "No se pudo abrir este sonido. Usa MP3, WAV u OGG.",
+        },
+        ["Sfx_EmptySound"] = new[] { "Esse arquivo não tem som.", "This file has no sound.", "Este archivo no tiene sonido." },
+        ["Sfx_SaveError"] = new[] { "Não foi possível salvar o som: {0}", "Could not save the sound: {0}", "No se pudo guardar el sonido: {0}" },
+        ["Sfx_RemoveError"] = new[] { "Não foi possível remover o som: {0}", "Could not remove the sound: {0}", "No se pudo quitar el sonido: {0}" },
+        ["Sfx_PlayError"] = new[] { "Não foi possível tocar o som: {0}", "Could not play the sound: {0}", "No se pudo reproducir el sonido: {0}" },
+        ["Sfx_NoOutput"] = new[] { "Nenhuma saída de áudio encontrada neste PC.", "No audio output found on this PC.", "No se encontró ninguna salida de audio en este PC." },
+
         // ── Cartões de sala ──
         ["Room_DefaultName"] = new[] { "Sala", "Room", "Sala" },
         ["Room_Users"] = new[] { "{0} na sala", "{0} in the room", "{0} en la sala" },

@@ -11,7 +11,7 @@
     <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
 
     <!-- Versão do app: ÚNICA fonte. A tag da release no GitHub deve ser igual (ex.: v0.5.0) -->
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
   </PropertyGroup>
 
   <!-- Publicação: um único LANShare.exe (Windows x64), com o .NET e a DLL do Rust embutidos -->
@@ -27,8 +27,10 @@
     <PackageReference Include="Avalonia" Version="12.*" />
     <PackageReference Include="Avalonia.Desktop" Version="12.*" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.*" />
-    <!-- Toca os sons (MP3) no Windows -->
+    <!-- Toca os sons (MP3, WAV) no Windows -->
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Lê arquivos .ogg (efeitos sonoros) -->
+    <PackageReference Include="NAudio.Vorbis" Version="1.5.0" />
   </ItemGroup>
 
   <!-- Imagens e sons embutidos no programa -->
