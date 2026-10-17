@@ -1,10 +1,11 @@
-//! Biblioteca do Host: abre a sala, aceita vários Clients ao mesmo tempo e transmite a tela.
+//! Biblioteca do Host: abre a sala, aceita vários Clients ao mesmo tempo e transmite a tela (e o som).
 //!
 //! - `HostEngine` (engine.rs) é o motor: recebe comandos e emite eventos (events.rs).
 //! - `run_cli()` (cli.rs) é o terminal que usa o motor (`lanshare host`).
 //! - A interface gráfica usa o mesmo motor pela FFI.
 
 pub mod app_windows;
+mod audio_capture;
 mod capture;
 mod cli;
 mod discovery;

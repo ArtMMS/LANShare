@@ -114,6 +114,11 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void lanshare_client_stop();
 
+    // ── Áudio ──
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_audio_output_devices();
+
     /// Versão do motor Rust. O texto vem de memória estática do Rust, então não se libera.
     public static string GetVersion() =>
         Marshal.PtrToStringUTF8(lanshare_version()) ?? "?";
@@ -333,4 +338,40 @@ internal static class NativeMethods
     }
 
     public static void ClientStop() => lanshare_client_stop();
+
+    // ───────────── Áudio ─────────────
+
+    /// Saídas de áudio do PC (o padrão do Windows primeiro). Demora alguns milissegundos:
+    /// chame fora da thread da interface. Em caso de erro, a lista vem vazia e Error explica.
+    public static (List<AudioOutputDevice> Devices, string? Error) AudioOutputDevices()
+    {
+        var json = TakeString(lanshare_audio_output_devices()) ?? "{}";
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var devices = new List<AudioOutputDevice>();
+
+        if (!(root.TryGetProperty("ok", out var ok) && ok.GetBoolean()))
+        {
+            var error = root.TryGetProperty("error", out var e) ? e.GetString() : null;
+            return (devices, error ?? "?");
+        }
+
+        if (root.TryGetProperty("devices", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var d in list.EnumerateArray())
+            {
+                var id = d.GetProperty("id").GetString();
+                if (string.IsNullOrEmpty(id)) continue;
+                devices.Add(new AudioOutputDevice(
+                    id,
+                    d.GetProperty("name").GetString() ?? id,
+                    d.TryGetProperty("default", out var def) && def.ValueKind == JsonValueKind.True));
+            }
+        }
+
+        return (devices, null);
+    }
 }
+
+/// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
+internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);

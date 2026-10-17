@@ -262,11 +262,24 @@ internal static class Loc
         ["Settings_AudioNotifications"] = new[] { "Áudio & Notificações", "Audio & Notifications", "Audio y notificaciones" },
         ["Settings_AudioOutput"] = new[] { "Saída do áudio das transmissões", "Stream audio output", "Salida de audio de las transmisiones" },
         ["Settings_WindowsDefault"] = new[] { "Padrão do Windows", "Windows default", "Predeterminado de Windows" },
-        ["Settings_AudioSoon"] = new[]
+        ["Settings_WindowsDefaultNamed"] = new[] { "Padrão do Windows ({0})", "Windows default ({0})", "Predeterminado de Windows ({0})" },
+        ["Settings_AudioOutputHint"] = new[]
         {
-            "Disponível quando o áudio da transmissão chegar.",
-            "Available once stream audio arrives.",
-            "Disponible cuando llegue el audio de la transmisión.",
+            "Por onde sai o som das transmissões que você assiste. O padrão do Windows acompanha o sistema se ele mudar.",
+            "Where the sound of the streams you watch comes out. Windows default follows the system if it changes.",
+            "Por dónde sale el sonido de las transmisiones que ves. El predeterminado de Windows sigue al sistema si cambia.",
+        },
+        ["Settings_AudioDeviceMissing"] = new[]
+        {
+            "O dispositivo escolhido não está conectado. Enquanto isso, o som sai pelo padrão do Windows.",
+            "The chosen device is not connected. Meanwhile, the sound comes out of the Windows default.",
+            "El dispositivo elegido no está conectado. Mientras tanto, el sonido sale por el predeterminado de Windows.",
+        },
+        ["Settings_AudioDevicesError"] = new[]
+        {
+            "Não foi possível listar os dispositivos de áudio. O som sai pelo padrão do Windows.",
+            "Could not list the audio devices. The sound comes out of the Windows default.",
+            "No se pudieron listar los dispositivos de audio. El sonido sale por el predeterminado de Windows.",
         },
         ["Settings_NotificationSounds"] = new[] { "Sons de notificação", "Notification sounds", "Sonidos de notificación" },
         ["Settings_SoundJoinLeave"] = new[] { "Quando um usuário entra ou sai", "When a user joins or leaves", "Cuando un usuario entra o sale" },

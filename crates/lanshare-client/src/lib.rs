@@ -1,7 +1,8 @@
 //! Biblioteca do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
 //! O executável único (`lanshare-app`) chama `run()` para iniciar o Client em modo console.
-//! A interface gráfica usa o `ClientEngine` (engine.rs).
+//! A interface gráfica usa o `ClientEngine` (engine.rs) e a lista de saídas de áudio (audio_devices.rs).
 
+pub mod audio_devices;
 mod decoder;
 mod discovery;
 mod engine;

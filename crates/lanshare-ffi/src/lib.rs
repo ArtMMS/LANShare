@@ -4,7 +4,7 @@
 //! Textos que voltam do Rust (JSON) são alocados aqui e DEVEM ser liberados
 //! pelo C# com `lanshare_free_string`.
 
-use lanshare_client::ClientEngine;
+use lanshare_client::{audio_devices, ClientEngine};
 use lanshare_core::i18n::{self, tr, Language};
 use lanshare_core::settings::{self, Settings};
 use lanshare_host::monitors::{self, Thumbnail};
@@ -560,6 +560,26 @@ fn with_client(action: impl FnOnce(&ClientEngine) -> Result<(), String>) -> *mut
             Ok(()) => reply_ok(),
             Err(error) => reply_err(&error),
         },
+    }
+}
+
+// ───────────────────────────── Áudio ─────────────────────────────
+
+/// Dispositivos de saída de áudio (por onde o Client toca o som das transmissões), como JSON:
+/// {"ok":true,"devices":[{"id":"{0.0.0.00000000}.{...}","name":"Alto-falantes (Realtek)","default":true}]}
+/// ou {"ok":false,"error":".."}. O padrão do Windows vem primeiro. Não precisa do modo Client ativo.
+/// Leva alguns milissegundos: chame fora da thread da interface.
+#[no_mangle]
+pub extern "C" fn lanshare_audio_output_devices() -> *mut c_char {
+    match audio_devices::list_output_devices() {
+        Ok(devices) => {
+            let list: Vec<_> = devices
+                .iter()
+                .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "default": d.is_default }))
+                .collect();
+            to_c(serde_json::json!({ "ok": true, "devices": list }).to_string())
+        }
+        Err(error) => reply_err(&error),
     }
 }
 

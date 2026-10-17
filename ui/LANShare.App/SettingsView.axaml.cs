@@ -18,7 +18,8 @@ public partial class SettingsView : UserControl
     private readonly Button _closeButton, _shortcutButton, _res1080Button, _res720Button, _fps30Button, _fps15Button,
         _checkUpdatesButton, _restartButton;
     private readonly ToggleSwitch _soundJoinLeaveSwitch, _soundStreamSwitch, _autoUpdateSwitch;
-    private readonly TextBlock _updateStatusText, _restartText;
+    private readonly TextBlock _updateStatusText, _restartText, _audioDeviceHint;
+    private readonly ComboBox _audioDeviceBox;
     private readonly Grid _restartRow;
 
     /// Botões de idioma, na mesma ordem de Loc.All.
@@ -26,6 +27,12 @@ public partial class SettingsView : UserControl
 
     private AppPreferences _prefs = new();
     private bool _loading;
+
+    /// true = preenchendo a lista de saídas de áudio (a seleção não conta como mudança).
+    private bool _loadingAudio;
+
+    /// Muda a cada listagem: uma resposta atrasada de uma abertura anterior é ignorada.
+    private int _audioRequest;
 
     public event EventHandler? CloseRequested;
     public event EventHandler? PreferencesChanged;
@@ -57,6 +64,8 @@ public partial class SettingsView : UserControl
         _restartButton = Find<Button>("RestartButton");
         _restartText = Find<TextBlock>("RestartText");
         _restartRow = Find<Grid>("RestartRow");
+        _audioDeviceBox = Find<ComboBox>("AudioDeviceBox");
+        _audioDeviceHint = Find<TextBlock>("AudioDeviceHint");
         _languageButtons = new[] { Find<Button>("LangPtButton"), Find<Button>("LangEnButton"), Find<Button>("LangEsButton") };
 
         _closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
@@ -79,6 +88,11 @@ public partial class SettingsView : UserControl
             Change(p => p.AutoCheckUpdates = _autoUpdateSwitch.IsChecked == true);
 
         _checkUpdatesButton.Click += (_, _) => CheckNowRequested?.Invoke(this, EventArgs.Empty);
+
+        // Saída do som: só "Padrão do Windows" até a lista chegar do Rust
+        _audioDeviceBox.ItemsSource = new List<ComboBoxItem> { DefaultDeviceItem(null) };
+        _audioDeviceBox.SelectedIndex = 0;
+        _audioDeviceBox.SelectionChanged += (_, _) => OnAudioDeviceChanged();
 
         // Idioma: salva na hora, mas só vale depois de reiniciar o app
         for (var i = 0; i < _languageButtons.Length; i++)
@@ -107,6 +121,7 @@ public partial class SettingsView : UserControl
         IsCapturingKey = false;
         _shortcutButton.Classes.Set("capturing", false);
         Refresh();
+        RefreshAudioDevices();
     }
 
     /// Resultado do "Verificar agora". `busy` = verificando (botão desativado).
@@ -171,6 +186,72 @@ public partial class SettingsView : UserControl
         _restartRow.IsVisible = pending;
 
         _loading = false;
+    }
+
+    // ───────────────────────── Saída do áudio ─────────────────────────
+
+    /// Lista as saídas de áudio do PC (fora da thread da interface) e marca a que está salva.
+    private async void RefreshAudioDevices()
+    {
+        var request = ++_audioRequest;
+        _audioDeviceBox.IsEnabled = false;
+
+        List<AudioOutputDevice> devices;
+        string? error;
+        try
+        {
+            (devices, error) = await Task.Run(() => NativeMethods.AudioOutputDevices());
+        }
+        catch (Exception ex)
+        {
+            (devices, error) = (new List<AudioOutputDevice>(), ex.Message);
+        }
+
+        // O painel foi reaberto enquanto listava: vale a listagem mais nova
+        if (request != _audioRequest) return;
+
+        var items = new List<ComboBoxItem> { DefaultDeviceItem(devices.FirstOrDefault(d => d.IsDefault)) };
+        items.AddRange(devices.Select(d => new ComboBoxItem { Content = d.Name, Tag = d.Id }));
+
+        var saved = _prefs.AudioOutputDevice;
+        var selected = saved is null ? null : items.FirstOrDefault(i => i.Tag as string == saved);
+
+        _loadingAudio = true;
+        _audioDeviceBox.ItemsSource = items;
+        _audioDeviceBox.SelectedItem = selected ?? items[0];
+        _loadingAudio = false;
+        _audioDeviceBox.IsEnabled = true;
+
+        if (error is not null) SetAudioHint(Loc.T("Settings_AudioDevicesError"), warning: true);
+        else if (saved is not null && selected is null) SetAudioHint(Loc.T("Settings_AudioDeviceMissing"), warning: true);
+        else SetAudioHint(Loc.T("Settings_AudioOutputHint"), warning: false);
+    }
+
+    /// Primeira opção da lista: segue o padrão do Windows (mostra qual é ele agora, se souber).
+    private static ComboBoxItem DefaultDeviceItem(AudioOutputDevice? current) => new()
+    {
+        Content = current is null
+            ? Loc.T("Settings_WindowsDefault")
+            : Loc.F("Settings_WindowsDefaultNamed", current.Name),
+        Tag = null, // null = padrão do Windows
+    };
+
+    /// O usuário escolheu outra saída: salva na hora (o padrão do Windows é salvo como null).
+    private void OnAudioDeviceChanged()
+    {
+        if (_loadingAudio || _audioDeviceBox.SelectedItem is not ComboBoxItem item) return;
+
+        var id = item.Tag as string;
+        if (id == _prefs.AudioOutputDevice) return;
+
+        Change(p => p.AudioOutputDevice = id);
+        SetAudioHint(Loc.T("Settings_AudioOutputHint"), warning: false);
+    }
+
+    private void SetAudioHint(string text, bool warning)
+    {
+        _audioDeviceHint.Text = text;
+        _audioDeviceHint.Classes.Set("warning", warning);
     }
 
     // ───────────────────────── Captura da tecla ─────────────────────────

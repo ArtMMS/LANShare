@@ -26,6 +26,11 @@
             <Setter Property="Opacity" Value="0.6" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <!-- Aviso (ex.: o dispositivo de áudio escolhido não está conectado) -->
+        <Style Selector="TextBlock.hint.warning">
+            <Setter Property="Foreground" Value="#E8B04B" />
+            <Setter Property="Opacity" Value="0.95" />
+        </Style>
 
         <!-- Escolha em blocos (1080p / 720p, 30 / 15 FPS) -->
         <Style Selector="Button.segment">
@@ -151,12 +156,10 @@
 
                                 <StackPanel Margin="16,12" Spacing="6">
                                     <TextBlock Text="{l:Tr Settings_AudioOutput}" />
-                                    <ComboBox x:Name="AudioDeviceBox" HorizontalAlignment="Stretch"
-                                              SelectedIndex="0" IsEnabled="False">
-                                        <ComboBoxItem Content="{l:Tr Settings_WindowsDefault}" />
-                                    </ComboBox>
-                                    <TextBlock Classes="hint"
-                                               Text="{l:Tr Settings_AudioSoon}" />
+                                    <!-- Os itens vêm do Rust (lanshare_audio_output_devices) ao abrir o painel -->
+                                    <ComboBox x:Name="AudioDeviceBox" HorizontalAlignment="Stretch" />
+                                    <TextBlock x:Name="AudioDeviceHint" Classes="hint"
+                                               Text="{l:Tr Settings_AudioOutputHint}" />
                                 </StackPanel>
 
                                 <Border Classes="divider" />

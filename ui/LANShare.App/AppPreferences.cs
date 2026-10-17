@@ -19,8 +19,13 @@ internal sealed class AppPreferences
     public int StreamHeight { get; set; } = 1080;
     public int StreamFps { get; set; } = 30;
 
-    /// Dispositivo de saída do áudio das transmissões (null = padrão do Windows). Ainda não usado.
+    /// Saída do som das transmissões que o Client assiste: o id do dispositivo no Windows.
+    /// Null = padrão do Windows (acompanha se o padrão mudar). Se o dispositivo salvo
+    /// não estiver conectado, o som sai pelo padrão, mas a escolha continua salva.
     public string? AudioOutputDevice { get; set; }
+
+    /// Volume do som das transmissões no Client, de 0 a 100. Começa na metade.
+    public int StreamVolume { get; set; } = 50;
 
     public bool SoundOnUserJoinLeave { get; set; } = true;
     public bool SoundOnStreamStart { get; set; } = true;
@@ -88,5 +93,7 @@ internal sealed class AppPreferences
         if (StreamHeight is not (720 or 1080)) StreamHeight = 1080;
         if (StreamFps is not (15 or 30)) StreamFps = 30;
         if (Loc.FromCode(Language) is null) Language = null;
+        if (string.IsNullOrWhiteSpace(AudioOutputDevice)) AudioOutputDevice = null;
+        StreamVolume = Math.Clamp(StreamVolume, 0, 100);
     }
 }

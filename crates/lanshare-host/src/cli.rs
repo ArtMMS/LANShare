@@ -336,6 +336,8 @@ fn handle_command(line: &str, prompt: &mut Prompt, engine: &HostEngine) {
 
         Some("hwencode") => start_hw_encode_test(parse_seconds(parts.next())),
 
+        Some("audiotest") => start_audio_test(parse_seconds(parts.next())),
+
         Some("help") => print_help(),
 
         Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
@@ -409,6 +411,17 @@ fn start_hw_encode_test(seconds: u64) {
     });
 }
 
+/// Teste temporário da captura de som (grava um .wav na pasta atual).
+fn start_audio_test(seconds: u64) {
+    println!("[host] Capturando o som do PC por {seconds}s...");
+
+    std::thread::spawn(move || {
+        if let Err(erro) = crate::audio_capture::test_audio_capture(seconds) {
+            println!("[host] Falha na captura de som: {erro}");
+        }
+    });
+}
+
 fn print_help() {
     println!("[host] Comandos:");
     println!("[host]   list              mostra quem esta conectado");
@@ -418,5 +431,6 @@ fn print_help() {
     println!("[host]   capture [segs]    teste de captura da tela (padrao: 5 segundos)");
     println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");
     println!("[host]   hwencode [segs]   teste de captura + compressao H.264 na GPU");
+    println!("[host]   audiotest [segs]  teste de captura do som do PC (grava lanshare-audiotest.wav)");
     println!("[host]   help              mostra esta ajuda");
 }
