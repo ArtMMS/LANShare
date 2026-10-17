@@ -16,8 +16,10 @@ using Avalonia.Threading;
 namespace LANShare.App;
 
 /// Efeitos sonoros (soundboard), no Host com a sala aberta e no Client conectado:
-/// botão 🎉 na parte de baixo do vídeo e, ao clicar, o painel com os sons (3 por fileira),
-/// o "Adicionar som" e o volume dos efeitos no canto superior direito.
+/// - botão 🎉 na parte de baixo do vídeo; ao clicar, o painel com os sons (3 por fileira);
+/// - ícone de volume no canto do painel: abre um slider deitado, por cima do painel;
+/// - "Adicionar som" abre uma janela (como a do avatar) para escolher/arrastar o arquivo e dar um nome;
+/// - quem toca um som fica com a borda azul e um 🎉 na lista de usuários, enquanto o som toca.
 /// Por enquanto os sons tocam só neste PC (a rede vem na próxima etapa).
 public partial class MainWindow
 {
@@ -25,6 +27,10 @@ public partial class MainWindow
     private const double SfxPanelWidth = 360;
     private const double SfxListMaxHeight = 196;
     private const double SfxTileHeight = 40;
+    private const double SfxVolumeBoxWidth = 240;
+
+    /// Espaço entre o painel e o slider de volume que abre por cima dele.
+    private const double SfxVolumeGap = 8;
 
     /// Opacidade do botão parado (ele fica "escondido" até passar o mouse).
     private const double SfxIdleOpacity = 0.35;
@@ -32,11 +38,19 @@ public partial class MainWindow
     /// Quanto a roda do mouse muda o volume dos efeitos a cada "clique".
     private const int SfxWheelStep = 5;
 
+    private const string SfxAudioGlyph = "";
+    private const string SfxPlayGlyph = "";
+    private const string PartyEmoji = "\U0001F389"; // 🎉
+
     private static readonly TimeSpan SfxHoverAnimation = TimeSpan.FromMilliseconds(160);
     private static readonly TimeSpan SfxErrorDuration = TimeSpan.FromSeconds(5);
 
     /// O slider do volume some este tempo depois de o mouse sair dele (se não estiver fixado).
     private static readonly TimeSpan SfxVolumeHideDelay = TimeSpan.FromMilliseconds(350);
+
+    /// Destaque na lista de usuários: dura o tempo do som (com um mínimo, para dar tempo de ver).
+    private static readonly TimeSpan SfxHighlightMin = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan SfxHighlightExtra = TimeSpan.FromMilliseconds(400);
 
     private static readonly TransformOperations SfxScaleIdle = TransformOperations.Parse("scale(1)");
     private static readonly TransformOperations SfxScaleHot = TransformOperations.Parse("scale(1.12)");
@@ -47,21 +61,35 @@ public partial class MainWindow
 
     private static readonly IBrush SfxDashBrush = new SolidColorBrush(Color.Parse("#5A6470"));
     private static readonly IBrush SfxErrorBrush = new SolidColorBrush(Color.Parse("#FF6B6B"));
+    private static readonly IBrush SfxHighlightBorder = new SolidColorBrush(Color.Parse("#4F7CFF"));
+    private static readonly IBrush SfxHighlightFill = new SolidColorBrush(Color.Parse("#264F7CFF"));
+    private static readonly IBrush SfxDialogBackground = new SolidColorBrush(Color.Parse("#1B1F24"));
+    private static readonly IBrush SfxDialogBorder = new SolidColorBrush(Color.Parse("#2E343C"));
+    private static readonly IBrush SfxDropBackground = new SolidColorBrush(Color.Parse("#15191E"));
+    private static readonly IBrush SfxDropBorder = new SolidColorBrush(Color.Parse("#3A414B"));
+    private static readonly IBrush SfxDropBorderHot = new SolidColorBrush(Color.Parse("#4F7CFF"));
 
     private static readonly FilePickerFileType SfxFileTypes = new(Loc.T("Sfx_FileType"))
     {
         Patterns = new[] { "*.mp3", "*.wav", "*.ogg" },
     };
 
+    // ── Botão, painel e volume ──
     private Border _sfxButton = null!, _sfxPanel = null!, _sfxVolumeButton = null!, _sfxVolumeBox = null!,
         _sfxAddButton = null!;
-    private TextBlock _sfxVolumeIcon = null!, _sfxVolumeLabel = null!, _sfxError = null!, _sfxEmptyText = null!,
-        _sfxAddText = null!;
+    private TextBlock _sfxVolumeIcon = null!, _sfxVolumeLabel = null!, _sfxError = null!, _sfxEmptyText = null!;
     private Slider _sfxVolumeSlider = null!;
     private UniformGrid _sfxGrid = null!;
     private ScrollViewer _sfxScroll = null!;
     private Grid _sfxRenameRow = null!;
     private TextBox _sfxRenameBox = null!;
+
+    // ── Janela "Adicionar som" ──
+    private Border _sfxAddOverlay = null!, _sfxAddDrop = null!, _sfxAddFileCard = null!;
+    private TextBlock _sfxAddDropTitle = null!, _sfxAddFileName = null!, _sfxAddFileInfo = null!, _sfxAddError = null!;
+    private StackPanel _sfxAddNameSection = null!;
+    private TextBox _sfxAddNameBox = null!;
+    private Button _sfxAddChooseAnother = null!, _sfxAddSave = null!, _sfxAddPreview = null!;
 
     private readonly DispatcherTimer _sfxVolumeHideTimer = new();
     private IDisposable? _sfxErrorTimer;
@@ -70,13 +98,24 @@ public partial class MainWindow
     private bool _sfxPanelOpen;
     private bool _sfxVolumePinned;   // clicou no ícone: o slider fica aberto até clicar de novo
     private bool _sfxVolumeHeld;     // arrastando o slider (não esconde no meio)
-    private bool _sfxImporting;
     private bool _updatingSfxSlider;
     private string? _sfxRenamingId;
+
+    // Estado da janela "Adicionar som": o arquivo escolhido e já conferido
+    private bool _sfxAddOpen;
+    private bool _sfxAddBusy;
+    private byte[]? _sfxAddData;
+    private SfxCheck? _sfxAddCheck;
+
+    /// Quem está com o destaque azul na lista de usuários, e até quando (id 0 = o Host).
+    private readonly Dictionary<ulong, DateTime> _sfxHighlights = new();
 
     /// O soundboard faz sentido agora? (Host com a sala aberta ou Client conectado.)
     private bool SoundboardAvailable =>
         (_mode == Mode.Host && _roomOpen) || (_mode == Mode.Client && _clientState == ClientState.Connected);
+
+    /// O meu id na sala (o mesmo que os outros usam para me identificar).
+    private ulong MySfxUserId => _mode == Mode.Host ? HostUserId : _myId;
 
     /// Chamado uma vez no construtor (depois do InitVolume e antes do InitFullscreen:
     /// o Esc fecha o painel antes de sair da tela cheia).
@@ -86,32 +125,40 @@ public partial class MainWindow
 
         BuildSfxButton();
         BuildSfxPanel();
+        BuildSfxVolumeBox();
+        BuildSfxAddDialog();
 
         // Por cima do vídeo (mesmo Grid da imagem e do botão de volume)
         if (_previewImage.Parent is Panel stage)
         {
             stage.Children.Add(_sfxButton);
             stage.Children.Add(_sfxPanel);
+            stage.Children.Add(_sfxVolumeBox);
         }
 
-        // Clicar fora do painel e do botão fecha o painel (e o slider, se clicar fora dele)
+        // A janela de adicionar fica por cima de tudo (como a do avatar)
+        if (Content is Panel root) root.Children.Add(_sfxAddOverlay);
+
+        // Clicar fora do painel, do slider e do botão fecha o painel
         AddHandler(PointerPressedEvent, (_, e) =>
         {
-            if (!_sfxPanelOpen || e.Source is not Visual source) return;
+            if (!_sfxPanelOpen || _sfxAddOpen || e.Source is not Visual source) return;
 
             if (_sfxVolumeBox.IsVisible && !IsInside(source, _sfxVolumeBox) && !IsInside(source, _sfxVolumeButton))
                 HideSfxVolume();
 
-            if (IsInside(source, _sfxPanel) || IsInside(source, _sfxButton)) return;
+            if (IsInside(source, _sfxPanel) || IsInside(source, _sfxButton) || IsInside(source, _sfxVolumeBox)) return;
             SetSoundboardPanel(false);
         }, RoutingStrategies.Tunnel);
 
-        // Esc: cancela a renomeação, depois fecha o slider, depois fecha o painel
+        // Esc: fecha a janela de adicionar, depois cancela a renomeação, depois o slider, depois o painel
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (!_sfxPanelOpen || e.Key != Key.Escape) return;
+            if (e.Key != Key.Escape) return;
 
-            if (_sfxRenamingId is not null) CancelSfxRename();
+            if (_sfxAddOpen) CloseSfxAddDialog();
+            else if (!_sfxPanelOpen) return;
+            else if (_sfxRenamingId is not null) CancelSfxRename();
             else if (_sfxVolumeBox.IsVisible) HideSfxVolume();
             else SetSoundboardPanel(false);
             e.Handled = true;
@@ -131,7 +178,7 @@ public partial class MainWindow
         RefreshSfxVolume();
     }
 
-    // ───────────────────────── Montagem ─────────────────────────
+    // ───────────────────────── Botão 🎉 ─────────────────────────
 
     private void BuildSfxButton()
     {
@@ -163,7 +210,7 @@ public partial class MainWindow
             },
             Child = new TextBlock
             {
-                Text = "\U0001F389", // 🎉
+                Text = PartyEmoji,
                 FontFamily = SfxEmojiFont,
                 FontSize = 20,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -181,6 +228,8 @@ public partial class MainWindow
             e.Handled = true;
         };
     }
+
+    // ───────────────────────── Painel ─────────────────────────
 
     private void BuildSfxPanel()
     {
@@ -266,7 +315,6 @@ public partial class MainWindow
         };
 
         // ── Adicionar som (borda tracejada) ──
-        _sfxAddText = new TextBlock { Text = Loc.T("Sfx_Add"), VerticalAlignment = VerticalAlignment.Center };
         _sfxAddButton = new Border
         {
             Height = 36,
@@ -280,14 +328,7 @@ public partial class MainWindow
             {
                 Children =
                 {
-                    new Rectangle
-                    {
-                        Stroke = SfxDashBrush,
-                        StrokeThickness = 1.5,
-                        StrokeDashArray = new AvaloniaList<double> { 4, 3 },
-                        RadiusX = 8,
-                        RadiusY = 8,
-                    },
+                    DashedOutline(8),
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal,
@@ -299,53 +340,15 @@ public partial class MainWindow
                         {
                             new TextBlock
                             {
-                                Text = "\uE710", // +
+                                Text = "", // +
                                 FontFamily = IconFont,
                                 FontSize = 12,
                                 VerticalAlignment = VerticalAlignment.Center,
                             },
-                            _sfxAddText,
+                            new TextBlock { Text = Loc.T("Sfx_Add"), VerticalAlignment = VerticalAlignment.Center },
                         },
                     },
                 },
-            },
-        };
-
-        // ── Slider do volume (abre por cima da lista, logo abaixo do ícone) ──
-        _sfxVolumeLabel = new TextBlock
-        {
-            FontSize = 11,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Opacity = 0.9,
-        };
-        _sfxVolumeSlider = new Slider
-        {
-            Orientation = Orientation.Vertical,
-            Minimum = 0,
-            Maximum = 100,
-            SmallChange = 1,
-            LargeChange = 10,
-            Height = 110,
-            HorizontalAlignment = HorizontalAlignment.Center,
-        };
-        _sfxVolumeBox = new Border
-        {
-            Width = 52,
-            CornerRadius = new CornerRadius(8),
-            Background = VolumeBackground,
-            BorderBrush = VolumeBorder,
-            BorderThickness = new Thickness(1),
-            Padding = new Thickness(4, 8),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 34, 0, 0),
-            BoxShadow = BoxShadows.Parse("0 6 18 0 #80000000"),
-            ZIndex = 5,
-            IsVisible = false,
-            Child = new StackPanel
-            {
-                Spacing = 6,
-                Children = { _sfxVolumeLabel, _sfxVolumeSlider },
             },
         };
 
@@ -360,22 +363,18 @@ public partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             // Logo acima do botão 🎉
-            Margin = new Thickness(0, 0, 0, VolumeEdgeMargin + SfxButtonSize + 10),
+            Margin = new Thickness(0, 0, 0, SfxPanelBottom),
             BoxShadow = BoxShadows.Parse("0 8 24 0 #80000000"),
             ZIndex = 21,
             IsVisible = false,
-            Child = new Panel
+            Child = new StackPanel
             {
-                Children =
-                {
-                    new StackPanel
-                    {
-                        Children = { header, _sfxRenameRow, _sfxError, _sfxEmptyText, _sfxScroll, _sfxAddButton },
-                    },
-                    _sfxVolumeBox,
-                },
+                Children = { header, _sfxRenameRow, _sfxError, _sfxEmptyText, _sfxScroll, _sfxAddButton },
             },
         };
+
+        // O slider de volume fica logo acima do painel: acompanha a altura dele
+        _sfxPanel.SizeChanged += (_, e) => PositionSfxVolumeBox(e.NewSize.Height);
 
         // ── Eventos ──
 
@@ -404,48 +403,27 @@ public partial class MainWindow
             }
             e.Handled = true;
         };
-        _sfxVolumeBox.PointerEntered += (_, _) => _sfxVolumeHideTimer.Stop();
-        _sfxVolumeBox.PointerExited += (_, _) => ScheduleSfxVolumeHide();
-
-        // Arrastando o slider, ele não some mesmo se o mouse sair do quadro
-        _sfxVolumeBox.AddHandler(PointerPressedEvent, (_, _) => _sfxVolumeHeld = true,
-            RoutingStrategies.Tunnel, handledEventsToo: true);
-        _sfxVolumeBox.AddHandler(PointerReleasedEvent, (_, _) =>
-        {
-            _sfxVolumeHeld = false;
-            ScheduleSfxVolumeHide();
-        }, RoutingStrategies.Tunnel, handledEventsToo: true);
-
-        _sfxVolumeSlider.ValueChanged += (_, _) =>
-        {
-            if (_updatingSfxSlider) return;
-            SetSfxVolume((int)Math.Round(_sfxVolumeSlider.Value));
-        };
         _sfxVolumeButton.PointerWheelChanged += OnSfxVolumeWheel;
-        _sfxVolumeBox.PointerWheelChanged += OnSfxVolumeWheel;
 
-        // Adicionar som
+        // Adicionar som: abre a janela
         _sfxAddButton.PointerEntered += (_, _) => _sfxAddButton.Background = VolumeBackgroundHover;
         _sfxAddButton.PointerExited += (_, _) => _sfxAddButton.Background = Brushes.Transparent;
-        _sfxAddButton.PointerPressed += async (_, e) =>
+        _sfxAddButton.PointerPressed += (_, e) =>
         {
             if (!e.GetCurrentPoint(_sfxAddButton).Properties.IsLeftButtonPressed) return;
             e.Handled = true;
-            await PickSfxFilesAsync();
+            OpenSfxAddDialog();
         };
 
-        // Soltar arquivos em qualquer lugar do painel
+        // Soltar um arquivo no painel: abre a janela já com ele
         DragDrop.SetAllowDrop(_sfxPanel, true);
-        _sfxPanel.AddHandler(DragDrop.DragOverEvent, (_, e) =>
-        {
-            e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
-            e.Handled = true;
-        });
+        _sfxPanel.AddHandler(DragDrop.DragOverEvent, OnSfxDragOver);
         _sfxPanel.AddHandler(DragDrop.DropEvent, async (_, e) =>
         {
             e.Handled = true;
-            var files = e.DataTransfer.TryGetFiles()?.OfType<IStorageFile>().ToList();
-            if (files is { Count: > 0 }) await ImportSfxFilesAsync(files);
+            if (DroppedFile(e) is not { } file) return;
+            OpenSfxAddDialog();
+            await LoadSfxAddFileAsync(file);
         });
 
         // Renomear
@@ -458,6 +436,19 @@ public partial class MainWindow
             e.Handled = true;
         };
     }
+
+    /// Distância do painel até a borda de baixo do vídeo (fica logo acima do botão 🎉).
+    private static double SfxPanelBottom => VolumeEdgeMargin + SfxButtonSize + 10;
+
+    /// Contorno tracejado com cantos arredondados (botão "Adicionar som" e área de soltar).
+    private static Rectangle DashedOutline(double radius, double thickness = 1.5, IBrush? stroke = null) => new()
+    {
+        Stroke = stroke ?? SfxDashBrush,
+        StrokeThickness = thickness,
+        StrokeDashArray = new AvaloniaList<double> { 4, 3 },
+        RadiusX = radius,
+        RadiusY = radius,
+    };
 
     /// Um som do painel: clicar toca; botão direito mostra as opções.
     private Control BuildSfxTile(SfxEntry entry)
@@ -483,7 +474,7 @@ public partial class MainWindow
         tile.Click += (_, _) => PlaySfx(entry);
 
         var preview = new MenuItem { Header = Loc.T("Sfx_PlayLocal") };
-        preview.Click += (_, _) => PlaySfx(entry);
+        preview.Click += (_, _) => PlaySfx(entry, onlyForMe: true);
         var rename = new MenuItem { Header = Loc.T("Sfx_Rename") };
         rename.Click += (_, _) => StartSfxRename(entry);
         var remove = new MenuItem { Header = Loc.T("Sfx_Remove") };
@@ -493,13 +484,12 @@ public partial class MainWindow
         return tile;
     }
 
-    // ───────────────────────── Botão e painel ─────────────────────────
-
     /// Mostra ou esconde o botão 🎉 (chamado pelo UpdateUi do Host e pelo UpdateVolumeControls).
     private void UpdateSoundboardControls()
     {
         if (!SoundboardAvailable)
         {
+            CloseSfxAddDialog();
             SetSoundboardPanel(false);
             _sfxButton.IsVisible = false;
             return;
@@ -573,12 +563,14 @@ public partial class MainWindow
 
     // ───────────────────────── Tocar ─────────────────────────
 
-    /// Toca o som neste PC. (Na etapa de rede, clicar também vai tocar para a sala.)
-    private async void PlaySfx(SfxEntry entry)
+    /// Toca o som. `onlyForMe` = "Ouvir só para mim" (sem destaque na lista; na etapa de rede,
+    /// também não vai para a sala).
+    private async void PlaySfx(SfxEntry entry, bool onlyForMe = false)
     {
         try
         {
-            await SfxPlayer.PlayFileAsync(SfxStore.PathOf(entry), _preferences.AudioOutputDevice);
+            var duration = await SfxPlayer.PlayFileAsync(SfxStore.PathOf(entry), _preferences.AudioOutputDevice);
+            if (!onlyForMe) HighlightSfxUser(MySfxUserId, duration);
         }
         catch (SfxException ex)
         {
@@ -590,80 +582,70 @@ public partial class MainWindow
         }
     }
 
-    // ───────────────────────── Adicionar ─────────────────────────
+    // ───────────────────────── Destaque na lista de usuários ─────────────────────────
 
-    private async Task PickSfxFilesAsync()
+    /// Borda azul + 🎉 na linha de quem tocou um som, enquanto o som toca.
+    /// (Na etapa de rede, também é chamado quando chega o som de outra pessoa.)
+    private void HighlightSfxUser(ulong userId, TimeSpan soundDuration)
     {
-        if (_sfxImporting) return;
+        var span = soundDuration + SfxHighlightExtra;
+        if (span < SfxHighlightMin) span = SfxHighlightMin;
 
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = Loc.T("Sfx_PickerTitle"),
-            AllowMultiple = true,
-            FileTypeFilter = new[] { SfxFileTypes },
-        });
+        _sfxHighlights[userId] = DateTime.UtcNow + span;
+        RefreshSfxUserLists();
 
-        if (files.Count > 0) await ImportSfxFilesAsync(files);
+        // Um pouco depois do fim: tira o destaque (se não tiver tocado outro som nesse meio tempo)
+        DispatcherTimer.RunOnce(ExpireSfxHighlights, span + TimeSpan.FromMilliseconds(50));
     }
 
-    /// Adiciona um ou mais arquivos, um por vez. Se algum falhar, os outros continuam.
-    private async Task ImportSfxFilesAsync(IReadOnlyList<IStorageFile> files)
+    private void ExpireSfxHighlights()
     {
-        if (_sfxImporting) return;
-        _sfxImporting = true;
-        _sfxAddText.Text = Loc.T("Sfx_Adding");
-        ShowSfxError(null);
+        var now = DateTime.UtcNow;
+        var expired = _sfxHighlights.Where(h => h.Value <= now).Select(h => h.Key).ToList();
+        if (expired.Count == 0) return;
 
-        string? lastError = null;
-        var added = 0;
-
-        foreach (var file in files)
-        {
-            try
-            {
-                byte[] bytes;
-                await using (var stream = await file.OpenReadAsync())
-                {
-                    bytes = await ReadSfxFileAsync(stream);
-                }
-
-                var name = file.Name;
-                await Task.Run(() => SfxStore.Import(bytes, name));
-                added++;
-            }
-            catch (SfxException ex)
-            {
-                lastError = files.Count > 1 ? $"{file.Name}: {ex.Message}" : ex.Message;
-            }
-            catch (Exception ex)
-            {
-                lastError = Loc.F("Sfx_SaveError", ex.Message);
-            }
-        }
-
-        _sfxImporting = false;
-        _sfxAddText.Text = Loc.T("Sfx_Add");
-
-        if (added > 0)
-        {
-            ReloadSfx();
-            Dispatcher.UIThread.Post(() => _sfxScroll.ScrollToEnd(), DispatcherPriority.Background);
-        }
-        ShowSfxError(lastError);
+        foreach (var id in expired) _sfxHighlights.Remove(id);
+        RefreshSfxUserLists();
     }
 
-    /// Lê o arquivo para a memória, parando se passar do tamanho máximo.
-    private static async Task<byte[]> ReadSfxFileAsync(Stream stream)
+    private void RefreshSfxUserLists()
     {
-        using var memory = new MemoryStream();
-        var buffer = new byte[81920];
-        int read;
-        while ((read = await stream.ReadAsync(buffer)) > 0)
+        if (_roomOpen) RefreshUsers();
+        if (_clientState == ClientState.Connected) RefreshClientUsers();
+    }
+
+    /// Envolve uma linha da lista de usuários: borda azul e 🎉 quando a pessoa tocou um som.
+    /// (A borda existe sempre, transparente, para as linhas não "pularem" ao acender.)
+    private Control WithSfxHighlight(Control row, ulong userId)
+    {
+        var lit = _sfxHighlights.TryGetValue(userId, out var until) && until > DateTime.UtcNow;
+
+        var content = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        content.Children.Add(row);
+
+        if (lit)
         {
-            memory.Write(buffer, 0, read);
-            if (memory.Length > SfxStore.MaxFileBytes) throw new SfxException(Loc.T("Sfx_TooBig"));
+            var party = new TextBlock
+            {
+                Text = PartyEmoji,
+                FontFamily = SfxEmojiFont,
+                FontSize = 14,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(6, 0, 0, 0),
+            };
+            Grid.SetColumn(party, 1);
+            content.Children.Add(party);
         }
-        return memory.ToArray();
+
+        return new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1.5),
+            BorderBrush = lit ? SfxHighlightBorder : Brushes.Transparent,
+            Background = lit ? SfxHighlightFill : Brushes.Transparent,
+            Padding = new Thickness(5, 3),
+            Child = content,
+        };
     }
 
     // ───────────────────────── Renomear e remover ─────────────────────────
@@ -721,11 +703,100 @@ public partial class MainWindow
         ReloadSfx();
     }
 
-    // ───────────────────────── Volume dos efeitos ─────────────────────────
+    // ───────────────────────── Volume dos efeitos (slider deitado) ─────────────────────────
+
+    /// Cartão com o slider horizontal. Fica fora do painel, logo acima dele, alinhado à direita
+    /// (embaixo dele está o ícone de volume).
+    private void BuildSfxVolumeBox()
+    {
+        _sfxVolumeLabel = new TextBlock
+        {
+            FontSize = 12,
+            MinWidth = 36,
+            TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0),
+        };
+        Grid.SetColumn(_sfxVolumeLabel, 1);
+
+        _sfxVolumeSlider = new Slider
+        {
+            Orientation = Orientation.Horizontal,
+            Minimum = 0,
+            Maximum = 100,
+            SmallChange = 1,
+            LargeChange = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        _sfxVolumeBox = new Border
+        {
+            Width = SfxVolumeBoxWidth,
+            CornerRadius = new CornerRadius(10),
+            Background = VolumeBackground,
+            BorderBrush = VolumeBorder,
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(14, 10, 14, 4),
+            // Centralizado com um recuo à esquerda: a borda direita fica alinhada com a do painel
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            BoxShadow = BoxShadows.Parse("0 6 18 0 #80000000"),
+            ZIndex = 22,
+            IsVisible = false,
+            Child = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = Loc.T("Sfx_VolumeTooltip"),
+                        FontSize = 12,
+                        Opacity = 0.85,
+                    },
+                    new Grid
+                    {
+                        ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                        Children = { _sfxVolumeSlider, _sfxVolumeLabel },
+                    },
+                },
+            },
+        };
+        PositionSfxVolumeBox(0);
+
+        _sfxVolumeBox.PointerEntered += (_, _) => _sfxVolumeHideTimer.Stop();
+        _sfxVolumeBox.PointerExited += (_, _) => ScheduleSfxVolumeHide();
+        _sfxVolumeBox.PointerWheelChanged += OnSfxVolumeWheel;
+
+        // Arrastando o slider, ele não some mesmo se o mouse sair do cartão
+        _sfxVolumeBox.AddHandler(PointerPressedEvent, (_, _) => _sfxVolumeHeld = true,
+            RoutingStrategies.Tunnel, handledEventsToo: true);
+        _sfxVolumeBox.AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            _sfxVolumeHeld = false;
+            ScheduleSfxVolumeHide();
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+
+        _sfxVolumeSlider.ValueChanged += (_, _) =>
+        {
+            if (_updatingSfxSlider) return;
+            SetSfxVolume((int)Math.Round(_sfxVolumeSlider.Value));
+        };
+    }
+
+    /// Coloca o slider logo acima do painel (que muda de altura conforme a quantidade de sons).
+    private void PositionSfxVolumeBox(double panelHeight)
+    {
+        _sfxVolumeBox.Margin = new Thickness(
+            SfxPanelWidth - SfxVolumeBoxWidth,
+            0,
+            0,
+            SfxPanelBottom + panelHeight + SfxVolumeGap);
+    }
 
     private void ShowSfxVolume()
     {
         _sfxVolumeHideTimer.Stop();
+        PositionSfxVolumeBox(_sfxPanel.Bounds.Height);
         _sfxVolumeBox.IsVisible = true;
     }
 
@@ -782,5 +853,448 @@ public partial class MainWindow
         _updatingSfxSlider = true;
         _sfxVolumeSlider.Value = volume;
         _updatingSfxSlider = false;
+    }
+
+    // ───────────────────────── Janela "Adicionar som" ─────────────────────────
+
+    /// Igual à do avatar: área para clicar ou arrastar o arquivo; depois, o arquivo escolhido,
+    /// o botão de ouvir e o campo do nome (o nome do arquivo já vem preenchido).
+    private void BuildSfxAddDialog()
+    {
+        // ── Área de escolher/soltar ──
+        _sfxAddDropTitle = new TextBlock
+        {
+            Text = Loc.T("Sfx_ClickToChoose"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        _sfxAddDrop = new Border
+        {
+            Height = 170,
+            Background = SfxDropBackground,
+            BorderBrush = SfxDropBorder,
+            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(10),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = new StackPanel
+            {
+                Spacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = SfxAudioGlyph,
+                        FontFamily = IconFont,
+                        FontSize = 36,
+                        Opacity = 0.7,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    _sfxAddDropTitle,
+                    new TextBlock
+                    {
+                        Text = Loc.T("Sfx_OrDrag"),
+                        Opacity = 0.6,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    new TextBlock
+                    {
+                        Text = Loc.T("Sfx_Formats"),
+                        FontSize = 11,
+                        Opacity = 0.45,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                },
+            },
+        };
+
+        // ── Arquivo escolhido: ícone, nome, duração e "Ouvir" ──
+        _sfxAddFileName = new TextBlock
+        {
+            FontWeight = FontWeight.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        _sfxAddFileInfo = new TextBlock { FontSize = 12, Opacity = 0.65 };
+
+        _sfxAddPreview = new Button
+        {
+            Padding = new Thickness(10, 6),
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = SfxPlayGlyph,
+                        FontFamily = IconFont,
+                        FontSize = 12,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    },
+                    new TextBlock { Text = Loc.T("Sfx_Preview"), VerticalAlignment = VerticalAlignment.Center },
+                },
+            },
+        };
+
+        var fileIcon = new TextBlock
+        {
+            Text = SfxAudioGlyph,
+            FontFamily = IconFont,
+            FontSize = 22,
+            Opacity = 0.8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 12, 0),
+        };
+        var fileText = new StackPanel
+        {
+            Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { _sfxAddFileName, _sfxAddFileInfo },
+        };
+        Grid.SetColumn(fileText, 1);
+        Grid.SetColumn(_sfxAddPreview, 2);
+
+        _sfxAddFileCard = new Border
+        {
+            Background = SfxDropBackground,
+            BorderBrush = SfxDropBorder,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(14, 12),
+            IsVisible = false,
+            Child = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+                Children = { fileIcon, fileText, _sfxAddPreview },
+            },
+        };
+
+        _sfxAddChooseAnother = new Button
+        {
+            Content = Loc.T("Sfx_ChooseAnother"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            IsVisible = false,
+        };
+
+        // ── Nome ──
+        _sfxAddNameBox = new TextBox
+        {
+            PlaceholderText = Loc.T("Sfx_RenamePlaceholder"),
+            MaxLength = 64,
+            FontFamily = SfxTextFont,
+        };
+        _sfxAddNameSection = new StackPanel
+        {
+            Spacing = 6,
+            IsVisible = false,
+            Children =
+            {
+                new TextBlock { Text = Loc.T("Sfx_NameLabel"), FontSize = 12, Opacity = 0.8 },
+                _sfxAddNameBox,
+                new TextBlock
+                {
+                    Text = Loc.T("Sfx_NameHint"),
+                    FontSize = 11,
+                    Opacity = 0.5,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+            },
+        };
+
+        _sfxAddError = new TextBlock
+        {
+            Foreground = SfxErrorBrush,
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+            IsVisible = false,
+        };
+
+        // ── Cancelar / Salvar ──
+        var cancel = new Button
+        {
+            Content = Loc.T("Common_Cancel"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Padding = new Thickness(0, 10),
+        };
+        _sfxAddSave = new Button
+        {
+            Content = Loc.T("Common_Save"),
+            IsEnabled = false,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Padding = new Thickness(0, 10),
+        };
+        _sfxAddSave.Classes.Add("accent");
+        Grid.SetColumn(_sfxAddSave, 2);
+
+        var card = new Border
+        {
+            Background = SfxDialogBackground,
+            BorderBrush = SfxDialogBorder,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(24),
+            Width = 380,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            BoxShadow = BoxShadows.Parse("0 12 40 0 #80000000"),
+            Child = new StackPanel
+            {
+                Spacing = 16,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = Loc.T("Sfx_AddTitle"),
+                        FontSize = 20,
+                        FontWeight = FontWeight.SemiBold,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                    },
+                    _sfxAddDrop,
+                    _sfxAddFileCard,
+                    _sfxAddChooseAnother,
+                    _sfxAddNameSection,
+                    _sfxAddError,
+                    new Grid
+                    {
+                        ColumnDefinitions = new ColumnDefinitions("*,8,*"),
+                        Children = { cancel, _sfxAddSave },
+                    },
+                },
+            },
+        };
+
+        _sfxAddOverlay = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#B3000000")),
+            IsVisible = false,
+            ZIndex = 40,
+            Child = card,
+        };
+
+        // ── Eventos ──
+        _sfxAddDrop.PointerEntered += (_, _) => _sfxAddDrop.BorderBrush = SfxDropBorderHot;
+        _sfxAddDrop.PointerExited += (_, _) => _sfxAddDrop.BorderBrush = SfxDropBorder;
+        _sfxAddDrop.PointerPressed += async (_, e) =>
+        {
+            if (!e.GetCurrentPoint(_sfxAddDrop).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            await PickSfxAddFileAsync();
+        };
+        _sfxAddChooseAnother.Click += async (_, _) => await PickSfxAddFileAsync();
+        _sfxAddPreview.Click += (_, _) => PreviewSfxAddFile();
+        cancel.Click += (_, _) => CloseSfxAddDialog();
+        _sfxAddSave.Click += async (_, _) => await SaveSfxAddAsync();
+        _sfxAddNameBox.KeyDown += async (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            e.Handled = true;
+            await SaveSfxAddAsync();
+        };
+
+        // Soltar o arquivo em qualquer lugar da janela
+        DragDrop.SetAllowDrop(_sfxAddOverlay, true);
+        _sfxAddOverlay.AddHandler(DragDrop.DragOverEvent, OnSfxDragOver);
+        _sfxAddOverlay.AddHandler(DragDrop.DropEvent, async (_, e) =>
+        {
+            e.Handled = true;
+            if (DroppedFile(e) is { } file) await LoadSfxAddFileAsync(file);
+        });
+
+        // Clicar na parte escurecida (fora da janela) cancela
+        _sfxAddOverlay.PointerPressed += (_, e) =>
+        {
+            if (ReferenceEquals(e.Source, _sfxAddOverlay)) CloseSfxAddDialog();
+        };
+    }
+
+    private void OnSfxDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Contains(DataFormat.File) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private static IStorageFile? DroppedFile(DragEventArgs e) =>
+        e.DataTransfer.TryGetFiles()?.OfType<IStorageFile>().FirstOrDefault();
+
+    private void OpenSfxAddDialog()
+    {
+        if (_sfxAddOpen || !SoundboardAvailable) return;
+        if (_pickerOpen || _avatarEditorOpen || _settingsOpen) return;
+
+        _sfxAddOpen = true;
+        ResetSfxAddDialog();
+        HideSfxVolume();
+        CancelSfxRename();
+
+        _sfxAddOverlay.IsVisible = true;
+        _mainLayout.IsEnabled = false; // o fundo fica travado, como na janela do avatar
+    }
+
+    private void CloseSfxAddDialog()
+    {
+        if (!_sfxAddOpen) return;
+
+        _sfxAddOpen = false;
+        _sfxAddOverlay.IsVisible = false;
+        _mainLayout.IsEnabled = true;
+        ResetSfxAddDialog();
+    }
+
+    /// Volta a janela para "escolha ou arraste um arquivo".
+    private void ResetSfxAddDialog()
+    {
+        _sfxAddData = null;
+        _sfxAddCheck = null;
+        _sfxAddBusy = false;
+
+        _sfxAddDrop.IsVisible = true;
+        _sfxAddDropTitle.Text = Loc.T("Sfx_ClickToChoose");
+        _sfxAddFileCard.IsVisible = false;
+        _sfxAddChooseAnother.IsVisible = false;
+        _sfxAddNameSection.IsVisible = false;
+        _sfxAddNameBox.Text = "";
+        _sfxAddSave.IsEnabled = false;
+        SetSfxAddError(null);
+    }
+
+    private void SetSfxAddError(string? message)
+    {
+        _sfxAddError.Text = message ?? "";
+        _sfxAddError.IsVisible = !string.IsNullOrEmpty(message);
+    }
+
+    private async Task PickSfxAddFileAsync()
+    {
+        if (_sfxAddBusy) return;
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("Sfx_PickerTitle"),
+            AllowMultiple = false,
+            FileTypeFilter = new[] { SfxFileTypes },
+        });
+
+        if (files.Count > 0) await LoadSfxAddFileAsync(files[0]);
+    }
+
+    /// Lê e confere o arquivo (formato, tamanho, duração). Deu certo: mostra o arquivo e pede o nome.
+    /// Deu errado: mostra o erro e mantém o arquivo anterior (se havia um).
+    private async Task LoadSfxAddFileAsync(IStorageFile file)
+    {
+        if (_sfxAddBusy || !_sfxAddOpen) return;
+        _sfxAddBusy = true;
+        SetSfxAddError(null);
+
+        var hadFile = _sfxAddCheck is not null;
+        if (!hadFile) _sfxAddDropTitle.Text = Loc.T("Sfx_Checking");
+
+        try
+        {
+            byte[] bytes;
+            await using (var stream = await file.OpenReadAsync())
+            {
+                bytes = await ReadSfxFileAsync(stream);
+            }
+
+            var check = await Task.Run(() => SfxStore.Check(bytes));
+            if (!_sfxAddOpen) return; // a janela foi fechada enquanto conferia
+
+            _sfxAddData = bytes;
+            _sfxAddCheck = check;
+
+            _sfxAddFileName.Text = file.Name;
+            ToolTip.SetTip(_sfxAddFileName, file.Name);
+            _sfxAddFileInfo.Text = Loc.F("Sfx_Duration", check.Duration.TotalSeconds);
+
+            _sfxAddDrop.IsVisible = false;
+            _sfxAddFileCard.IsVisible = true;
+            _sfxAddChooseAnother.IsVisible = true;
+            _sfxAddNameSection.IsVisible = true;
+            _sfxAddSave.IsEnabled = true;
+
+            // Nome padrão: o nome do arquivo (dá para mudar e colar um emoji)
+            _sfxAddNameBox.Text = SfxStore.DefaultName(file.Name);
+            Dispatcher.UIThread.Post(() =>
+            {
+                _sfxAddNameBox.Focus();
+                _sfxAddNameBox.SelectAll();
+            });
+        }
+        catch (SfxException ex)
+        {
+            SetSfxAddError(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            SetSfxAddError(Loc.F("Sfx_SaveError", ex.Message));
+        }
+        finally
+        {
+            _sfxAddBusy = false;
+            if (_sfxAddCheck is null) _sfxAddDropTitle.Text = Loc.T("Sfx_ClickToChoose");
+        }
+    }
+
+    /// "Ouvir": toca o arquivo escolhido só neste PC (sem destaque na lista).
+    private async void PreviewSfxAddFile()
+    {
+        if (_sfxAddCheck is not { } check) return;
+
+        try
+        {
+            await SfxPlayer.PlaySamplesAsync(check.Samples, _preferences.AudioOutputDevice);
+        }
+        catch (Exception ex)
+        {
+            SetSfxAddError(ex is SfxException ? ex.Message : Loc.F("Sfx_PlayError", ex.Message));
+        }
+    }
+
+    /// Grava o som com o nome escolhido e volta para o painel (com o som novo no fim da lista).
+    private async Task SaveSfxAddAsync()
+    {
+        if (_sfxAddBusy || _sfxAddData is not { } data || _sfxAddCheck is not { } check) return;
+        _sfxAddBusy = true;
+        _sfxAddSave.IsEnabled = false;
+
+        var name = _sfxAddNameBox.Text;
+        try
+        {
+            await Task.Run(() => SfxStore.Add(data, check.Format, name));
+        }
+        catch (Exception ex)
+        {
+            _sfxAddBusy = false;
+            _sfxAddSave.IsEnabled = true;
+            SetSfxAddError(Loc.F("Sfx_SaveError", ex.Message));
+            return;
+        }
+
+        CloseSfxAddDialog();
+
+        if (_sfxPanelOpen)
+        {
+            ReloadSfx();
+            Dispatcher.UIThread.Post(() => _sfxScroll.ScrollToEnd(), DispatcherPriority.Background);
+        }
+    }
+
+    /// Lê o arquivo para a memória, parando se passar do tamanho máximo.
+    private static async Task<byte[]> ReadSfxFileAsync(Stream stream)
+    {
+        using var memory = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(buffer)) > 0)
+        {
+            memory.Write(buffer, 0, read);
+            if (memory.Length > SfxStore.MaxFileBytes) throw new SfxException(Loc.T("Sfx_TooBig"));
+        }
+        return memory.ToArray();
     }
 }

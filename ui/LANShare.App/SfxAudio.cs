@@ -46,6 +46,10 @@ internal static class SfxDecoder
         _ => ".ogg",
     };
 
+    /// Duração de amostras decodificadas (48 kHz, estéreo, intercaladas).
+    public static TimeSpan DurationOf(float[] samples) =>
+        TimeSpan.FromSeconds((double)samples.Length / (SampleRate * Channels));
+
     /// Lê um som da biblioteca e decodifica.
     public static float[] DecodeFile(string path)
     {
@@ -82,8 +86,7 @@ internal static class SfxDecoder
             while ((read = samples.Read(buffer, 0, buffer.Length)) > 0)
             {
                 output.AddRange(new ArraySegment<float>(buffer, 0, read));
-                if (output.Count > limit)
-                    throw TooLong(TimeSpan.FromSeconds((double)output.Count / (SampleRate * Channels)));
+                if (output.Count > limit) throw TooLong(DurationOf(output.ToArray()));
             }
 
             if (output.Count < Channels) throw new SfxException(Loc.T("Sfx_EmptySound"));
@@ -140,12 +143,16 @@ internal static class SfxPlayer
         _gain = linear * linear;
     }
 
-    /// Toca um som da biblioteca. Decodifica fora da thread da interface.
-    public static Task PlayFileAsync(string path, string? deviceId) =>
+    /// Toca um som da biblioteca. Decodifica fora da thread da interface. Devolve a duração do som.
+    public static Task<TimeSpan> PlayFileAsync(string path, string? deviceId) =>
         Task.Run(() => Play(Load(path), deviceId));
 
-    /// Toca amostras já decodificadas (48 kHz, estéreo, intercaladas).
-    public static void Play(float[] samples, string? deviceId)
+    /// Toca amostras já decodificadas, fora da thread da interface (ex.: a prévia ao adicionar um som).
+    public static Task<TimeSpan> PlaySamplesAsync(float[] samples, string? deviceId) =>
+        Task.Run(() => Play(samples, deviceId));
+
+    /// Toca amostras já decodificadas (48 kHz, estéreo, intercaladas). Devolve a duração do som.
+    public static TimeSpan Play(float[] samples, string? deviceId)
     {
         using var enumerator = new MMDeviceEnumerator();
         var device = ResolveDevice(enumerator, deviceId)
@@ -175,6 +182,8 @@ internal static class SfxPlayer
         // Fora do lock: o Stop espera a thread do som, que também usa o lock no PlaybackStopped
         oldest?.Stop();
         output.Play();
+
+        return SfxDecoder.DurationOf(samples);
     }
 
     /// Para todos os sons (ao fechar o app).

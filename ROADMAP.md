@@ -88,10 +88,10 @@
 
  # V1.2.0 — Soundboard
 
-- [ ] Add sound effects (.mp3 / .wav / .ogg, up to 5 seconds) saved in %APPDATA%\LANShare\sfx
-- [ ] Soundboard button and panel (3 sounds per row)
-- [ ] Rename, remove and preview sounds locally
-- [ ] Individual sound effects volume control for each user
+- [x] Add sound effects (.mp3 / .wav / .ogg, up to 5 seconds) saved in %APPDATA%\LANShare\sfx
+- [x] Soundboard button and panel (3 sounds per row)
+- [x] Rename, remove and preview sounds locally
+- [x] Individual sound effects volume control for each user
 - [ ] Play sound effects for everyone in the room (Host and Clients)
 - [ ] Anti-spam cooldown enforced by the Host
 

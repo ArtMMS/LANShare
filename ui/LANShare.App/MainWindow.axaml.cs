@@ -428,6 +428,7 @@ public partial class MainWindow : Window
             _roomOpen = false;
             _streaming = false;
             _peerAvatars.Clear();
+            _sfxHighlights.Clear();
             StopTimerIfIdle();
             _usersPanel.Children.Clear();
             UpdateUi();
@@ -543,12 +544,13 @@ public partial class MainWindow : Window
     }
 
     /// Lista da sala: primeiro o próprio Host, depois os clients (com o botão Expulsar).
+    /// Quem acabou de tocar um efeito sonoro aparece com a borda azul e um 🎉.
     private void RefreshUsers()
     {
         _usersPanel.Children.Clear();
         if (!_roomOpen) return;
 
-        _usersPanel.Children.Add(UserRow(_myAvatar, Loc.F("Users_YouHost", _username)));
+        _usersPanel.Children.Add(WithSfxHighlight(UserRow(_myAvatar, Loc.F("Users_YouHost", _username)), HostUserId));
 
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
@@ -558,7 +560,7 @@ public partial class MainWindow : Window
             var kick = new Button { Content = Loc.T("Users_Kick") };
             kick.Click += (_, _) => NativeMethods.HostKick(id);
 
-            _usersPanel.Children.Add(UserRow(PeerAvatar(id), name, kick));
+            _usersPanel.Children.Add(WithSfxHighlight(UserRow(PeerAvatar(id), name, kick), id));
         }
     }
 
@@ -636,6 +638,7 @@ public partial class MainWindow : Window
         _clientUsers.Clear();
         _clientUsersPanel.Children.Clear();
         _peerAvatars.Clear();
+        _sfxHighlights.Clear();
         _passwordPanel.IsVisible = false;
         _clientPasswordBox.Text = "";
         _hostName = "Host";
@@ -972,14 +975,17 @@ public partial class MainWindow : Window
     }
 
     /// Lista da sala: primeiro o Host, depois os clients (você marcado), cada um com o avatar.
+    /// Quem acabou de tocar um efeito sonoro aparece com a borda azul e um 🎉.
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
-        _clientUsersPanel.Children.Add(UserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName)));
+        _clientUsersPanel.Children.Add(
+            WithSfxHighlight(UserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName)), HostUserId));
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
             var mine = id == _myId;
-            _clientUsersPanel.Children.Add(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name));
+            _clientUsersPanel.Children.Add(
+                WithSfxHighlight(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name), id));
         }
     }
 

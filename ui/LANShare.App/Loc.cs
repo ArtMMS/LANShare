@@ -205,12 +205,26 @@ internal static class Loc
         // ── Efeitos sonoros (soundboard) ──
         ["Sfx_Title"] = new[] { "Efeitos sonoros", "Sound effects", "Efectos de sonido" },
         ["Sfx_Add"] = new[] { "Adicionar som", "Add sound", "Añadir sonido" },
-        ["Sfx_Adding"] = new[] { "Adicionando...", "Adding...", "Añadiendo..." },
         ["Sfx_Empty"] = new[]
         {
-            "Nenhum som ainda. Adicione um .mp3, .wav ou .ogg de até 5 segundos (ou arraste o arquivo para cá).",
-            "No sounds yet. Add an .mp3, .wav or .ogg of up to 5 seconds (or drag the file here).",
-            "Todavía no hay sonidos. Añade un .mp3, .wav u .ogg de hasta 5 segundos (o arrastra el archivo aquí).",
+            "Nenhum som ainda. Clique em Adicionar som ou arraste um arquivo para cá.",
+            "No sounds yet. Click Add sound or drag a file here.",
+            "Todavía no hay sonidos. Haz clic en Añadir sonido o arrastra un archivo aquí.",
+        },
+        ["Sfx_AddTitle"] = new[] { "Adicionar som", "Add sound", "Añadir sonido" },
+        ["Sfx_ClickToChoose"] = new[] { "Clique para escolher um som", "Click to choose a sound", "Haz clic para elegir un sonido" },
+        ["Sfx_OrDrag"] = new[] { "ou arraste o arquivo para cá", "or drag the file here", "o arrastra el archivo aquí" },
+        ["Sfx_Formats"] = new[] { "MP3, WAV ou OGG · até 5 segundos", "MP3, WAV or OGG · up to 5 seconds", "MP3, WAV u OGG · hasta 5 segundos" },
+        ["Sfx_Checking"] = new[] { "Verificando o arquivo...", "Checking the file...", "Comprobando el archivo..." },
+        ["Sfx_ChooseAnother"] = new[] { "Escolher outro arquivo", "Choose another file", "Elegir otro archivo" },
+        ["Sfx_Preview"] = new[] { "Ouvir", "Preview", "Escuchar" },
+        ["Sfx_Duration"] = new[] { "{0:F1} s", "{0:F1} s", "{0:F1} s" },
+        ["Sfx_NameLabel"] = new[] { "Nome do som", "Sound name", "Nombre del sonido" },
+        ["Sfx_NameHint"] = new[]
+        {
+            "Dica: cole um emoji no nome (ex.: Quack 🦆).",
+            "Tip: paste an emoji into the name (e.g. Quack 🦆).",
+            "Consejo: pega un emoji en el nombre (ej.: Quack 🦆).",
         },
         ["Sfx_VolumeTooltip"] = new[] { "Volume dos efeitos sonoros", "Sound effects volume", "Volumen de los efectos de sonido" },
         ["Sfx_PlayLocal"] = new[] { "Ouvir só para mim", "Play only for me", "Escuchar solo yo" },

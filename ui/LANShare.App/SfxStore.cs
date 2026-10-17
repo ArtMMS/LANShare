@@ -19,12 +19,16 @@ internal sealed class SfxEntry
     public SfxEntry Copy() => new() { Id = Id, Name = Name, FileName = FileName };
 }
 
+/// Resultado da conferência de um arquivo: o formato, o som já decodificado e a duração.
+internal sealed record SfxCheck(SfxFormat Format, float[] Samples, TimeSpan Duration);
+
 /// Erro de efeito sonoro com uma mensagem pronta para mostrar ao usuário.
 internal sealed class SfxException(string message, Exception? inner = null) : Exception(message, inner);
 
 /// Biblioteca de efeitos sonoros: os arquivos ficam em %APPDATA%\LANShare\sfx
 /// e o índice sfx.json guarda o nome e a ordem de cada um.
-/// O arquivo é guardado como veio (.mp3, .wav ou .ogg); ele só é validado ao ser adicionado.
+/// O arquivo é guardado como veio (.mp3, .wav ou .ogg).
+/// Adicionar tem duas etapas: Check (confere o arquivo) e Add (grava com o nome escolhido).
 internal static class SfxStore
 {
     /// Tamanho máximo do arquivo ao adicionar (um .wav de 5 s em 48 kHz tem ~1 MB).
@@ -61,18 +65,23 @@ internal static class SfxStore
     /// Caminho completo do arquivo de um som.
     public static string PathOf(SfxEntry entry) => Path.Combine(Folder, entry.FileName);
 
-    /// Valida (formato, duração, tamanho) e guarda um som novo no fim da lista.
+    /// Confere um arquivo (formato, tamanho e duração) sem gravar nada.
     /// Demora alguns milissegundos (decodifica o arquivo inteiro): chame fora da thread da interface.
-    public static SfxEntry Import(byte[] data, string originalName)
+    public static SfxCheck Check(byte[] data)
     {
         if (data.Length > MaxFileBytes) throw new SfxException(Loc.T("Sfx_TooBig"));
 
         // O formato vem do conteúdo, não da extensão (um .mp3 renomeado para .wav ainda funciona)
         var format = SfxDecoder.Detect(data) ?? throw new SfxException(Loc.T("Sfx_Unsupported"));
-        SfxDecoder.Decode(data, format); // lança SfxException se for longo demais ou inválido
+        var samples = SfxDecoder.Decode(data, format); // lança SfxException se for longo demais ou inválido
+        return new SfxCheck(format, samples, SfxDecoder.DurationOf(samples));
+    }
 
-        var name = CleanName(DefaultName(originalName));
-        if (name.Length == 0) name = Loc.T("Sfx_DefaultName");
+    /// Grava um som já conferido (Check) no fim da lista, com o nome escolhido.
+    public static SfxEntry Add(byte[] data, SfxFormat format, string? name)
+    {
+        var cleaned = CleanName(name);
+        if (cleaned.Length == 0) cleaned = Loc.T("Sfx_DefaultName");
 
         lock (Gate)
         {
@@ -80,7 +89,7 @@ internal static class SfxStore
             var entry = new SfxEntry
             {
                 Id = id,
-                Name = name,
+                Name = cleaned,
                 FileName = id + SfxDecoder.Extension(format),
             };
 
@@ -186,9 +195,9 @@ internal static class SfxStore
         return result.ToString().Trim();
     }
 
-    /// Nome inicial: o nome do arquivo, sem extensão e com "_" virando espaço.
-    private static string DefaultName(string? fileName) =>
-        Path.GetFileNameWithoutExtension(fileName ?? "").Replace('_', ' ').Trim();
+    /// Nome sugerido: o nome do arquivo, sem extensão, com "_" virando espaço (já limpo).
+    public static string DefaultName(string? fileName) =>
+        CleanName(Path.GetFileNameWithoutExtension(fileName ?? "").Replace('_', ' '));
 
     /// Lê o índice. Ausente ou quebrado = biblioteca vazia (os arquivos na pasta não são apagados).
     private static List<SfxEntry> LoadIndex()
