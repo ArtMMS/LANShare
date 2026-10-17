@@ -7,6 +7,7 @@
 use lanshare_client::{audio_devices, ClientEngine};
 use lanshare_core::i18n::{self, tr, Language};
 use lanshare_core::settings::{self, Settings};
+use lanshare_core::sfx;
 use lanshare_host::monitors::{self, Thumbnail};
 use lanshare_host::{app_windows, CaptureTarget, HostConfig, HostEngine, StreamSettings};
 use std::ffi::{CStr, CString};
@@ -350,6 +351,46 @@ pub unsafe extern "C" fn lanshare_host_preview(
     }
 }
 
+/// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele no Host).
+/// `pcm`: `len` amostras float intercaladas, 48 kHz, estéreo (no máximo MAX_SAMPLES do sfx.rs).
+/// Retorna {"ok":true} ou {"ok":false,"error":".."}. Leva alguns milissegundos: chame fora da thread da interface.
+///
+/// # Safety
+/// `pcm` deve apontar para `len` floats legíveis.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_play_sfx(name: *const c_char, pcm: *const f32, len: usize) -> *mut c_char {
+    let packets = match encode_pcm(pcm, len) {
+        Ok(packets) => packets,
+        Err(error) => return reply_err(&error),
+    };
+    let name = read_c_string(name).unwrap_or_default();
+
+    let host = HOST.lock().unwrap();
+    match host.as_ref() {
+        None => reply_err(room_not_open()),
+        Some(engine) => {
+            engine.play_sfx(&name, packets);
+            reply_ok()
+        }
+    }
+}
+
+/// Copia para `buffer` o efeito sonoro avisado no evento "sfx_played" (pelo "sfx_id").
+/// Retorna quantas amostras foram copiadas (float intercalado, 48 kHz, estéreo);
+/// -1 se o som não existe (já buscado ou descartado); -2 se `capacity` é pequena demais.
+/// Cada som só pode ser buscado uma vez.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` floats graváveis.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_host_take_sfx(sfx_id: u64, buffer: *mut f32, capacity: usize) -> i64 {
+    let samples = {
+        let host = HOST.lock().unwrap();
+        host.as_ref().and_then(|engine| engine.take_sfx(sfx_id))
+    };
+    write_pcm(samples, buffer, capacity)
+}
+
 /// Fecha a sala (para a transmissão e desconecta todos).
 #[no_mangle]
 pub extern "C" fn lanshare_host_stop() {
@@ -507,6 +548,35 @@ pub extern "C" fn lanshare_client_set_volume(percent: u32, muted: i32) -> *mut c
     })
 }
 
+/// Toca um efeito sonoro para a sala: vai ao Host, que repassa a todos (a interface já tocou ele aqui).
+/// `pcm`: `len` amostras float intercaladas, 48 kHz, estéreo (no máximo MAX_SAMPLES do sfx.rs).
+/// Retorna {"ok":true} ou {"ok":false,"error":".."}. Leva alguns milissegundos: chame fora da thread da interface.
+///
+/// # Safety
+/// `pcm` deve apontar para `len` floats legíveis.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_client_play_sfx(name: *const c_char, pcm: *const f32, len: usize) -> *mut c_char {
+    let packets = match encode_pcm(pcm, len) {
+        Ok(packets) => packets,
+        Err(error) => return reply_err(&error),
+    };
+    let name = read_c_string(name).unwrap_or_default();
+    with_client(|engine| engine.play_sfx(&name, packets))
+}
+
+/// Igual a `lanshare_host_take_sfx`, para o Client.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` floats graváveis.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_client_take_sfx(sfx_id: u64, buffer: *mut f32, capacity: usize) -> i64 {
+    let samples = {
+        let client = lock_client();
+        client.as_ref().and_then(|engine| engine.take_sfx(sfx_id))
+    };
+    write_pcm(samples, buffer, capacity)
+}
+
 /// Desconecta da sala (ou cancela a tentativa). O fim chega no evento "disconnected".
 /// Retorna 1 se havia conexão, 0 se não.
 #[no_mangle]
@@ -615,6 +685,33 @@ fn room_not_open() -> &'static str {
     )
 }
 
+/// Lê as amostras que vieram da interface e comprime em Opus (antes de pegar o lock do motor:
+/// comprimir leva alguns milissegundos e a interface não pode ficar esperando o lock).
+///
+/// # Safety
+/// `pcm` deve apontar para `len` floats legíveis.
+unsafe fn encode_pcm(pcm: *const f32, len: usize) -> Result<Vec<Vec<u8>>, String> {
+    if pcm.is_null() || len == 0 || len > sfx::MAX_SAMPLES {
+        return Err(tr("Som inválido.", "Invalid sound.", "Sonido no válido.").to_string());
+    }
+    sfx::encode(std::slice::from_raw_parts(pcm, len))
+}
+
+/// Copia o som buscado para o buffer da interface (veja `lanshare_host_take_sfx`).
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` floats graváveis.
+unsafe fn write_pcm(samples: Option<Vec<f32>>, buffer: *mut f32, capacity: usize) -> i64 {
+    let Some(samples) = samples else {
+        return -1;
+    };
+    if buffer.is_null() || samples.len() > capacity {
+        return -2;
+    }
+    std::ptr::copy_nonoverlapping(samples.as_ptr(), buffer, samples.len());
+    samples.len() as i64
+}
+
 fn read_c_string(ptr: *const c_char) -> Option<String> {
     if ptr.is_null() {
         return None;
@@ -653,3 +750,5 @@ mod tests {
         assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
     }
 }
+
+

@@ -12,11 +12,12 @@ use crate::registry::{ClientInfo, Registry};
 use crate::stream::{StreamHandle, StreamSettings};
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
-    read_message, write_message, Message, UserInfo, DEFAULT_PORT, HOST_USER_ID, MAX_AVATAR_LEN,
-    PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL,
-    REJECT_WRONG_PASSWORD,
+    read_message, write_message, Message, SfxFrame, UserInfo, DEFAULT_PORT, HOST_USER_ID,
+    MAX_AVATAR_LEN, PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH,
+    REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
+use lanshare_core::sfx::{self, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use serde::Deserialize;
 use std::io;
@@ -70,6 +71,8 @@ struct Shared {
     host_name: Arc<String>,
     /// Avatar do Host (PNG em base64). None = sem avatar.
     host_avatar: Arc<Mutex<Option<String>>>,
+    /// Efeitos sonoros que os Clients tocaram, esperando a interface do Host buscar.
+    sfx_inbox: SfxInbox,
 }
 
 /// A sala aberta. Tem o seu próprio runtime do tokio, então pode ser usada de qualquer thread.
@@ -86,6 +89,8 @@ pub struct HostEngine {
     preview: PreviewSlot,
     /// Avatar do Host, enviado a quem entra na sala.
     host_avatar: Arc<Mutex<Option<String>>>,
+    /// Efeitos sonoros que os Clients tocaram (a interface busca com take_sfx).
+    sfx_inbox: SfxInbox,
 }
 
 impl HostEngine {
@@ -112,6 +117,7 @@ impl HostEngine {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let streaming: Arc<Mutex<Option<StreamHandle>>> = Arc::new(Mutex::new(None));
         let host_avatar: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let sfx_inbox = SfxInbox::default();
 
         let shared = Shared {
             registry: registry.clone(),
@@ -120,6 +126,7 @@ impl HostEngine {
             events: events.clone(),
             host_name: Arc::new(host_display_name()),
             host_avatar: host_avatar.clone(),
+            sfx_inbox: sfx_inbox.clone(),
         };
 
         events.emit(HostEvent::Started {
@@ -160,6 +167,7 @@ impl HostEngine {
             streaming,
             preview: PreviewSlot::default(),
             host_avatar,
+            sfx_inbox,
         })
     }
 
@@ -205,6 +213,23 @@ impl HostEngine {
         };
         self.registry.broadcast(&notice, None);
         Ok(())
+    }
+
+    /// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele aqui).
+    /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
+    pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) {
+        let frame = SfxFrame {
+            user_id: HOST_USER_ID,
+            name: sfx::clean_name(name),
+            packets: Arc::new(packets),
+        };
+        self.registry.broadcast(&Message::Sfx(frame), None);
+    }
+
+    /// Busca (e descomprime) um efeito sonoro avisado no evento "sfx_played".
+    /// None = já foi buscado, foi descartado ou veio inválido.
+    pub fn take_sfx(&self, sfx_id: u64) -> Option<Vec<f32>> {
+        self.sfx_inbox.take(sfx_id)
     }
 
     /// Remove um Client: avisa ele, avisa os outros e encerra a conexão dele.
@@ -499,9 +524,11 @@ async fn handle_client(
     // Guardamos uma cópia para saber, no fim, se o Host inteiro está encerrando
     let shutdown_check = shutdown.clone();
 
-    // O ping de cada Client vira um evento; o avatar dele é guardado e repassado aos outros
+    // O ping de cada Client vira um evento; o avatar dele é guardado e repassado aos outros;
+    // o efeito sonoro dele é repassado aos outros e guardado para a interface do Host tocar
     let conn_events = shared.events.clone();
     let conn_registry = shared.registry.clone();
+    let conn_inbox = shared.sfx_inbox.clone();
     let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| match event {
         ConnectionEvent::Rtt(rtt) => conn_events.emit(HostEvent::Ping {
             id,
@@ -522,6 +549,22 @@ async fn handle_client(
                 Some(id),
             );
             conn_events.emit(HostEvent::UserAvatar { id, png_base64 });
+        }
+        ConnectionEvent::Message(Message::Sfx(frame)) => {
+            // Quem tocou é sempre quem mandou (o id que veio do Client é ignorado)
+            let name = sfx::clean_name(&frame.name);
+            let relay = SfxFrame {
+                user_id: id,
+                name: name.clone(),
+                packets: frame.packets,
+            };
+            let sfx_id = conn_inbox.put(relay.packets.clone());
+            conn_registry.broadcast(&Message::Sfx(relay), Some(id));
+            conn_events.emit(HostEvent::SfxPlayed {
+                user_id: id,
+                name,
+                sfx_id,
+            });
         }
         ConnectionEvent::Message(_) => {}
     })
@@ -770,3 +813,5 @@ fn local_addresses(events: &EventSender) -> Vec<LocalAddress> {
         }
     }
 }
+
+

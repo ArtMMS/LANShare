@@ -320,6 +320,7 @@ dependencies = [
 name = "lanshare-core"
 version = "0.1.0"
 dependencies = [
+ "opus",
  "serde",
  "serde_json",
  "tokio",

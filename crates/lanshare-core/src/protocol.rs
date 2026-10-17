@@ -3,6 +3,8 @@
 //!   tipo 0 = mensagem em JSON
 //!   tipo 1 = pacote de vídeo, em binário: [1 byte: keyframe][8 bytes: timestamp em µs][bytes H.264]
 //!   tipo 2 = pacote de áudio, em binário: [8 bytes: timestamp em µs][bytes Opus]
+//!   tipo 3 = efeito sonoro, em binário: [8 bytes: id de quem tocou][2 bytes: tamanho do nome][nome UTF-8]
+//!            [2 bytes: quantos pacotes][cada pacote: 2 bytes de tamanho + bytes Opus]
 
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -12,7 +14,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 9;
+pub const PROTOCOL_VERSION: u16 = 10;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -38,6 +40,7 @@ pub const REJECT_PASSWORD_TIMEOUT: &str = "password_timeout";
 const KIND_JSON: u8 = 0;
 const KIND_VIDEO: u8 = 1;
 const KIND_AUDIO: u8 = 2;
+const KIND_SFX: u8 = 3;
 
 /// Tamanho máximo de uma mensagem JSON (1 MiB).
 const MAX_JSON_SIZE: usize = 1024 * 1024;
@@ -53,6 +56,18 @@ const MAX_AUDIO_SIZE: usize = 64 * 1024;
 
 /// Cabeçalho do áudio: 8 bytes (timestamp).
 const AUDIO_HEADER_SIZE: usize = 8;
+
+/// Maior efeito sonoro aceito: 5,2 s em pacotes Opus de 20 ms.
+pub const MAX_SFX_PACKETS: usize = 260;
+
+/// Maior pacote Opus de um efeito sonoro (o Opus nunca passa de 1275 bytes).
+pub const MAX_SFX_PACKET_BYTES: usize = 1500;
+
+/// Maior nome de efeito sonoro na rede, em bytes UTF-8 (o nome tem no máximo 32 caracteres).
+const MAX_SFX_NAME_BYTES: usize = 256;
+
+/// Tamanho máximo de um efeito sonoro na rede (um som de 5 s fica perto de 60 KB).
+const MAX_SFX_SIZE: usize = 512 * 1024;
 
 /// Um usuário conectado, como os Clients o enxergam.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,6 +115,18 @@ pub struct AudioFrame {
     pub timestamp_us: u64,
     /// Bytes Opus (compartilhados entre os Clients, sem copiar).
     pub data: Arc<Vec<u8>>,
+}
+
+/// Um efeito sonoro (soundboard), já comprimido em Opus: 48 kHz, estéreo, pacotes de 20 ms.
+/// Client -> Host: `user_id` vai 0 (o Host troca pelo id real de quem tocou).
+/// Host -> Clients: `user_id` = quem tocou (0 = o próprio Host). Não passa pelo JSON.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SfxFrame {
+    pub user_id: u64,
+    /// Nome do som (pode ter emoji).
+    pub name: String,
+    /// Pacotes Opus, em ordem (compartilhados entre os Clients, sem copiar).
+    pub packets: Arc<Vec<Vec<u8>>>,
 }
 
 /// Diminui o contador da fila quando o frame some. Copiar o frame NÃO copia o ticket.
@@ -198,6 +225,11 @@ pub enum Message {
     /// Não vai em JSON: tem formato binário próprio (ver write_message).
     #[serde(skip)]
     Audio(AudioFrame),
+
+    /// Client -> Host e Host -> Clients: alguém tocou um efeito sonoro na sala.
+    /// Não vai em JSON: tem formato binário próprio (ver write_message).
+    #[serde(skip)]
+    Sfx(SfxFrame),
 }
 
 pub async fn write_message<W>(writer: &mut W, message: &Message) -> io::Result<()>
@@ -207,6 +239,7 @@ where
     match message {
         Message::Video(frame) => return write_video(writer, frame).await,
         Message::Audio(frame) => return write_audio(writer, frame).await,
+        Message::Sfx(frame) => return write_sfx(writer, frame).await,
         _ => {}
     }
 
@@ -287,6 +320,127 @@ where
     Ok(())
 }
 
+async fn write_sfx<W>(writer: &mut W, frame: &SfxFrame) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let body = encode_sfx(frame)?;
+
+    let mut buffer = Vec::with_capacity(5 + body.len());
+    buffer.extend_from_slice(&((body.len() + 1) as u32).to_be_bytes());
+    buffer.push(KIND_SFX);
+    buffer.extend_from_slice(&body);
+
+    writer.write_all(&buffer).await?;
+    writer.flush().await?;
+
+    Ok(())
+}
+
+fn invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.to_string())
+}
+
+/// Corpo binário de um efeito sonoro (sem o cabeçalho de tamanho e tipo).
+fn encode_sfx(frame: &SfxFrame) -> io::Result<Vec<u8>> {
+    let name = frame.name.as_bytes();
+    if name.len() > MAX_SFX_NAME_BYTES {
+        return Err(invalid("nome do efeito sonoro grande demais"));
+    }
+    if frame.packets.is_empty() || frame.packets.len() > MAX_SFX_PACKETS {
+        return Err(invalid("efeito sonoro vazio ou longo demais"));
+    }
+
+    let mut body = Vec::with_capacity(12 + name.len() + frame.packets.iter().map(|p| p.len() + 2).sum::<usize>());
+    body.extend_from_slice(&frame.user_id.to_be_bytes());
+    body.extend_from_slice(&(name.len() as u16).to_be_bytes());
+    body.extend_from_slice(name);
+    body.extend_from_slice(&(frame.packets.len() as u16).to_be_bytes());
+    for packet in frame.packets.iter() {
+        if packet.is_empty() || packet.len() > MAX_SFX_PACKET_BYTES {
+            return Err(invalid("pacote de efeito sonoro inválido"));
+        }
+        body.extend_from_slice(&(packet.len() as u16).to_be_bytes());
+        body.extend_from_slice(packet);
+    }
+
+    if body.len() > MAX_SFX_SIZE {
+        return Err(invalid("efeito sonoro grande demais"));
+    }
+    Ok(body)
+}
+
+/// Lê um corpo binário aos pedaços, sem nunca passar do fim.
+struct ByteReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> ByteReader<'a> {
+    fn take(&mut self, len: usize) -> io::Result<&'a [u8]> {
+        let end = self
+            .pos
+            .checked_add(len)
+            .filter(|end| *end <= self.data.len())
+            .ok_or_else(|| invalid("efeito sonoro incompleto"))?;
+        let part = &self.data[self.pos..end];
+        self.pos = end;
+        Ok(part)
+    }
+
+    fn u16(&mut self) -> io::Result<u16> {
+        let bytes = self.take(2)?;
+        Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn u64(&mut self) -> io::Result<u64> {
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(self.take(8)?);
+        Ok(u64::from_be_bytes(bytes))
+    }
+
+    fn finished(&self) -> bool {
+        self.pos == self.data.len()
+    }
+}
+
+/// Lê o corpo binário de um efeito sonoro, conferindo cada tamanho antes de usar.
+fn decode_sfx(body: &[u8]) -> io::Result<SfxFrame> {
+    let mut reader = ByteReader { data: body, pos: 0 };
+
+    let user_id = reader.u64()?;
+
+    let name_len = reader.u16()? as usize;
+    if name_len > MAX_SFX_NAME_BYTES {
+        return Err(invalid("nome do efeito sonoro grande demais"));
+    }
+    let name = String::from_utf8_lossy(reader.take(name_len)?).into_owned();
+
+    let count = reader.u16()? as usize;
+    if count == 0 || count > MAX_SFX_PACKETS {
+        return Err(invalid("efeito sonoro vazio ou longo demais"));
+    }
+
+    let mut packets = Vec::with_capacity(count);
+    for _ in 0..count {
+        let len = reader.u16()? as usize;
+        if len == 0 || len > MAX_SFX_PACKET_BYTES {
+            return Err(invalid("pacote de efeito sonoro inválido"));
+        }
+        packets.push(reader.take(len)?.to_vec());
+    }
+
+    if !reader.finished() {
+        return Err(invalid("efeito sonoro com bytes sobrando"));
+    }
+
+    Ok(SfxFrame {
+        user_id,
+        name,
+        packets: Arc::new(packets),
+    })
+}
+
 /// Lê UMA mensagem. Se o outro lado fechar a conexão, devolve UnexpectedEof.
 pub async fn read_message<R>(reader: &mut R) -> io::Result<Message>
 where
@@ -357,6 +511,17 @@ where
             }))
         }
 
+        KIND_SFX => {
+            if body_len > MAX_SFX_SIZE {
+                return Err(invalid("efeito sonoro grande demais"));
+            }
+
+            let mut body = vec![0u8; body_len];
+            reader.read_exact(&mut body).await?;
+
+            Ok(Message::Sfx(decode_sfx(&body)?))
+        }
+
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "tipo de mensagem desconhecido",
@@ -424,6 +589,11 @@ mod tests {
                 timestamp_us: 20_000,
                 data: Arc::new(vec![0xFC, 0xFF, 0xFE]),
             }),
+            Message::Sfx(SfxFrame {
+                user_id: 3,
+                name: "Quack 🦆".to_string(),
+                packets: Arc::new(vec![vec![0xFC, 1, 2], vec![0xFC, 3]]),
+            }),
         ];
 
         for enviada in mensagens {
@@ -458,6 +628,42 @@ mod tests {
         }
     }
 
+    // Um efeito sonoro cortado no meio, com bytes sobrando ou sem pacotes é recusado (nunca trava nem estoura).
+    #[test]
+    fn efeito_sonoro_malformado_e_recusado() {
+        let frame = SfxFrame {
+            user_id: 1,
+            name: "Airhorn".to_string(),
+            packets: Arc::new(vec![vec![1, 2, 3]]),
+        };
+        let body = encode_sfx(&frame).unwrap();
+        assert_eq!(decode_sfx(&body).unwrap(), frame);
+
+        // Cortado em qualquer ponto
+        for cut in 0..body.len() {
+            assert!(decode_sfx(&body[..cut]).is_err(), "aceitou cortado em {cut}");
+        }
+
+        // Bytes sobrando
+        let mut extra = body.clone();
+        extra.push(0);
+        assert!(decode_sfx(&extra).is_err());
+
+        // Sem pacotes
+        let empty = SfxFrame {
+            packets: Arc::new(Vec::new()),
+            ..frame.clone()
+        };
+        assert!(encode_sfx(&empty).is_err());
+
+        // Pacotes demais
+        let long = SfxFrame {
+            packets: Arc::new(vec![vec![1]; MAX_SFX_PACKETS + 1]),
+            ..frame
+        };
+        assert!(encode_sfx(&long).is_err());
+    }
+
     // O contador da fila diminui quando o frame some.
     #[test]
     fn contador_da_fila_diminui_quando_o_frame_some() {
@@ -473,3 +679,5 @@ mod tests {
         assert_eq!(contador.load(Ordering::Relaxed), 0);
     }
 }
+
+

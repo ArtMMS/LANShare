@@ -10,10 +10,12 @@ use crate::sync_clock::SyncClock;
 use crate::video::{FrameSlot, VideoPipeline};
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
-    read_message, write_message, Message, UserInfo, VideoFrame, MAX_AVATAR_LEN, PROTOCOL_VERSION,
-    REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
+    read_message, write_message, Message, SfxFrame, UserInfo, VideoFrame, MAX_AVATAR_LEN,
+    PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL,
+    REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
+use lanshare_core::sfx::{self, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use serde_json::{json, Value};
 use std::io;
@@ -66,6 +68,8 @@ pub struct ClientEngine {
     audio_output: AudioOutputSetting,
     /// Volume do som das transmissões (o botão sobre o vídeo).
     audio_volume: AudioVolume,
+    /// Efeitos sonoros que chegaram da sala, esperando a interface buscar.
+    sfx_inbox: SfxInbox,
 }
 
 impl ClientEngine {
@@ -88,6 +92,7 @@ impl ClientEngine {
             avatar: Mutex::new(None),
             audio_output: AudioOutputSetting::default(),
             audio_volume: AudioVolume::default(),
+            sfx_inbox: SfxInbox::default(),
         })
     }
 
@@ -130,6 +135,38 @@ impl ClientEngine {
     /// Volume do som das transmissões (0 a 100) e mudo. Muda na hora, mesmo tocando.
     pub fn set_volume(&self, percent: u32, muted: bool) {
         self.audio_volume.set(percent, muted);
+    }
+
+    /// Toca um efeito sonoro para a sala: vai ao Host, que repassa a todos (a interface já tocou ele aqui).
+    /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
+    pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) -> Result<(), String> {
+        let frame = SfxFrame {
+            user_id: 0, // o Host troca pelo meu id
+            name: sfx::clean_name(name),
+            packets: Arc::new(packets),
+        };
+
+        let sent = self
+            .lock_session()
+            .as_ref()
+            .is_some_and(|session| session.outgoing_tx.send(Message::Sfx(frame)).is_ok());
+
+        if sent {
+            Ok(())
+        } else {
+            Err(tr(
+                "Você não está numa sala.",
+                "You are not in a room.",
+                "No estás en ninguna sala.",
+            )
+            .to_string())
+        }
+    }
+
+    /// Busca (e descomprime) um efeito sonoro avisado no evento "sfx_played".
+    /// None = já foi buscado, foi descartado ou veio inválido.
+    pub fn take_sfx(&self, sfx_id: u64) -> Option<Vec<f32>> {
+        self.sfx_inbox.take(sfx_id)
     }
 
     /// Procura salas na rede (~2 s, em segundo plano). O resultado chega no evento "rooms".
@@ -219,6 +256,7 @@ impl ClientEngine {
         let frame = self.frame.clone();
         let audio_output = self.audio_output.clone();
         let audio_volume = self.audio_volume.clone();
+        let sfx_inbox = self.sfx_inbox.clone();
 
         self.runtime.spawn(async move {
             let end = run_session(
@@ -231,6 +269,7 @@ impl ClientEngine {
                 frame.clone(),
                 audio_output,
                 audio_volume,
+                sfx_inbox,
             )
             .await;
 
@@ -381,6 +420,7 @@ async fn run_session(
     frame: FrameSlot,
     audio_output: AudioOutputSetting,
     audio_volume: AudioVolume,
+    sfx_inbox: SfxInbox,
 ) -> SessionEnd {
     send(&events, json!({ "type": "connecting", "address": address }));
 
@@ -532,6 +572,23 @@ async fn run_session(
                 &cb_events,
                 json!({ "type": "user_avatar", "id": id, "png_base64": png_base64 }),
             ),
+            // Alguém tocou um efeito sonoro: guarda o som e avisa quem foi (a interface busca e toca)
+            Message::Sfx(SfxFrame {
+                user_id,
+                name,
+                packets,
+            }) => {
+                let sfx_id = sfx_inbox.put(packets);
+                send(
+                    &cb_events,
+                    json!({
+                        "type": "sfx_played",
+                        "user_id": user_id,
+                        "name": sfx::clean_name(&name),
+                        "sfx_id": sfx_id,
+                    }),
+                );
+            }
             // O motivo que vem da rede está no idioma do Host: usa o texto no idioma deste app
             Message::Kicked { .. } => send(
                 &cb_events,
@@ -676,3 +733,5 @@ impl VideoStats {
         Some(report)
     }
 }
+
+

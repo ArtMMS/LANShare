@@ -502,6 +502,11 @@ public partial class MainWindow : Window
                         SetPeerAvatar(e.GetProperty("id").GetUInt64(), e.GetProperty("png_base64").GetString());
                         changedUsers = true;
                         break;
+                    case "sfx_played":
+                        // Um Client tocou um efeito sonoro (o motor já repassou aos outros)
+                        PlayRemoteSfx(e.GetProperty("user_id").GetUInt64(), e.GetProperty("sfx_id").GetUInt64(),
+                            fromHostEngine: true);
+                        break;
                     case "stream_started":
                         _infoText.Text = Loc.F(
                             "Stream_Started",
@@ -807,6 +812,12 @@ public partial class MainWindow : Window
                     case "user_avatar":
                         SetPeerAvatar(e.GetProperty("id").GetUInt64(), e.GetProperty("png_base64").GetString());
                         RefreshClientUsers();
+                        break;
+
+                    case "sfx_played":
+                        // O Host ou outro Client tocou um efeito sonoro (id 0 = o Host)
+                        PlayRemoteSfx(e.GetProperty("user_id").GetUInt64(), e.GetProperty("sfx_id").GetUInt64(),
+                            fromHostEngine: false);
                         break;
 
                     case "kicked":

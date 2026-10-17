@@ -3,5 +3,8 @@
 pub mod discovery;
 pub mod i18n;
 pub mod protocol;
+pub mod sfx;
 
 pub mod settings;
+
+

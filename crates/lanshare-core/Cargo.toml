@@ -9,3 +9,7 @@ publish = false   # nunca publicar este crate na internet por engano
 tokio = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# Comprime e descomprime os efeitos sonoros (soundboard)
+opus = { workspace = true }
+
+

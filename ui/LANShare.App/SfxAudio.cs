@@ -147,6 +147,10 @@ internal static class SfxPlayer
     public static Task<TimeSpan> PlayFileAsync(string path, string? deviceId) =>
         Task.Run(() => Play(Load(path), deviceId));
 
+    /// Decodifica um som da biblioteca (ou pega da memória), fora da thread da interface.
+    /// É esse PCM que vai para a sala.
+    public static Task<float[]> LoadAsync(string path) => Task.Run(() => Load(path));
+
     /// Toca amostras já decodificadas, fora da thread da interface (ex.: a prévia ao adicionar um som).
     public static Task<TimeSpan> PlaySamplesAsync(float[] samples, string? deviceId) =>
         Task.Run(() => Play(samples, deviceId));

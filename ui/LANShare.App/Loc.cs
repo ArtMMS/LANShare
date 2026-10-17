@@ -252,6 +252,7 @@ internal static class Loc
         ["Sfx_SaveError"] = new[] { "Não foi possível salvar o som: {0}", "Could not save the sound: {0}", "No se pudo guardar el sonido: {0}" },
         ["Sfx_RemoveError"] = new[] { "Não foi possível remover o som: {0}", "Could not remove the sound: {0}", "No se pudo quitar el sonido: {0}" },
         ["Sfx_PlayError"] = new[] { "Não foi possível tocar o som: {0}", "Could not play the sound: {0}", "No se pudo reproducir el sonido: {0}" },
+        ["Sfx_SendError"] = new[] { "O som não foi enviado para a sala: {0}", "The sound was not sent to the room: {0}", "El sonido no se envió a la sala: {0}" },
         ["Sfx_NoOutput"] = new[] { "Nenhuma saída de áudio encontrada neste PC.", "No audio output found on this PC.", "No se encontró ninguna salida de audio en este PC." },
 
         // ── Cartões de sala ──

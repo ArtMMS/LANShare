@@ -81,6 +81,11 @@ pub enum HostEvent {
     /// Ping medido até um Client, em milissegundos.
     Ping { id: u64, rtt_ms: u64 },
 
+    /// Um Client tocou um efeito sonoro (já repassado aos outros Clients).
+    /// A interface busca o som com `HostEngine::take_sfx(sfx_id)`.
+    /// O som do próprio Host não gera evento: a interface já tocou ele.
+    SfxPlayed { user_id: u64, name: String, sfx_id: u64 },
+
     /// A transmissão da tela começou.
     StreamStarted {
         source_width: u32,
@@ -141,3 +146,4 @@ impl EventSender {
         self.log(LogLevel::Warn, message);
     }
 }
+

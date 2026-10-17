@@ -368,8 +368,8 @@ fn handle_message(
         // Fomos nós: a conexão será encerrada em seguida pelo Host
         Message::Kicked { reason } => println!("[client] {reason}."),
 
-        // Avatares, som e fim de transmissão: o modo terminal não mostra nem toca
-        Message::UserAvatar { .. } | Message::Audio(_) | Message::StreamStopped => {}
+        // Avatares, som, efeitos sonoros e fim de transmissão: o modo terminal não mostra nem toca
+        Message::UserAvatar { .. } | Message::Audio(_) | Message::Sfx(_) | Message::StreamStopped => {}
 
         outra => println!("[client] Mensagem inesperada: {outra:?}"),
     }
@@ -399,3 +399,5 @@ fn normalize_address(entrada: &str) -> String {
         format!("{entrada}:{DEFAULT_PORT}")
     }
 }
+
+

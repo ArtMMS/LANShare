@@ -191,6 +191,11 @@ impl EventPrinter {
             // O terminal não mostra o ping (a GUI vai mostrar)
             HostEvent::Ping { .. } => {}
 
+            // O terminal não toca o som, só avisa
+            HostEvent::SfxPlayed { user_id, name, .. } => {
+                println!("[host] #{user_id} tocou o efeito sonoro '{name}'");
+            }
+
             HostEvent::StreamStarted {
                 source_width,
                 source_height,
@@ -434,3 +439,5 @@ fn print_help() {
     println!("[host]   audiotest [segs]  teste de captura do som do PC (grava lanshare-audiotest.wav)");
     println!("[host]   help              mostra esta ajuda");
 }
+
+

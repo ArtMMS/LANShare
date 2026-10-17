@@ -125,6 +125,20 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_audio_output_devices();
 
+    // ── Efeitos sonoros ──
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_play_sfx(IntPtr name, float[] pcm, UIntPtr len);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern long lanshare_host_take_sfx(ulong sfxId, float[] buffer, UIntPtr capacity);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_client_play_sfx(IntPtr name, float[] pcm, UIntPtr len);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern long lanshare_client_take_sfx(ulong sfxId, float[] buffer, UIntPtr capacity);
+
     /// Versão do motor Rust. O texto vem de memória estática do Rust, então não se libera.
     public static string GetVersion() =>
         Marshal.PtrToStringUTF8(lanshare_version()) ?? "?";
@@ -354,6 +368,49 @@ internal static class NativeMethods
 
     public static void ClientStop() => lanshare_client_stop();
 
+    // ───────────── Efeitos sonoros ─────────────
+
+    /// Maior efeito sonoro, em amostras float intercaladas (igual ao MAX_SAMPLES do sfx.rs: 5,2 s).
+    public const int SfxMaxSamples = 260 * 960 * 2;
+
+    /// Buffer reaproveitado para receber os sons (cada busca copia só o tamanho certo).
+    private static readonly float[] SfxBuffer = new float[SfxMaxSamples];
+    private static readonly object SfxBufferGate = new();
+
+    /// Toca um efeito sonoro do Host para todos os Clients (PCM float, 48 kHz, estéreo).
+    /// Comprime o som: chame fora da thread da interface.
+    public static (bool Ok, string? Error) HostPlaySfx(string name, float[] pcm) =>
+        PlaySfx(name, pcm, lanshare_host_play_sfx);
+
+    /// Toca um efeito sonoro do Client para a sala (vai ao Host, que repassa a todos).
+    /// Comprime o som: chame fora da thread da interface.
+    public static (bool Ok, string? Error) ClientPlaySfx(string name, float[] pcm) =>
+        PlaySfx(name, pcm, lanshare_client_play_sfx);
+
+    /// Busca o som avisado no evento "sfx_played" (só uma vez). Null = não existe mais.
+    /// Descomprime o som: chame fora da thread da interface.
+    public static float[]? HostTakeSfx(ulong sfxId) => TakeSfx(sfxId, lanshare_host_take_sfx);
+
+    /// Igual ao HostTakeSfx, para o Client.
+    public static float[]? ClientTakeSfx(ulong sfxId) => TakeSfx(sfxId, lanshare_client_take_sfx);
+
+    private static (bool Ok, string? Error) PlaySfx(
+        string name, float[] pcm, Func<IntPtr, float[], UIntPtr, IntPtr> play)
+    {
+        var ptr = Marshal.StringToCoTaskMemUTF8(name);
+        try { return ParseReply(play(ptr, pcm, (UIntPtr)pcm.Length)); }
+        finally { Marshal.FreeCoTaskMem(ptr); }
+    }
+
+    private static float[]? TakeSfx(ulong sfxId, Func<ulong, float[], UIntPtr, long> take)
+    {
+        lock (SfxBufferGate)
+        {
+            var count = take(sfxId, SfxBuffer, (UIntPtr)SfxBuffer.Length);
+            return count > 0 ? SfxBuffer[..(int)count] : null;
+        }
+    }
+
     // ───────────── Áudio ─────────────
 
     /// Saídas de áudio do PC (o padrão do Windows primeiro). Demora alguns milissegundos:
@@ -390,3 +447,5 @@ internal static class NativeMethods
 
 /// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
 internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);
+
+

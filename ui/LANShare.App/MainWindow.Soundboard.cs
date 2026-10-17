@@ -19,8 +19,8 @@ namespace LANShare.App;
 /// - botão 🎉 na parte de baixo do vídeo; ao clicar, o painel com os sons (3 por fileira);
 /// - ícone de volume no canto do painel: abre um slider deitado, por cima do painel;
 /// - "Adicionar som" abre uma janela (como a do avatar) para escolher/arrastar o arquivo e dar um nome;
-/// - quem toca um som fica com a borda azul e um 🎉 na lista de usuários, enquanto o som toca.
-/// Por enquanto os sons tocam só neste PC (a rede vem na próxima etapa).
+/// - tocar um som toca aqui e manda para a sala: todos ouvem (cada um no seu volume dos efeitos);
+/// - quem toca um som fica com a borda azul e um 🎉 na lista de usuários de todos, enquanto o som toca.
 public partial class MainWindow
 {
     private const double SfxButtonSize = 44;
@@ -563,29 +563,101 @@ public partial class MainWindow
 
     // ───────────────────────── Tocar ─────────────────────────
 
-    /// Toca o som. `onlyForMe` = "Ouvir só para mim" (sem destaque na lista; na etapa de rede,
-    /// também não vai para a sala).
+    /// Toca o som aqui e manda para a sala (todos ouvem e veem o destaque em mim).
+    /// `onlyForMe` = "Ouvir só para mim": toca só aqui, sem destaque e sem mandar para ninguém.
     private async void PlaySfx(SfxEntry entry, bool onlyForMe = false)
     {
+        var device = _preferences.AudioOutputDevice;
+
+        float[] samples;
         try
         {
-            var duration = await SfxPlayer.PlayFileAsync(SfxStore.PathOf(entry), _preferences.AudioOutputDevice);
-            if (!onlyForMe) HighlightSfxUser(MySfxUserId, duration);
+            samples = await SfxPlayer.LoadAsync(SfxStore.PathOf(entry));
         }
         catch (SfxException ex)
         {
             ShowSfxError(ex.Message);
+            return;
         }
         catch (Exception ex)
         {
             ShowSfxError(Loc.F("Sfx_PlayError", ex.Message));
+            return;
         }
+
+        // Vai para a sala ao mesmo tempo em que começa a tocar aqui
+        var sent = onlyForMe ? null : SendSfxToRoomAsync(entry.Name, samples);
+
+        try
+        {
+            var duration = await SfxPlayer.PlaySamplesAsync(samples, device);
+            if (!onlyForMe) HighlightSfxUser(MySfxUserId, duration);
+        }
+        catch (Exception ex)
+        {
+            // Sem saída de áudio aqui: os outros ainda ouvem
+            ShowSfxError(ex is SfxException ? ex.Message : Loc.F("Sfx_PlayError", ex.Message));
+            if (!onlyForMe) HighlightSfxUser(MySfxUserId, SfxDecoder.DurationOf(samples));
+        }
+
+        if (sent is not null && await sent is { } error) ShowSfxError(error);
+    }
+
+    /// Manda o som para a sala (o Host manda a todos; o Client manda ao Host, que repassa).
+    /// Comprimir leva alguns milissegundos, então roda fora da thread da interface.
+    /// Devolve a mensagem de erro, ou null se deu certo.
+    private Task<string?> SendSfxToRoomAsync(string name, float[] samples)
+    {
+        var asHost = _mode == Mode.Host;
+        return Task.Run(() =>
+        {
+            var (ok, error) = asHost
+                ? NativeMethods.HostPlaySfx(name, samples)
+                : NativeMethods.ClientPlaySfx(name, samples);
+            return ok ? null : Loc.F("Sfx_SendError", error ?? "?");
+        });
+    }
+
+    /// Alguém da sala tocou um som (evento "sfx_played"): busca, toca no volume dos efeitos
+    /// e acende o destaque de quem tocou. `fromHostEngine` = o evento veio do motor do Host.
+    private async void PlayRemoteSfx(ulong userId, ulong sfxId, bool fromHostEngine)
+    {
+        var device = _preferences.AudioOutputDevice;
+        TimeSpan duration;
+
+        try
+        {
+            var played = await Task.Run(() =>
+            {
+                var samples = fromHostEngine ? NativeMethods.HostTakeSfx(sfxId) : NativeMethods.ClientTakeSfx(sfxId);
+                if (samples is null) return (TimeSpan?)null;
+
+                try
+                {
+                    return SfxPlayer.Play(samples, device);
+                }
+                catch (Exception)
+                {
+                    // Sem saída de áudio aqui: não toca, mas o destaque aparece mesmo assim
+                    return SfxDecoder.DurationOf(samples);
+                }
+            });
+
+            if (played is not { } d) return; // o som não chegou inteiro: ignora
+            duration = d;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (SoundboardAvailable) HighlightSfxUser(userId, duration);
     }
 
     // ───────────────────────── Destaque na lista de usuários ─────────────────────────
 
-    /// Borda azul + 🎉 na linha de quem tocou um som, enquanto o som toca.
-    /// (Na etapa de rede, também é chamado quando chega o som de outra pessoa.)
+    /// Borda azul + 🎉 na linha de quem tocou um som, enquanto o som toca
+    /// (eu mesmo, ou quem tocou na sala: o id vem no evento "sfx_played").
     private void HighlightSfxUser(ulong userId, TimeSpan soundDuration)
     {
         var span = soundDuration + SfxHighlightExtra;
