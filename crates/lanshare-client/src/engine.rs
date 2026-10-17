@@ -15,7 +15,7 @@ use lanshare_core::protocol::{
     REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
-use lanshare_core::sfx::{self, SfxInbox};
+use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use serde_json::{json, Value};
 use std::io;
@@ -70,6 +70,8 @@ pub struct ClientEngine {
     audio_volume: AudioVolume,
     /// Efeitos sonoros que chegaram da sala, esperando a interface buscar.
     sfx_inbox: SfxInbox,
+    /// Anti-spam dos meus sons (o Host também confere: isto só evita mandar à toa).
+    sfx_cooldown: Mutex<SfxCooldown>,
 }
 
 impl ClientEngine {
@@ -93,6 +95,7 @@ impl ClientEngine {
             audio_output: AudioOutputSetting::default(),
             audio_volume: AudioVolume::default(),
             sfx_inbox: SfxInbox::default(),
+            sfx_cooldown: Mutex::new(SfxCooldown::default()),
         })
     }
 
@@ -139,7 +142,17 @@ impl ClientEngine {
 
     /// Toca um efeito sonoro para a sala: vai ao Host, que repassa a todos (a interface já tocou ele aqui).
     /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
+    /// Erro = não está numa sala, ou cedo demais desde o último som (anti-spam).
     pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) -> Result<(), String> {
+        let allowed = self
+            .sfx_cooldown
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_start(sfx::MIN_INTERVAL);
+        if !allowed {
+            return Err(sfx::too_soon_message());
+        }
+
         let frame = SfxFrame {
             user_id: 0, // o Host troca pelo meu id
             name: sfx::clean_name(name),

@@ -17,7 +17,7 @@ use lanshare_core::protocol::{
     REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
-use lanshare_core::sfx::{self, SfxInbox};
+use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use serde::Deserialize;
 use std::io;
@@ -91,6 +91,8 @@ pub struct HostEngine {
     host_avatar: Arc<Mutex<Option<String>>>,
     /// Efeitos sonoros que os Clients tocaram (a interface busca com take_sfx).
     sfx_inbox: SfxInbox,
+    /// Anti-spam dos sons do próprio Host.
+    sfx_cooldown: Mutex<SfxCooldown>,
 }
 
 impl HostEngine {
@@ -168,6 +170,7 @@ impl HostEngine {
             preview: PreviewSlot::default(),
             host_avatar,
             sfx_inbox,
+            sfx_cooldown: Mutex::new(SfxCooldown::default()),
         })
     }
 
@@ -217,13 +220,24 @@ impl HostEngine {
 
     /// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele aqui).
     /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
-    pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) {
+    /// Erro = cedo demais desde o último som (anti-spam).
+    pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) -> Result<(), String> {
+        let allowed = self
+            .sfx_cooldown
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_start(sfx::MIN_INTERVAL);
+        if !allowed {
+            return Err(sfx::too_soon_message());
+        }
+
         let frame = SfxFrame {
             user_id: HOST_USER_ID,
             name: sfx::clean_name(name),
             packets: Arc::new(packets),
         };
         self.registry.broadcast(&Message::Sfx(frame), None);
+        Ok(())
     }
 
     /// Busca (e descomprime) um efeito sonoro avisado no evento "sfx_played".
@@ -529,6 +543,8 @@ async fn handle_client(
     let conn_events = shared.events.clone();
     let conn_registry = shared.registry.clone();
     let conn_inbox = shared.sfx_inbox.clone();
+    // Anti-spam deste Client: quem é garante é o Host (um Client modificado não consegue burlar)
+    let mut sfx_cooldown = SfxCooldown::default();
     let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| match event {
         ConnectionEvent::Rtt(rtt) => conn_events.emit(HostEvent::Ping {
             id,
@@ -551,6 +567,11 @@ async fn handle_client(
             conn_events.emit(HostEvent::UserAvatar { id, png_base64 });
         }
         ConnectionEvent::Message(Message::Sfx(frame)) => {
+            // Cedo demais desde o último som dele: descarta (ninguém ouve)
+            if !sfx_cooldown.try_start(sfx::MIN_INTERVAL) {
+                return;
+            }
+
             // Quem tocou é sempre quem mandou (o id que veio do Client é ignorado)
             let name = sfx::clean_name(&frame.name);
             let relay = SfxFrame {

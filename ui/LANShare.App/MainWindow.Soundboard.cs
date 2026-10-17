@@ -48,6 +48,13 @@ public partial class MainWindow
     /// O slider do volume some este tempo depois de o mouse sair dele (se não estiver fixado).
     private static readonly TimeSpan SfxVolumeHideDelay = TimeSpan.FromMilliseconds(350);
 
+    /// Anti-spam: depois de tocar um som para a sala, espera este tempo antes do próximo
+    /// (igual ao COOLDOWN do sfx.rs; o Host também confere e descarta o que chegar cedo demais).
+    private static readonly TimeSpan SfxCooldown = TimeSpan.FromSeconds(1.5);
+
+    /// Opacidade dos sons enquanto o anti-spam está contando.
+    private const double SfxCoolingOpacity = 0.45;
+
     /// Destaque na lista de usuários: dura o tempo do som (com um mínimo, para dar tempo de ver).
     private static readonly TimeSpan SfxHighlightMin = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan SfxHighlightExtra = TimeSpan.FromMilliseconds(400);
@@ -93,6 +100,11 @@ public partial class MainWindow
 
     private readonly DispatcherTimer _sfxVolumeHideTimer = new();
     private IDisposable? _sfxErrorTimer;
+
+    // ── Anti-spam ──
+    private ProgressBar _sfxCooldownBar = null!;
+    private readonly DispatcherTimer _sfxCooldownTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    private DateTime _sfxCooldownUntil = DateTime.MinValue;
 
     private List<SfxEntry> _sfxEntries = new();
     private bool _sfxPanelOpen;
@@ -172,6 +184,8 @@ public partial class MainWindow
             if (_sfxVolumeButton.IsPointerOver || _sfxVolumeBox.IsPointerOver) return;
             _sfxVolumeBox.IsVisible = false;
         };
+
+        _sfxCooldownTimer.Tick += (_, _) => RefreshSfxCooldown();
 
         Closing += (_, _) => SfxPlayer.StopAll();
 
@@ -262,6 +276,17 @@ public partial class MainWindow
                 },
                 _sfxVolumeButton,
             },
+        };
+
+        // ── Anti-spam: barrinha que esvazia enquanto não dá para tocar outro som ──
+        _sfxCooldownBar = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Height = 3,
+            MinHeight = 0,
+            Margin = new Thickness(2, -4, 2, 10),
+            IsVisible = false,
         };
 
         // ── Renomear (só aparece enquanto renomeia) ──
@@ -369,7 +394,10 @@ public partial class MainWindow
             IsVisible = false,
             Child = new StackPanel
             {
-                Children = { header, _sfxRenameRow, _sfxError, _sfxEmptyText, _sfxScroll, _sfxAddButton },
+                Children =
+                {
+                    header, _sfxCooldownBar, _sfxRenameRow, _sfxError, _sfxEmptyText, _sfxScroll, _sfxAddButton,
+                },
             },
         };
 
@@ -569,19 +597,22 @@ public partial class MainWindow
     {
         var device = _preferences.AudioOutputDevice;
 
+        // Anti-spam: só vale para o que vai para a sala ("Ouvir só para mim" é livre)
+        if (!onlyForMe)
+        {
+            if (SfxCoolingDown) return;
+            StartSfxCooldown();
+        }
+
         float[] samples;
         try
         {
             samples = await SfxPlayer.LoadAsync(SfxStore.PathOf(entry));
         }
-        catch (SfxException ex)
-        {
-            ShowSfxError(ex.Message);
-            return;
-        }
         catch (Exception ex)
         {
-            ShowSfxError(Loc.F("Sfx_PlayError", ex.Message));
+            ShowSfxError(ex is SfxException ? ex.Message : Loc.F("Sfx_PlayError", ex.Message));
+            if (!onlyForMe) StopSfxCooldown(); // nada tocou: pode tentar de novo na hora
             return;
         }
 
@@ -601,6 +632,40 @@ public partial class MainWindow
         }
 
         if (sent is not null && await sent is { } error) ShowSfxError(error);
+    }
+
+    // ───────────────────────── Anti-spam ─────────────────────────
+
+    private bool SfxCoolingDown => DateTime.UtcNow < _sfxCooldownUntil;
+
+    /// Começa a contar o 1,5 s: os sons ficam apagados e a barrinha vai esvaziando.
+    private void StartSfxCooldown()
+    {
+        _sfxCooldownUntil = DateTime.UtcNow + SfxCooldown;
+        _sfxGrid.Opacity = SfxCoolingOpacity;
+        _sfxCooldownBar.Value = 100;
+        _sfxCooldownBar.IsVisible = true;
+        _sfxCooldownTimer.Start();
+    }
+
+    private void StopSfxCooldown()
+    {
+        _sfxCooldownUntil = DateTime.MinValue;
+        RefreshSfxCooldown();
+    }
+
+    private void RefreshSfxCooldown()
+    {
+        var left = _sfxCooldownUntil - DateTime.UtcNow;
+        if (left <= TimeSpan.Zero)
+        {
+            _sfxCooldownTimer.Stop();
+            _sfxCooldownBar.IsVisible = false;
+            _sfxGrid.Opacity = 1;
+            return;
+        }
+
+        _sfxCooldownBar.Value = left / SfxCooldown * 100;
     }
 
     /// Manda o som para a sala (o Host manda a todos; o Client manda ao Host, que repassa).

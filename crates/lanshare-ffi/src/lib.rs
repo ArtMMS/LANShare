@@ -368,10 +368,10 @@ pub unsafe extern "C" fn lanshare_host_play_sfx(name: *const c_char, pcm: *const
     let host = HOST.lock().unwrap();
     match host.as_ref() {
         None => reply_err(room_not_open()),
-        Some(engine) => {
-            engine.play_sfx(&name, packets);
-            reply_ok()
-        }
+        Some(engine) => match engine.play_sfx(&name, packets) {
+            Ok(()) => reply_ok(),
+            Err(error) => reply_err(&error),
+        },
     }
 }
 

@@ -198,20 +198,26 @@
                                         HorizontalAlignment="Stretch" Margin="0,8,0,0" />
                             </StackPanel>
 
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="{l:Tr Host_StatusHeader}" FontSize="11" Opacity="0.5" />
-                                <TextBlock x:Name="StatusLabel" Text="{l:Tr Host_RoomClosed}" />
+                            <!-- A lista de usuários ocupa só o espaço que sobra e rola dentro dele
+                                 (com muita gente na sala, ela não invade os botões de baixo) -->
+                            <Grid RowDefinitions="Auto,*">
+                                <StackPanel Grid.Row="0" Spacing="6">
+                                    <TextBlock Text="{l:Tr Host_StatusHeader}" FontSize="11" Opacity="0.5" />
+                                    <TextBlock x:Name="StatusLabel" Text="{l:Tr Host_RoomClosed}" />
 
-                                <TextBlock Text="{l:Tr Host_ConnectionHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                <TextBox x:Name="RoomNameBox" PlaceholderText="{l:Tr Host_RoomNamePlaceholder}" />
-                                <TextBox x:Name="PasswordBox" PlaceholderText="{l:Tr Host_PasswordPlaceholder}" PasswordChar="●" />
-                                <Button x:Name="RoomButton" Content="{l:Tr Host_OpenRoom}" HorizontalAlignment="Stretch" />
+                                    <TextBlock Text="{l:Tr Host_ConnectionHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
+                                    <TextBox x:Name="RoomNameBox" PlaceholderText="{l:Tr Host_RoomNamePlaceholder}" />
+                                    <TextBox x:Name="PasswordBox" PlaceholderText="{l:Tr Host_PasswordPlaceholder}" PasswordChar="●" />
+                                    <Button x:Name="RoomButton" Content="{l:Tr Host_OpenRoom}" HorizontalAlignment="Stretch" />
 
-                                <TextBlock Text="{l:Tr Room_UsersHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,0" />
-                                <ScrollViewer MaxHeight="220">
-                                    <StackPanel x:Name="UsersPanel" Spacing="8" />
+                                    <TextBlock Text="{l:Tr Room_UsersHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,6" />
+                                </StackPanel>
+
+                                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+                                    <!-- Margem à direita: a barra de rolagem não fica por cima do botão Expulsar -->
+                                    <StackPanel x:Name="UsersPanel" Spacing="8" Margin="0,0,10,0" />
                                 </ScrollViewer>
-                            </StackPanel>
+                            </Grid>
                         </DockPanel>
 
                         <!-- ── Entrar em sala (Client) ── -->
@@ -503,3 +509,5 @@
 
     </Grid>
 </Window>
+
+

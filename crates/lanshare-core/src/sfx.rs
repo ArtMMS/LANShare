@@ -10,6 +10,15 @@ use crate::protocol::{MAX_SFX_PACKETS, MAX_SFX_PACKET_BYTES};
 use opus::{Application, Bitrate, Channels, Decoder, Encoder};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+/// Anti-spam: cada pessoa toca no máximo um som a cada 1,5 s. A interface (C#) espera este tempo
+/// entre um som e outro: mantenha igual ao SfxCooldown do MainWindow.Soundboard.cs.
+pub const COOLDOWN: Duration = Duration::from_millis(1500);
+
+/// O que o motor de fato confere: um pouco menos que o COOLDOWN, porque dois sons enviados
+/// com 1,5 s de diferença podem chegar mais perto um do outro pela rede.
+pub const MIN_INTERVAL: Duration = Duration::from_millis(1250);
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const CHANNELS: usize = 2;
@@ -124,6 +133,34 @@ pub fn clean_name(raw: &str) -> String {
     name.trim().to_string()
 }
 
+/// Conta o tempo desde o último som de uma pessoa (anti-spam).
+#[derive(Debug, Default)]
+pub struct SfxCooldown {
+    last: Option<Instant>,
+}
+
+impl SfxCooldown {
+    /// true = pode tocar (e começa a contar o tempo de novo); false = cedo demais, ignore o som.
+    pub fn try_start(&mut self, min_interval: Duration) -> bool {
+        let now = Instant::now();
+        if self.last.is_some_and(|last| now.duration_since(last) < min_interval) {
+            return false;
+        }
+        self.last = Some(now);
+        true
+    }
+}
+
+/// Mensagem de "cedo demais" no idioma do app.
+pub fn too_soon_message() -> String {
+    tr(
+        "Espere um pouco antes de tocar outro som.",
+        "Wait a moment before playing another sound.",
+        "Espera un momento antes de reproducir otro sonido.",
+    )
+    .to_string()
+}
+
 #[derive(Default)]
 struct InboxData {
     next_id: u64,
@@ -213,6 +250,17 @@ mod tests {
             inbox.put(packets.clone());
         }
         assert!(inbox.take(old).is_none()); // descartado por ser o mais antigo
+    }
+
+    #[test]
+    fn cooldown_segura_o_segundo_som() {
+        let mut cooldown = SfxCooldown::default();
+        assert!(cooldown.try_start(MIN_INTERVAL)); // o primeiro sempre pode
+        assert!(!cooldown.try_start(MIN_INTERVAL)); // logo em seguida, não
+
+        // Passado o intervalo, pode de novo
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(cooldown.try_start(Duration::from_millis(20)));
     }
 
     #[test]
