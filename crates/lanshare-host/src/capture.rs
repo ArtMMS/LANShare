@@ -33,6 +33,8 @@ pub struct CapturedFrame {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
+    /// Quando o Windows entregou o frame (o mesmo relógio do som, para a sincronia).
+    pub captured_at: Instant,
 }
 
 // Roda dentro da thread de captura e recebe cada frame novo.
@@ -57,13 +59,19 @@ impl GraphicsCaptureApiHandler for Handler {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
+        let captured_at = Instant::now();
         let width = frame.width();
         let height = frame.height();
 
         let buffer = frame.buffer()?;
         let data = buffer.as_nopadding_buffer(&mut self.scratch).to_vec();
 
-        match self.sender.try_send(CapturedFrame { width, height, data }) {
+        match self.sender.try_send(CapturedFrame {
+            width,
+            height,
+            data,
+            captured_at,
+        }) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {} // consumidor lento: descarta o frame
             Err(TrySendError::Disconnected(_)) => {

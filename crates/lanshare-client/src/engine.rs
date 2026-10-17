@@ -6,6 +6,7 @@
 use crate::audio_player::{AudioOutputSetting, AudioPlayer};
 use crate::discovery;
 use crate::normalize_address;
+use crate::sync_clock::SyncClock;
 use crate::video::{FrameSlot, VideoPipeline};
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
@@ -454,6 +455,9 @@ async fn run_session(
 
     // O som também só nasce quando chegar o primeiro pacote de áudio
     let mut audio: Option<AudioPlayer> = None;
+
+    // Relógio da sincronia: o som anota, o vídeo segue. Um novo a cada transmissão.
+    let mut clock = SyncClock::default();
     let mut stats = VideoStats::new();
     let cb_events = events.clone();
     let cb_frame = frame.clone();
@@ -470,14 +474,19 @@ async fn run_session(
                 }
                 video
                     .get_or_insert_with(|| {
-                        VideoPipeline::start(cb_frame.clone(), generation, cb_events.clone())
+                        VideoPipeline::start(
+                            cb_frame.clone(),
+                            generation,
+                            cb_events.clone(),
+                            clock.clone(),
+                        )
                     })
                     .push(video_frame);
             }
             Message::Audio(audio_frame) => {
                 audio
                     .get_or_insert_with(|| {
-                        AudioPlayer::start(audio_output.clone(), cb_events.clone())
+                        AudioPlayer::start(audio_output.clone(), cb_events.clone(), clock.clone())
                     })
                     .push(audio_frame);
             }
@@ -485,6 +494,7 @@ async fn run_session(
                 // O Host parou de transmitir: o decodificador e o som antigos terminam sozinhos
                 video = None;
                 audio = None;
+                clock = SyncClock::default();
                 // Imagens que ainda estavam sendo decodificadas são descartadas
                 generation = cb_frame.begin_session();
                 stats = VideoStats::new();

@@ -90,6 +90,7 @@ public partial class MainWindow : Window
     private string? _kickedReason;
     private int _pingMs = -1;
     private double _videoFps, _videoMbps;
+    private double? _syncMs; // diferença média entre imagem e som (null = sem som)
     private string? _videoSize;
     private DateTime _connectedAt;
 
@@ -637,6 +638,7 @@ public partial class MainWindow : Window
         _pingMs = -1;
         _videoFps = _videoMbps = 0;
         _videoSize = null;
+        _syncMs = null;
     }
 
     private void ScanRooms()
@@ -820,6 +822,13 @@ public partial class MainWindow : Window
                         break;
                     }
 
+                    case "sync_stats":
+                        _syncMs = e.TryGetProperty("offset_ms", out var off) && off.ValueKind == JsonValueKind.Number
+                            ? off.GetDouble()
+                            : null;
+                        RefreshClientInfo();
+                        break;
+
                     case "video_stats":
                         _videoFps = e.GetProperty("fps").GetDouble();
                         _videoMbps = e.GetProperty("mbps").GetDouble();
@@ -830,6 +839,7 @@ public partial class MainWindow : Window
                         // O Host parou de transmitir: a conexão continua, só a imagem acaba
                         _videoFps = _videoMbps = 0;
                         _videoSize = null;
+                        _syncMs = null;
                         HidePreview(Loc.T("Stream_Stopped"));
                         RefreshClientInfo();
                         break;
@@ -976,6 +986,7 @@ public partial class MainWindow : Window
         var parts = new List<string> { Loc.T("Client_Connected") };
         if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
         if (_videoSize is not null) parts.Add($"{_videoSize} @ {_videoFps:F0} FPS, {_videoMbps:F1} Mbps");
+        if (_videoSize is not null && _syncMs is { } sync) parts.Add($"A/V {sync:+0;-0;0} ms");
         _infoText.Text = string.Join(" — ", parts);
     }
 

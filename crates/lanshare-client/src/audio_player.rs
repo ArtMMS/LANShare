@@ -1,12 +1,16 @@
 //! Som da transmissão no Client: pacotes Opus -> PCM -> WASAPI, na saída escolhida nas Configurações.
 //!
-//! Roda numa thread própria. A saída segue a escolha do usuário em tempo real:
+//! Roda numa thread própria e é o relógio da sincronia: anota no SyncClock qual momento da
+//! transmissão está saindo no alto-falante, e o vídeo se guia por ele (sync_clock.rs).
+//!
+//! A saída segue a escolha do usuário em tempo real:
 //! - "Padrão do Windows" (None): acompanha se o padrão do Windows mudar;
 //! - um dispositivo específico: se ele for desconectado, o som vai para o padrão
 //!   e volta para ele sozinho quando ele reaparecer.
 
 use crate::audio_devices::{self, ComGuard};
 use crate::engine::EventTx;
+use crate::sync_clock::SyncClock;
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::AudioFrame;
 use opus::{Channels, Decoder};
@@ -66,6 +70,10 @@ fn ms_to_frames(ms: usize) -> usize {
     SAMPLE_RATE as usize * ms / 1000
 }
 
+fn frames_to_us(frames: usize) -> u64 {
+    frames as u64 * 1_000_000 / SAMPLE_RATE as u64
+}
+
 // ───────────────────────────── Saída escolhida ─────────────────────────────
 
 /// A saída de áudio escolhida nas Configurações, compartilhada com a thread do som.
@@ -104,12 +112,16 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
-    pub fn start(output: AudioOutputSetting, events: EventTx) -> Self {
+    /// `clock` é o relógio desta transmissão (o vídeo lê o mesmo).
+    pub fn start(output: AudioOutputSetting, events: EventTx, clock: SyncClock) -> Self {
         let (tx, rx) = sync_channel(QUEUE_SIZE);
 
         let _ = std::thread::Builder::new()
             .name("lanshare-audio-player".to_string())
-            .spawn(move || run(rx, output, events));
+            .spawn(move || {
+                run(rx, output, &events, &clock);
+                clock.pause(); // o som acabou: o vídeo para de esperar por ele
+            });
 
         Self { tx }
     }
@@ -124,12 +136,12 @@ fn send_error(events: &EventTx, message: String) {
     let _ = events.send(json!({ "type": "audio_error", "error": message }));
 }
 
-fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: EventTx) {
+fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: &EventTx, clock: &SyncClock) {
     // Primeiro a ser criado = último a ser liberado (o COM precisa sobreviver à saída)
     let _com = match ComGuard::new() {
         Ok(com) => com,
         Err(erro) => {
-            send_error(&events, erro);
+            send_error(events, erro);
             return;
         }
     };
@@ -138,7 +150,7 @@ fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: EventTx) {
         Ok(decoder) => decoder,
         Err(erro) => {
             send_error(
-                &events,
+                events,
                 format!(
                     "{}: {erro}",
                     tr(
@@ -181,27 +193,35 @@ fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: EventTx) {
                     next_check = Instant::now() + RETRY_DELAY;
                     if !warned {
                         warned = true;
-                        send_error(&events, erro);
+                        send_error(events, erro);
                     }
                 }
             }
         }
 
-        // 3) Entrega som à saída e espera ela pedir mais
+        // 3) Entrega som à saída, anota o relógio e espera a saída pedir mais
         let fed = device
-            .as_ref()
-            .map(|open| open.feed(&mut queue).map(|()| open.event.0));
+            .as_mut()
+            .map(|open| open.feed(&mut queue).map(|audible| (open.event.0, audible)));
 
         match fed {
-            Some(Ok(event)) => unsafe {
-                let _ = WaitForSingleObject(event, WAIT_MS);
-            },
+            Some(Ok((event, audible))) => {
+                match audible {
+                    Some(audible_us) => clock.update(audible_us),
+                    None => clock.pause(), // nada tocando agora
+                }
+                unsafe {
+                    let _ = WaitForSingleObject(event, WAIT_MS);
+                }
+            }
             Some(Err(_)) => {
                 // Saída sumiu (fone desconectado, driver reiniciado): reabre já
+                clock.pause();
                 device = None;
                 next_check = Instant::now();
             }
             None => {
+                clock.pause();
                 // Sem saída: continua recebendo para o atraso não acumular
                 match rx.recv_timeout(Duration::from_millis(WAIT_MS as u64)) {
                     Ok(frame) => decode_into(&mut decoder, &frame, &mut pcm, &mut queue),
@@ -215,7 +235,7 @@ fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: EventTx) {
 
 fn decode_into(decoder: &mut Decoder, frame: &AudioFrame, pcm: &mut [i16], queue: &mut PlaybackQueue) {
     match decoder.decode(&frame.data, pcm, false) {
-        Ok(frames) => queue.push(&pcm[..frames * CHANNELS]),
+        Ok(frames) => queue.push(frame.timestamp_us, &pcm[..frames * CHANNELS]),
         Err(_) => {
             // Pacote inválido: ignora (o próximo decodifica normalmente)
         }
@@ -257,10 +277,31 @@ fn switch_device(device: &mut Option<RenderDevice>, chosen: Option<&str>) -> Res
 
 // ───────────────────────────── Fila de som ─────────────────────────────
 
+/// Um pacote já decodificado, com o momento da transmissão em que ele tocou no Host.
+struct QueuedPacket {
+    timestamp_us: u64,
+    samples: Vec<i16>,
+    /// Quantas amostras do começo já foram entregues à saída.
+    pos: usize,
+}
+
+impl QueuedPacket {
+    fn frames_left(&self) -> usize {
+        (self.samples.len() - self.pos) / CHANNELS
+    }
+
+    /// Momento da transmissão da próxima amostra a sair deste pacote.
+    fn position_us(&self) -> u64 {
+        self.timestamp_us + frames_to_us(self.pos / CHANNELS)
+    }
+}
+
 /// O som já decodificado, esperando para tocar. Controla o atraso: junta um pouco antes de
-/// começar e joga fora o excesso se acumular demais.
+/// começar e joga fora o excesso se acumular demais. Cada pacote guarda o próprio horário,
+/// então o relógio da sincronia continua certo mesmo depois de buracos ou cortes.
 struct PlaybackQueue {
-    samples: VecDeque<i16>,
+    packets: VecDeque<QueuedPacket>,
+    frames: usize,
     /// true = juntando som antes de tocar (no começo ou depois de faltar som).
     buffering: bool,
 }
@@ -268,36 +309,54 @@ struct PlaybackQueue {
 impl PlaybackQueue {
     fn new() -> Self {
         Self {
-            samples: VecDeque::with_capacity(ms_to_frames(MAX_LATENCY_MS) * CHANNELS * 2),
+            packets: VecDeque::new(),
+            frames: 0,
             buffering: true,
         }
     }
 
-    fn frames(&self) -> usize {
-        self.samples.len() / CHANNELS
-    }
-
-    fn push(&mut self, pcm: &[i16]) {
-        self.samples.extend(pcm.iter().copied());
+    fn push(&mut self, timestamp_us: u64, pcm: &[i16]) {
+        if pcm.is_empty() {
+            return;
+        }
+        self.frames += pcm.len() / CHANNELS;
+        self.packets.push_back(QueuedPacket {
+            timestamp_us,
+            samples: pcm.to_vec(),
+            pos: 0,
+        });
 
         // Atraso grande demais (a saída travou um pouco, ou a rede entregou de uma vez)
-        if self.frames() > ms_to_frames(MAX_LATENCY_MS) {
-            let excess = (self.frames() - ms_to_frames(TRIM_LATENCY_MS)) * CHANNELS;
-            self.samples.drain(..excess);
+        if self.frames > ms_to_frames(MAX_LATENCY_MS) {
+            self.skip(self.frames - ms_to_frames(TRIM_LATENCY_MS));
+        }
+    }
+
+    /// Joga fora `frames` quadros do começo da fila.
+    fn skip(&mut self, mut frames: usize) {
+        while frames > 0 {
+            let Some(front) = self.packets.front_mut() else { break };
+            let take = front.frames_left().min(frames);
+            front.pos += take * CHANNELS;
+            frames -= take;
+            self.frames -= take;
+            if front.frames_left() == 0 {
+                self.packets.pop_front();
+            }
         }
     }
 
     /// Quantos quadros podem ser tocados agora (no máximo `free`).
     fn ready(&mut self, free: usize) -> usize {
         if self.buffering {
-            if self.frames() < ms_to_frames(START_LATENCY_MS) {
+            if self.frames < ms_to_frames(START_LATENCY_MS) {
                 return 0;
             }
             self.buffering = false;
         }
 
-        let frames = self.frames().min(free);
-        if frames == 0 {
+        let frames = self.frames.min(free);
+        if frames == 0 && self.frames == 0 {
             // Acabou o som: volta a juntar antes de tocar de novo
             self.buffering = true;
         }
@@ -305,10 +364,32 @@ impl PlaybackQueue {
     }
 
     /// Tira `frames` quadros da fila e grava em `out` (PCM 16 bits, little-endian).
-    fn take_into(&mut self, frames: usize, out: &mut [u8]) {
-        for (sample, bytes) in self.samples.drain(..frames * CHANNELS).zip(out.chunks_exact_mut(2)) {
-            bytes.copy_from_slice(&sample.to_le_bytes());
+    /// Devolve o momento da transmissão logo depois do último quadro entregue.
+    fn take_into(&mut self, frames: usize, out: &mut [u8]) -> u64 {
+        let mut written = 0;
+        let mut end_us = 0;
+
+        while written < frames {
+            let Some(front) = self.packets.front_mut() else { break };
+            let take = front.frames_left().min(frames - written);
+            let from = front.pos;
+            let to = from + take * CHANNELS;
+
+            let dst = &mut out[written * CHANNELS * 2..(written + take) * CHANNELS * 2];
+            for (sample, bytes) in front.samples[from..to].iter().zip(dst.chunks_exact_mut(2)) {
+                bytes.copy_from_slice(&sample.to_le_bytes());
+            }
+
+            front.pos = to;
+            end_us = front.position_us();
+            written += take;
+            self.frames -= take;
+            if front.frames_left() == 0 {
+                self.packets.pop_front();
+            }
         }
+
+        end_us
     }
 }
 
@@ -332,6 +413,10 @@ struct RenderDevice {
     render: IAudioRenderClient,
     event: EventHandle,
     buffer_frames: u32,
+    /// Atraso fixo da saída (driver/hardware), em quadros.
+    latency_frames: usize,
+    /// Momento da transmissão logo depois do último quadro entregue à saída.
+    written_end_us: Option<u64>,
 }
 
 impl RenderDevice {
@@ -380,6 +465,10 @@ impl RenderDevice {
                 .GetService()
                 .map_err(|e| format!("GetService: {e}"))?;
 
+            // Unidades de 100 ns -> quadros (se o Windows não informar, conta como zero)
+            let latency_hns = client.GetStreamLatency().unwrap_or(0).max(0) as u64;
+            let latency_frames = (latency_hns * SAMPLE_RATE as u64 / 10_000_000) as usize;
+
             client.Start().map_err(|e| format!("Start: {e}"))?;
 
             Ok(Self {
@@ -388,28 +477,38 @@ impl RenderDevice {
                 render,
                 event,
                 buffer_frames,
+                latency_frames,
+                written_end_us: None,
             })
         }
     }
 
     /// Entrega à saída o som que couber. Erro = a saída deixou de existir.
-    fn feed(&self, queue: &mut PlaybackQueue) -> windows::core::Result<()> {
-        unsafe {
-            let padding = self.client.GetCurrentPadding()?;
-            let free = self.buffer_frames.saturating_sub(padding) as usize;
+    /// Devolve o momento da transmissão que está saindo no alto-falante agora
+    /// (None = nada tocando: a saída esvaziou).
+    fn feed(&mut self, queue: &mut PlaybackQueue) -> windows::core::Result<Option<u64>> {
+        let padding = unsafe { self.client.GetCurrentPadding()? } as usize;
+        let free = (self.buffer_frames as usize).saturating_sub(padding);
 
-            let frames = queue.ready(free);
-            if frames == 0 {
-                return Ok(());
+        let frames = queue.ready(free);
+        if frames > 0 {
+            unsafe {
+                let data = self.render.GetBuffer(frames as u32)?;
+                // SAFETY: o Windows deu `frames` quadros de BLOCK_ALIGN bytes até o ReleaseBuffer
+                let out = std::slice::from_raw_parts_mut(data, frames * BLOCK_ALIGN as usize);
+                self.written_end_us = Some(queue.take_into(frames, out));
+                self.render.ReleaseBuffer(frames as u32, 0)?;
             }
-
-            let data = self.render.GetBuffer(frames as u32)?;
-            // SAFETY: o Windows deu `frames` quadros de BLOCK_ALIGN bytes até o ReleaseBuffer
-            let out = std::slice::from_raw_parts_mut(data, frames * BLOCK_ALIGN as usize);
-            queue.take_into(frames, out);
-            self.render.ReleaseBuffer(frames as u32, 0)?;
         }
-        Ok(())
+
+        // O que está saindo agora = o último quadro entregue, menos o que ainda espera na saída
+        let waiting = padding + frames;
+        if waiting == 0 {
+            return Ok(None);
+        }
+        Ok(self
+            .written_end_us
+            .map(|end| end.saturating_sub(frames_to_us(waiting + self.latency_frames))))
     }
 }
 

@@ -10,6 +10,7 @@ use crate::preview::PreviewSlot;
 use crate::registry::Registry;
 use lanshare_core::i18n::tr;
 use rayon::prelude::*;
+use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
@@ -21,6 +22,11 @@ type BoxError = Box<dyn Error + Send + Sync>;
 
 /// De quanto em quanto tempo o Host emite o resumo da transmissão.
 const REPORT_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Quantos horários de captura podem esperar o encoder devolver o pacote correspondente.
+/// O encoder (em baixa latência) devolve um pacote por frame; isto só protege contra frames
+/// que ele decidiu não codificar.
+const MAX_PENDING_TIMESTAMPS: usize = 8;
 
 /// Tempo máximo esperando a transmissão trocar de monitor/janela.
 const SWITCH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -180,6 +186,10 @@ fn run(
     let mut first_packet_logged = false;
     let mut last_preview: Option<Instant> = None;
 
+    // Quando cada frame entregue ao encoder foi capturado (o pacote leva esse horário,
+    // não o do envio: é o que deixa o Client sincronizar a imagem com o som)
+    let mut pending_timestamps: VecDeque<u64> = VecDeque::new();
+
     // Limite de FPS: a agenda diz quando o próximo frame pode entrar
     let frame_interval = Duration::from_secs_f64(1.0 / settings.fps as f64);
     let mut next_frame_at = Instant::now();
@@ -298,6 +308,12 @@ fn run(
             encoder.force_keyframe();
         }
 
+        let captured_us = frame.captured_at.saturating_duration_since(started).as_micros() as u64;
+        pending_timestamps.push_back(captured_us);
+        while pending_timestamps.len() > MAX_PENDING_TIMESTAMPS {
+            pending_timestamps.pop_front();
+        }
+
         for packet in encoder.encode(&frame)? {
             if !first_packet_logged {
                 first_packet_logged = true;
@@ -308,7 +324,8 @@ fn run(
             }
 
             let keyframe = is_keyframe(&packet);
-            let timestamp_us = started.elapsed().as_micros() as u64;
+            // O pacote corresponde ao frame mais antigo ainda sem pacote
+            let timestamp_us = pending_timestamps.pop_front().unwrap_or(captured_us);
 
             packets += 1;
             bytes += packet.len() as u64;
@@ -356,7 +373,12 @@ fn fit_into(frame: &CapturedFrame, width: u32, height: u32) -> CapturedFrame {
         for px in data.chunks_exact_mut(4) {
             px[3] = 255;
         }
-        return CapturedFrame { width, height, data };
+        return CapturedFrame {
+            width,
+            height,
+            data,
+            captured_at: frame.captured_at,
+        };
     }
 
     let scale = (cw as f64 / sw as f64).min(ch as f64 / sh as f64);
@@ -401,7 +423,12 @@ fn fit_into(frame: &CapturedFrame, width: u32, height: u32) -> CapturedFrame {
             }
         });
 
-    CapturedFrame { width, height, data }
+    CapturedFrame {
+        width,
+        height,
+        data,
+        captured_at: frame.captured_at,
+    }
 }
 
 /// Esse pacote H.264 (formato Annex B) é um keyframe?

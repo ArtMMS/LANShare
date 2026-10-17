@@ -7,6 +7,7 @@ mod audio_player;
 mod decoder;
 mod discovery;
 mod engine;
+mod sync_clock;
 mod video;
 mod viewer;
 
