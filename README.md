@@ -21,16 +21,13 @@ The project is being developed with performance, stability, and ease of use in m
 
 <p align="center">
   <a href="https://github.com/ArtMMS/LANShare/releases/download/v1.1.0/LANShare.zip">
-    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.1.0-0078D4?style=for-the-badge" alt="Download LANShare v1.0.0">
+    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.1.0-0078D4?style=for-the-badge" alt="Download LANShare v1.1.0">
   </a>
   <a href="https://lanshareapp.com/">
     <img src="https://img.shields.io/badge/🌐%20Official%20Website-8A2BE2?style=for-the-badge" alt="Official Website">
   </a>
+  <img src="https://img.shields.io/badge/🖥️%20Platform-Windows%2011-4A90E2?style=for-the-badge" alt="Platform Windows 11">
 </p>
-
-
-- **Version:** v1.0
-- **Platform:** Windows 11
 
 Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
