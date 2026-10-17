@@ -27,6 +27,9 @@ internal sealed class AppPreferences
     /// Volume do som das transmissões no Client, de 0 a 100. Começa na metade.
     public int StreamVolume { get; set; } = 50;
 
+    /// Som das transmissões no mudo (o volume continua guardado para quando voltar).
+    public bool StreamMuted { get; set; }
+
     public bool SoundOnUserJoinLeave { get; set; } = true;
     public bool SoundOnStreamStart { get; set; } = true;
 

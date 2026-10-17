@@ -11,7 +11,7 @@
     <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
 
     <!-- Versão do app: ÚNICA fonte. A tag da release no GitHub deve ser igual (ex.: v0.5.0) -->
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <!-- Publicação: um único LANShare.exe (Windows x64), com o .NET e a DLL do Rust embutidos -->

@@ -193,6 +193,11 @@ internal static class Loc
         ["Client_KickedDefault"] = new[] { "Você foi removido pelo Host.", "You were removed by the Host.", "El Host te ha expulsado de la sala." },
         ["Client_VideoError"] = new[] { "Erro no vídeo.", "Video error.", "Error de vídeo." },
         ["Client_AudioError"] = new[] { "Erro no som da transmissão.", "Stream audio error.", "Error en el sonido de la transmisión." },
+
+        // ── Volume (botão sobre o vídeo) ──
+        ["Volume_Tooltip"] = new[] { "Volume da transmissão", "Stream volume", "Volumen de la transmisión" },
+        ["Volume_Mute"] = new[] { "Silenciar", "Mute", "Silenciar" },
+        ["Volume_Unmute"] = new[] { "Ativar som", "Unmute", "Activar sonido" },
         ["Client_Rejected"] = new[] { "Entrada recusada: {0}", "Join refused: {0}", "Entrada rechazada: {0}" },
         ["Client_ConnectFailed"] = new[] { "Não foi possível conectar.", "Could not connect.", "No se pudo conectar." },
         ["Client_DisconnectedReason"] = new[] { "Desconectado: {0}", "Disconnected: {0}", "Desconectado: {0}" },

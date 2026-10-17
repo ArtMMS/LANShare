@@ -156,6 +156,7 @@ public partial class MainWindow : Window
         InitSourcePicker();
         InitAvatar();
         InitNotifications();
+        InitVolume(); // antes do InitFullscreen: o Esc fecha o painel de volume antes de sair da tela cheia
 
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
@@ -374,6 +375,7 @@ public partial class MainWindow : Window
         });
         _infoText.Text = "";
         UpdateProfileState();
+        UpdateVolumeControls();
     }
 
     /// Decide o que aparece na área grande: salas, conexão, imagem ou mensagem.
@@ -597,6 +599,7 @@ public partial class MainWindow : Window
         _clientActive = true;
         NativeMethods.ClientSetAvatar(AvatarStore.ExportForNetwork()); // vai ao Host ao entrar numa sala
         ApplyAudioOutput(); // por onde sai o som das transmissões
+        ApplyVolume(); // volume salvo da última vez
         ResetClientSession();
         _roomsList.ItemsSource = null;
         _roomsSignature = null;
@@ -1014,6 +1017,7 @@ public partial class MainWindow : Window
 
         UpdateProfileState();
         UpdateStage();
+        UpdateVolumeControls(); // o botão de volume só existe com o Client conectado
     }
 
     // ───────────────────────── Imagem (Host e Client) ─────────────────────────

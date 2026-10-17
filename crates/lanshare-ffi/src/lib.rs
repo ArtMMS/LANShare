@@ -497,6 +497,16 @@ pub extern "C" fn lanshare_client_set_audio_output(device_id: *const c_char) -> 
     })
 }
 
+/// Volume do som das transmissões: `percent` de 0 a 100; `muted` diferente de 0 = mudo.
+/// Muda na hora, mesmo com som tocando.
+#[no_mangle]
+pub extern "C" fn lanshare_client_set_volume(percent: u32, muted: i32) -> *mut c_char {
+    with_client(|engine| {
+        engine.set_volume(percent.min(100), muted != 0);
+        Ok(())
+    })
+}
+
 /// Desconecta da sala (ou cancela a tentativa). O fim chega no evento "disconnected".
 /// Retorna 1 se havia conexão, 0 se não.
 #[no_mangle]

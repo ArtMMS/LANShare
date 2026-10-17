@@ -106,6 +106,9 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_client_set_audio_output(IntPtr deviceId);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_client_set_volume(uint percent, int muted);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_client_disconnect();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -326,6 +329,10 @@ internal static class NativeMethods
     /// Se já houver som tocando, ele muda de saída na hora.
     public static (bool Ok, string? Error) ClientSetAudioOutput(string? deviceId) =>
         CallWithString(deviceId ?? "", lanshare_client_set_audio_output);
+
+    /// Volume do som das transmissões (0 a 100) e mudo. Muda na hora, mesmo com som tocando.
+    public static (bool Ok, string? Error) ClientSetVolume(int percent, bool muted) =>
+        ParseReply(lanshare_client_set_volume((uint)Math.Clamp(percent, 0, 100), muted ? 1 : 0));
 
     public static bool ClientDisconnect() => lanshare_client_disconnect() != 0;
 

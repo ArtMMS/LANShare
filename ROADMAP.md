@@ -76,15 +76,13 @@
 
 ---
 
-# Future Plans
-
-## Audio Streaming
+# V1.1.0 — Audio Streaming
 
  [x] Capture system audio
  [x] Select the audio output device (default: Windows default device)
  [x] Transmit audio to connected users
  [x] Synchronize audio with the streamed image
- [ ] Individual transmission volume control for each user
+ [x] Individual transmission volume control for each user
 
 ---
 

@@ -81,5 +81,8 @@ public partial class MainWindow
         _mainLayout.ColumnDefinitions[0].Width = new GridLength(on ? 0 : 300);
         _infoText.IsVisible = !on;
         _previewImage.Margin = new Thickness(on ? 0 : 16);
+
+        // Em tela cheia o botão de volume some quando o mouse fica parado
+        OnVolumeFullscreenChanged(on);
     }
 }

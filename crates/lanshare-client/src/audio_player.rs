@@ -3,6 +3,8 @@
 //! Roda numa thread própria e é o relógio da sincronia: anota no SyncClock qual momento da
 //! transmissão está saindo no alto-falante, e o vídeo se guia por ele (sync_clock.rs).
 //!
+//! O volume (AudioVolume) também muda em tempo real, sem estalos.
+//!
 //! A saída segue a escolha do usuário em tempo real:
 //! - "Padrão do Windows" (None): acompanha se o padrão do Windows mudar;
 //! - um dispositivo específico: se ele for desconectado, o som vai para o padrão
@@ -17,6 +19,7 @@ use opus::{Channels, Decoder};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
@@ -104,6 +107,44 @@ impl AudioOutputSetting {
     }
 }
 
+// ───────────────────────────── Volume ─────────────────────────────
+
+/// Volume do som das transmissões, compartilhado com a thread do som.
+/// Clonar NÃO copia: todos os clones veem o mesmo volume.
+#[derive(Clone)]
+pub struct AudioVolume {
+    /// Ganho já calculado (0.0 a 1.0), guardado como os bits de um f32.
+    gain_bits: Arc<AtomicU32>,
+}
+
+impl Default for AudioVolume {
+    fn default() -> Self {
+        let volume = Self {
+            gain_bits: Arc::new(AtomicU32::new(0)),
+        };
+        volume.set(50, false); // começa na metade, como a interface
+        volume
+    }
+}
+
+impl AudioVolume {
+    /// `percent` de 0 a 100. A curva é quadrática, como a do ouvido:
+    /// 50% soa como "metade do volume" em vez de quase igual a 100%.
+    pub fn set(&self, percent: u32, muted: bool) {
+        let gain = if muted {
+            0.0
+        } else {
+            let linear = percent.min(100) as f32 / 100.0;
+            linear * linear
+        };
+        self.gain_bits.store(gain.to_bits(), Ordering::Relaxed);
+    }
+
+    fn gain(&self) -> f32 {
+        f32::from_bits(self.gain_bits.load(Ordering::Relaxed))
+    }
+}
+
 // ───────────────────────────── Player ─────────────────────────────
 
 /// A thread que toca o som. Ao ser descartada, a thread termina sozinha.
@@ -113,13 +154,18 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
     /// `clock` é o relógio desta transmissão (o vídeo lê o mesmo).
-    pub fn start(output: AudioOutputSetting, events: EventTx, clock: SyncClock) -> Self {
+    pub fn start(
+        output: AudioOutputSetting,
+        volume: AudioVolume,
+        events: EventTx,
+        clock: SyncClock,
+    ) -> Self {
         let (tx, rx) = sync_channel(QUEUE_SIZE);
 
         let _ = std::thread::Builder::new()
             .name("lanshare-audio-player".to_string())
             .spawn(move || {
-                run(rx, output, &events, &clock);
+                run(rx, output, &volume, &events, &clock);
                 clock.pause(); // o som acabou: o vídeo para de esperar por ele
             });
 
@@ -136,7 +182,13 @@ fn send_error(events: &EventTx, message: String) {
     let _ = events.send(json!({ "type": "audio_error", "error": message }));
 }
 
-fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: &EventTx, clock: &SyncClock) {
+fn run(
+    rx: Receiver<AudioFrame>,
+    output: AudioOutputSetting,
+    volume: &AudioVolume,
+    events: &EventTx,
+    clock: &SyncClock,
+) {
     // Primeiro a ser criado = último a ser liberado (o COM precisa sobreviver à saída)
     let _com = match ComGuard::new() {
         Ok(com) => com,
@@ -202,7 +254,10 @@ fn run(rx: Receiver<AudioFrame>, output: AudioOutputSetting, events: &EventTx, c
         // 3) Entrega som à saída, anota o relógio e espera a saída pedir mais
         let fed = device
             .as_mut()
-            .map(|open| open.feed(&mut queue).map(|audible| (open.event.0, audible)));
+            .map(|open| {
+                open.feed(&mut queue, volume.gain())
+                    .map(|audible| (open.event.0, audible))
+            });
 
         match fed {
             Some(Ok((event, audible))) => {
@@ -363,11 +418,13 @@ impl PlaybackQueue {
         frames
     }
 
-    /// Tira `frames` quadros da fila e grava em `out` (PCM 16 bits, little-endian).
+    /// Tira `frames` quadros da fila e grava em `out` (PCM 16 bits, little-endian), aplicando
+    /// o volume. O volume vai de `gain_from` a `gain_to` ao longo do bloco (sem estalos).
     /// Devolve o momento da transmissão logo depois do último quadro entregue.
-    fn take_into(&mut self, frames: usize, out: &mut [u8]) -> u64 {
+    fn take_into(&mut self, frames: usize, out: &mut [u8], gain_from: f32, gain_to: f32) -> u64 {
         let mut written = 0;
         let mut end_us = 0;
+        let step = (gain_to - gain_from) / frames.max(1) as f32;
 
         while written < frames {
             let Some(front) = self.packets.front_mut() else { break };
@@ -376,8 +433,13 @@ impl PlaybackQueue {
             let to = from + take * CHANNELS;
 
             let dst = &mut out[written * CHANNELS * 2..(written + take) * CHANNELS * 2];
-            for (sample, bytes) in front.samples[from..to].iter().zip(dst.chunks_exact_mut(2)) {
-                bytes.copy_from_slice(&sample.to_le_bytes());
+            for (index, (sample, bytes)) in
+                front.samples[from..to].iter().zip(dst.chunks_exact_mut(2)).enumerate()
+            {
+                let frame = written + index / CHANNELS;
+                let gain = gain_from + step * frame as f32;
+                let scaled = (*sample as f32 * gain).round().clamp(i16::MIN as f32, i16::MAX as f32);
+                bytes.copy_from_slice(&(scaled as i16).to_le_bytes());
             }
 
             front.pos = to;
@@ -417,6 +479,8 @@ struct RenderDevice {
     latency_frames: usize,
     /// Momento da transmissão logo depois do último quadro entregue à saída.
     written_end_us: Option<u64>,
+    /// Volume do último bloco entregue (o próximo bloco parte dele, sem saltos).
+    current_gain: Option<f32>,
 }
 
 impl RenderDevice {
@@ -479,6 +543,7 @@ impl RenderDevice {
                 buffer_frames,
                 latency_frames,
                 written_end_us: None,
+                current_gain: None,
             })
         }
     }
@@ -486,7 +551,7 @@ impl RenderDevice {
     /// Entrega à saída o som que couber. Erro = a saída deixou de existir.
     /// Devolve o momento da transmissão que está saindo no alto-falante agora
     /// (None = nada tocando: a saída esvaziou).
-    fn feed(&mut self, queue: &mut PlaybackQueue) -> windows::core::Result<Option<u64>> {
+    fn feed(&mut self, queue: &mut PlaybackQueue, gain: f32) -> windows::core::Result<Option<u64>> {
         let padding = unsafe { self.client.GetCurrentPadding()? } as usize;
         let free = (self.buffer_frames as usize).saturating_sub(padding);
 
@@ -496,7 +561,9 @@ impl RenderDevice {
                 let data = self.render.GetBuffer(frames as u32)?;
                 // SAFETY: o Windows deu `frames` quadros de BLOCK_ALIGN bytes até o ReleaseBuffer
                 let out = std::slice::from_raw_parts_mut(data, frames * BLOCK_ALIGN as usize);
-                self.written_end_us = Some(queue.take_into(frames, out));
+                let gain_from = self.current_gain.unwrap_or(gain);
+                self.written_end_us = Some(queue.take_into(frames, out, gain_from, gain));
+                self.current_gain = Some(gain);
                 self.render.ReleaseBuffer(frames as u32, 0)?;
             }
         }

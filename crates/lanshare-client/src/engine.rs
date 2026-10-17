@@ -3,7 +3,7 @@
 //! Não imprime nada e não lê o teclado. Quem usa (a interface) manda comandos pelos
 //! métodos de `ClientEngine` e recebe o que acontece como eventos em JSON.
 
-use crate::audio_player::{AudioOutputSetting, AudioPlayer};
+use crate::audio_player::{AudioOutputSetting, AudioPlayer, AudioVolume};
 use crate::discovery;
 use crate::normalize_address;
 use crate::sync_clock::SyncClock;
@@ -64,6 +64,8 @@ pub struct ClientEngine {
     avatar: Mutex<Option<String>>,
     /// Por onde sai o som das transmissões (escolhido nas Configurações).
     audio_output: AudioOutputSetting,
+    /// Volume do som das transmissões (o botão sobre o vídeo).
+    audio_volume: AudioVolume,
 }
 
 impl ClientEngine {
@@ -85,6 +87,7 @@ impl ClientEngine {
             frame: FrameSlot::default(),
             avatar: Mutex::new(None),
             audio_output: AudioOutputSetting::default(),
+            audio_volume: AudioVolume::default(),
         })
     }
 
@@ -122,6 +125,11 @@ impl ClientEngine {
     /// Se já houver som tocando, ele muda de saída na hora.
     pub fn set_audio_output(&self, device_id: Option<String>) {
         self.audio_output.set(device_id);
+    }
+
+    /// Volume do som das transmissões (0 a 100) e mudo. Muda na hora, mesmo tocando.
+    pub fn set_volume(&self, percent: u32, muted: bool) {
+        self.audio_volume.set(percent, muted);
     }
 
     /// Procura salas na rede (~2 s, em segundo plano). O resultado chega no evento "rooms".
@@ -210,6 +218,7 @@ impl ClientEngine {
         let events = self.events.clone();
         let frame = self.frame.clone();
         let audio_output = self.audio_output.clone();
+        let audio_volume = self.audio_volume.clone();
 
         self.runtime.spawn(async move {
             let end = run_session(
@@ -221,6 +230,7 @@ impl ClientEngine {
                 events.clone(),
                 frame.clone(),
                 audio_output,
+                audio_volume,
             )
             .await;
 
@@ -370,6 +380,7 @@ async fn run_session(
     events: EventTx,
     frame: FrameSlot,
     audio_output: AudioOutputSetting,
+    audio_volume: AudioVolume,
 ) -> SessionEnd {
     send(&events, json!({ "type": "connecting", "address": address }));
 
@@ -486,7 +497,12 @@ async fn run_session(
             Message::Audio(audio_frame) => {
                 audio
                     .get_or_insert_with(|| {
-                        AudioPlayer::start(audio_output.clone(), cb_events.clone(), clock.clone())
+                        AudioPlayer::start(
+                            audio_output.clone(),
+                            audio_volume.clone(),
+                            cb_events.clone(),
+                            clock.clone(),
+                        )
                     })
                     .push(audio_frame);
             }
