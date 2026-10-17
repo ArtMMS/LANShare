@@ -28,7 +28,11 @@ public partial class MainWindow
             Margin = new Thickness(24),
         };
         _settingsView.CloseRequested += (_, _) => CloseSettings();
-        _settingsView.PreferencesChanged += (_, _) => ApplyStreamDefaults();
+        _settingsView.PreferencesChanged += (_, _) =>
+        {
+            ApplyStreamDefaults();
+            ApplyAudioOutput();
+        };
         _settingsView.RestartRequested += (_, _) => RestartForLanguage();
 
         _settingsOverlay = new Border
@@ -94,6 +98,13 @@ public partial class MainWindow
         if (_streaming) return;
         _resolutionBox.SelectedIndex = _preferences.StreamHeight == 720 ? 0 : 1;
         _fpsBox.SelectedIndex = _preferences.StreamFps == 15 ? 0 : 1;
+    }
+
+    /// Diz ao motor por onde sai o som das transmissões (só com o modo Client ligado).
+    /// Se já houver som tocando, ele muda de saída na hora.
+    private void ApplyAudioOutput()
+    {
+        if (_clientActive) NativeMethods.ClientSetAudioOutput(_preferences.AudioOutputDevice);
     }
 
     /// "Reiniciar agora" depois de trocar o idioma: abre o LANShare de novo e fecha este.

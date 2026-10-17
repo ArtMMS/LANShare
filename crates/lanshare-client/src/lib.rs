@@ -3,6 +3,7 @@
 //! A interface gráfica usa o `ClientEngine` (engine.rs) e a lista de saídas de áudio (audio_devices.rs).
 
 pub mod audio_devices;
+mod audio_player;
 mod decoder;
 mod discovery;
 mod engine;
@@ -366,8 +367,8 @@ fn handle_message(
         // Fomos nós: a conexão será encerrada em seguida pelo Host
         Message::Kicked { reason } => println!("[client] {reason}."),
 
-        // Avatares e fim de transmissão: o modo terminal não mostra
-        Message::UserAvatar { .. } | Message::StreamStopped => {}
+        // Avatares, som e fim de transmissão: o modo terminal não mostra nem toca
+        Message::UserAvatar { .. } | Message::Audio(_) | Message::StreamStopped => {}
 
         outra => println!("[client] Mensagem inesperada: {outra:?}"),
     }

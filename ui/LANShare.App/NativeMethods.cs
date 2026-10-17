@@ -103,6 +103,9 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_client_set_avatar(IntPtr pngBase64);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_client_set_audio_output(IntPtr deviceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_client_disconnect();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -318,6 +321,11 @@ internal static class NativeMethods
     /// O meu avatar (PNG em base64; null = sem avatar), enviado ao Host ao entrar numa sala.
     public static (bool Ok, string? Error) ClientSetAvatar(string? pngBase64) =>
         CallWithString(pngBase64 ?? "", lanshare_client_set_avatar);
+
+    /// Por onde sai o som das transmissões (o Id de AudioOutputDevices; null = padrão do Windows).
+    /// Se já houver som tocando, ele muda de saída na hora.
+    public static (bool Ok, string? Error) ClientSetAudioOutput(string? deviceId) =>
+        CallWithString(deviceId ?? "", lanshare_client_set_audio_output);
 
     public static bool ClientDisconnect() => lanshare_client_disconnect() != 0;
 

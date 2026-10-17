@@ -1,6 +1,6 @@
 //! Registro das conexões ativas do Host.
 
-use lanshare_core::protocol::{Message, UserInfo, VideoFrame};
+use lanshare_core::protocol::{AudioFrame, Message, UserInfo, VideoFrame};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -205,6 +205,22 @@ impl Registry {
 
             // Erro = a conexão já terminou; o frame é descartado e o contador desce sozinho
             let _ = entry.tx.send(Message::Video(frame));
+        }
+    }
+
+    /// Envia um pacote de áudio (Opus) a todos os Clients.
+    ///
+    /// O áudio é pequeno (~16 KB/s) e nunca é descartado aqui: um buraco no som incomoda
+    /// muito mais que um quadro de vídeo perdido. Quem está atrasado já perde vídeo.
+    pub fn broadcast_audio(&self, timestamp_us: u64, data: Arc<Vec<u8>>) {
+        let clients = self.inner.clients.lock().unwrap();
+        for entry in clients.values() {
+            let frame = AudioFrame {
+                timestamp_us,
+                data: data.clone(),
+            };
+            // Erro = a conexão já terminou; não tem problema
+            let _ = entry.tx.send(Message::Audio(frame));
         }
     }
 

@@ -1,6 +1,8 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
+//! O som vai junto, numa thread própria (audio_stream.rs), com o mesmo relógio da imagem.
 //! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
 
+use crate::audio_stream::AudioStreamer;
 use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
 use crate::events::{EventSender, HostEvent};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
@@ -44,6 +46,8 @@ pub struct StreamHandle {
     thread: Option<JoinHandle<()>>,
     events: EventSender,
     switch_tx: Sender<SwitchRequest>,
+    /// O som da transmissão (Option só para poder tirá-lo no stop).
+    audio: Option<AudioStreamer>,
 }
 
 impl StreamHandle {
@@ -61,11 +65,16 @@ impl StreamHandle {
         let thread_preview = preview.clone();
         let (switch_tx, switch_rx) = mpsc::channel();
 
+        // Relógio comum da imagem e do som (os timestamps dos dois contam a partir daqui)
+        let started = Instant::now();
+        let audio = AudioStreamer::start(registry.clone(), started, events.clone());
+
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
             let result = run(
                 registry,
                 thread_stop,
+                started,
                 settings,
                 target,
                 switch_rx,
@@ -83,6 +92,7 @@ impl StreamHandle {
             thread: Some(thread),
             events,
             switch_tx,
+            audio: Some(audio),
         }
     }
 
@@ -124,6 +134,10 @@ impl StreamHandle {
             let _ = thread.join();
         }
         self.events.debug("stop: a thread terminou");
+
+        if let Some(audio) = self.audio.take() {
+            audio.stop();
+        }
     }
 }
 
@@ -143,6 +157,7 @@ fn canvas_size(height: u32) -> (u32, u32) {
 fn run(
     registry: Registry,
     stop: Arc<AtomicBool>,
+    started: Instant,
     settings: StreamSettings,
     target: CaptureTarget,
     switch_rx: Receiver<SwitchRequest>,
@@ -157,7 +172,6 @@ fn run(
 
     let (canvas_w, canvas_h) = canvas_size(settings.height);
 
-    let started = Instant::now();
     let mut report_start = Instant::now();
     let mut packets: u32 = 0;
     let mut bytes: u64 = 0;

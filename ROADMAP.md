@@ -80,11 +80,11 @@
 
 ## Audio Streaming
 
- Capture system audio
- Select the audio output device (default: Windows default device)
- Transmit audio to connected users
- Synchronize audio with the streamed image
- Individual transmission volume control for each user
+ [x] Capture system audio
+ [x] Select the audio output device (default: Windows default device)
+ [x] Transmit audio to connected users
+ [ ] Synchronize audio with the streamed image
+ [ ] Individual transmission volume control for each user
 
 ---
 

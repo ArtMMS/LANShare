@@ -18,6 +18,7 @@ public partial class MainWindow
     private const string LeaveGlyph = "\uE72B";
     private const string KickGlyph = "\uE7BA";
     private const string StreamGlyph = "\uE7F4";
+    private const string AudioErrorGlyph = "\uE74F";
 
     private StackPanel _toastHost = null!;
 

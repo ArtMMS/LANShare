@@ -595,6 +595,7 @@ public partial class MainWindow : Window
 
         _clientActive = true;
         NativeMethods.ClientSetAvatar(AvatarStore.ExportForNetwork()); // vai ao Host ao entrar numa sala
+        ApplyAudioOutput(); // por onde sai o som das transmissões
         ResetClientSession();
         _roomsList.ItemsSource = null;
         _roomsSignature = null;
@@ -831,6 +832,11 @@ public partial class MainWindow : Window
                         _videoSize = null;
                         HidePreview(Loc.T("Stream_Stopped"));
                         RefreshClientInfo();
+                        break;
+
+                    case "audio_error":
+                        // O vídeo continua; só avisa (uma vez por problema) que o som não está saindo
+                        Notify(e.GetProperty("error").GetString() ?? Loc.T("Client_AudioError"), AudioErrorGlyph);
                         break;
 
                     case "video_error":

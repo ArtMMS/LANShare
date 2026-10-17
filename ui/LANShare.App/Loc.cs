@@ -192,6 +192,7 @@ internal static class Loc
         ["Client_WaitingStream"] = new[] { "Conectado. Aguardando a transmissão do Host.", "Connected. Waiting for the Host's stream.", "Conectado. Esperando la transmisión del Host." },
         ["Client_KickedDefault"] = new[] { "Você foi removido pelo Host.", "You were removed by the Host.", "El Host te ha expulsado de la sala." },
         ["Client_VideoError"] = new[] { "Erro no vídeo.", "Video error.", "Error de vídeo." },
+        ["Client_AudioError"] = new[] { "Erro no som da transmissão.", "Stream audio error.", "Error en el sonido de la transmisión." },
         ["Client_Rejected"] = new[] { "Entrada recusada: {0}", "Join refused: {0}", "Entrada rechazada: {0}" },
         ["Client_ConnectFailed"] = new[] { "Não foi possível conectar.", "Could not connect.", "No se pudo conectar." },
         ["Client_DisconnectedReason"] = new[] { "Desconectado: {0}", "Disconnected: {0}", "Desconectado: {0}" },

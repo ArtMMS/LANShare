@@ -3,6 +3,7 @@
 //! Não imprime nada e não lê o teclado. Quem usa (a interface) manda comandos pelos
 //! métodos de `ClientEngine` e recebe o que acontece como eventos em JSON.
 
+use crate::audio_player::{AudioOutputSetting, AudioPlayer};
 use crate::discovery;
 use crate::normalize_address;
 use crate::video::{FrameSlot, VideoPipeline};
@@ -60,6 +61,8 @@ pub struct ClientEngine {
     frame: FrameSlot,
     /// O meu avatar (PNG em base64), enviado ao entrar numa sala. None = sem avatar.
     avatar: Mutex<Option<String>>,
+    /// Por onde sai o som das transmissões (escolhido nas Configurações).
+    audio_output: AudioOutputSetting,
 }
 
 impl ClientEngine {
@@ -80,6 +83,7 @@ impl ClientEngine {
             scanning: Arc::new(AtomicBool::new(false)),
             frame: FrameSlot::default(),
             avatar: Mutex::new(None),
+            audio_output: AudioOutputSetting::default(),
         })
     }
 
@@ -111,6 +115,12 @@ impl ClientEngine {
             });
         }
         Ok(())
+    }
+
+    /// Escolhe a saída do som das transmissões (id do dispositivo; None = padrão do Windows).
+    /// Se já houver som tocando, ele muda de saída na hora.
+    pub fn set_audio_output(&self, device_id: Option<String>) {
+        self.audio_output.set(device_id);
     }
 
     /// Procura salas na rede (~2 s, em segundo plano). O resultado chega no evento "rooms".
@@ -198,6 +208,7 @@ impl ClientEngine {
         let session_slot = self.session.clone();
         let events = self.events.clone();
         let frame = self.frame.clone();
+        let audio_output = self.audio_output.clone();
 
         self.runtime.spawn(async move {
             let end = run_session(
@@ -208,6 +219,7 @@ impl ClientEngine {
                 outgoing_rx,
                 events.clone(),
                 frame.clone(),
+                audio_output,
             )
             .await;
 
@@ -356,6 +368,7 @@ async fn run_session(
     outgoing_rx: mpsc::UnboundedReceiver<Message>,
     events: EventTx,
     frame: FrameSlot,
+    audio_output: AudioOutputSetting,
 ) -> SessionEnd {
     send(&events, json!({ "type": "connecting", "address": address }));
 
@@ -438,6 +451,9 @@ async fn run_session(
 
     // O decodificador só nasce quando chegar o primeiro pacote de vídeo
     let mut video: Option<VideoPipeline> = None;
+
+    // O som também só nasce quando chegar o primeiro pacote de áudio
+    let mut audio: Option<AudioPlayer> = None;
     let mut stats = VideoStats::new();
     let cb_events = events.clone();
     let cb_frame = frame.clone();
@@ -458,9 +474,17 @@ async fn run_session(
                     })
                     .push(video_frame);
             }
+            Message::Audio(audio_frame) => {
+                audio
+                    .get_or_insert_with(|| {
+                        AudioPlayer::start(audio_output.clone(), cb_events.clone())
+                    })
+                    .push(audio_frame);
+            }
             Message::StreamStopped => {
-                // O Host parou de transmitir: o decodificador antigo termina sozinho
+                // O Host parou de transmitir: o decodificador e o som antigos terminam sozinhos
                 video = None;
+                audio = None;
                 // Imagens que ainda estavam sendo decodificadas são descartadas
                 generation = cb_frame.begin_session();
                 stats = VideoStats::new();

@@ -2,6 +2,7 @@
 //! Formato na rede: [4 bytes: tamanho N][1 byte: tipo][N-1 bytes: conteúdo]
 //!   tipo 0 = mensagem em JSON
 //!   tipo 1 = pacote de vídeo, em binário: [1 byte: keyframe][8 bytes: timestamp em µs][bytes H.264]
+//!   tipo 2 = pacote de áudio, em binário: [8 bytes: timestamp em µs][bytes Opus]
 
 use serde::{Deserialize, Serialize};
 use std::io;
@@ -11,7 +12,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -36,6 +37,7 @@ pub const REJECT_PASSWORD_TIMEOUT: &str = "password_timeout";
 /// Tipos de mensagem na rede.
 const KIND_JSON: u8 = 0;
 const KIND_VIDEO: u8 = 1;
+const KIND_AUDIO: u8 = 2;
 
 /// Tamanho máximo de uma mensagem JSON (1 MiB).
 const MAX_JSON_SIZE: usize = 1024 * 1024;
@@ -45,6 +47,12 @@ const MAX_VIDEO_SIZE: usize = 8 * 1024 * 1024;
 
 /// Cabeçalho do vídeo: 1 byte (keyframe) + 8 bytes (timestamp).
 const VIDEO_HEADER_SIZE: usize = 9;
+
+/// Tamanho máximo dos bytes de áudio de um pacote (um pacote Opus tem no máximo ~1,3 KB).
+const MAX_AUDIO_SIZE: usize = 64 * 1024;
+
+/// Cabeçalho do áudio: 8 bytes (timestamp).
+const AUDIO_HEADER_SIZE: usize = 8;
 
 /// Um usuário conectado, como os Clients o enxergam.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +90,16 @@ impl VideoFrame {
         self.queue_ticket = QueueTicket(Some(counter));
         self
     }
+}
+
+/// Um pacote de áudio Opus (Host -> Clients): 20 ms de som estéreo a 48 kHz. Não passa pelo JSON.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioFrame {
+    /// Quando o som tocou no Host, em microssegundos desde o início da transmissão
+    /// (o mesmo relógio do vídeo).
+    pub timestamp_us: u64,
+    /// Bytes Opus (compartilhados entre os Clients, sem copiar).
+    pub data: Arc<Vec<u8>>,
 }
 
 /// Diminui o contador da fila quando o frame some. Copiar o frame NÃO copia o ticket.
@@ -175,14 +193,21 @@ pub enum Message {
     /// Não vai em JSON: tem formato binário próprio (ver write_message).
     #[serde(skip)]
     Video(VideoFrame),
+
+    /// Host -> Clients: um pacote de áudio do som do PC.
+    /// Não vai em JSON: tem formato binário próprio (ver write_message).
+    #[serde(skip)]
+    Audio(AudioFrame),
 }
 
 pub async fn write_message<W>(writer: &mut W, message: &Message) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    if let Message::Video(frame) = message {
-        return write_video(writer, frame).await;
+    match message {
+        Message::Video(frame) => return write_video(writer, frame).await,
+        Message::Audio(frame) => return write_audio(writer, frame).await,
+        _ => {}
     }
 
     let payload = serde_json::to_vec(message)
@@ -226,6 +251,33 @@ where
     buffer.extend_from_slice(&(body_len as u32).to_be_bytes());
     buffer.push(KIND_VIDEO);
     buffer.push(frame.keyframe as u8);
+    buffer.extend_from_slice(&frame.timestamp_us.to_be_bytes());
+    buffer.extend_from_slice(data);
+
+    writer.write_all(&buffer).await?;
+    writer.flush().await?;
+
+    Ok(())
+}
+
+async fn write_audio<W>(writer: &mut W, frame: &AudioFrame) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let data = frame.data.as_slice();
+
+    if data.len() > MAX_AUDIO_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "pacote de audio grande demais",
+        ));
+    }
+
+    let body_len = 1 + AUDIO_HEADER_SIZE + data.len();
+
+    let mut buffer = Vec::with_capacity(4 + body_len);
+    buffer.extend_from_slice(&(body_len as u32).to_be_bytes());
+    buffer.push(KIND_AUDIO);
     buffer.extend_from_slice(&frame.timestamp_us.to_be_bytes());
     buffer.extend_from_slice(data);
 
@@ -284,6 +336,25 @@ where
                 timestamp_us,
                 Arc::new(data),
             )))
+        }
+
+        KIND_AUDIO => {
+            if body_len < AUDIO_HEADER_SIZE || body_len - AUDIO_HEADER_SIZE > MAX_AUDIO_SIZE {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "tamanho de audio invalido",
+                ));
+            }
+
+            let timestamp_us = reader.read_u64().await?;
+
+            let mut data = vec![0u8; body_len - AUDIO_HEADER_SIZE];
+            reader.read_exact(&mut data).await?;
+
+            Ok(Message::Audio(AudioFrame {
+                timestamp_us,
+                data: Arc::new(data),
+            }))
         }
 
         _ => Err(io::Error::new(
@@ -349,6 +420,10 @@ mod tests {
             Message::Bye,
             Message::Video(VideoFrame::new(true, 123_456, Arc::new(vec![0, 0, 0, 1, 0x65, 9, 8, 7]))),
             Message::Video(VideoFrame::new(false, 987_654, Arc::new(vec![1, 2, 3]))),
+            Message::Audio(AudioFrame {
+                timestamp_us: 20_000,
+                data: Arc::new(vec![0xFC, 0xFF, 0xFE]),
+            }),
         ];
 
         for enviada in mensagens {

@@ -34,3 +34,6 @@ if-addrs = "0.12"
 
 # rpassword: lê a senha sem mostrar o que é digitado.
 rpassword = "7"
+
+# opus: comprime o som da transmissão (libopus, compilada junto; precisa do CMake no PATH).
+opus = "0.4"

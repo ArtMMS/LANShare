@@ -485,6 +485,18 @@ pub extern "C" fn lanshare_client_set_avatar(png_base64: *const c_char) -> *mut 
     with_client(|engine| engine.set_avatar(avatar))
 }
 
+/// Escolhe por onde sai o som das transmissões: o "id" da lista de `lanshare_audio_output_devices`.
+/// Vazio ou NULL = padrão do Windows (acompanha se o padrão mudar). Se já houver som tocando,
+/// ele muda de saída na hora.
+#[no_mangle]
+pub extern "C" fn lanshare_client_set_audio_output(device_id: *const c_char) -> *mut c_char {
+    let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
+    with_client(|engine| {
+        engine.set_audio_output(device_id);
+        Ok(())
+    })
+}
+
 /// Desconecta da sala (ou cancela a tentativa). O fim chega no evento "disconnected".
 /// Retorna 1 se havia conexão, 0 se não.
 #[no_mangle]

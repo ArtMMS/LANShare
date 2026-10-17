@@ -1,8 +1,9 @@
 //! Dispositivos de saída de áudio (alto-falantes, fones...) para a escolha nas Configurações.
-//! É por um deles que o Client toca o som da transmissão que está assistindo.
+//! É por um deles que o Client toca o som da transmissão que está assistindo (audio_player.rs).
 
 use lanshare_core::i18n::tr;
 use std::ffi::c_void;
+use windows::core::PCWSTR;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
     eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
@@ -35,10 +36,10 @@ pub fn list_output_devices() -> Result<Vec<OutputDevice>, String> {
 }
 
 /// Liga o COM nesta thread enquanto existir.
-struct ComGuard;
+pub(crate) struct ComGuard;
 
 impl ComGuard {
-    fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> Result<Self, String> {
         unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
             .ok()
             .map_err(|e| format!("CoInitializeEx: {e}"))?;
@@ -65,16 +66,15 @@ fn enumerate() -> Result<Vec<OutputDevice>, String> {
     };
 
     unsafe {
-        let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(fail)?;
+        let devices_enum = enumerator().map_err(fail)?;
 
         // Sem nenhum dispositivo de saída, o Windows não tem padrão: não é erro
-        let default_id = enumerator
+        let default_id = devices_enum
             .GetDefaultAudioEndpoint(eRender, eConsole)
             .ok()
             .and_then(|device| device_id(&device));
 
-        let collection = enumerator
+        let collection = devices_enum
             .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
             .map_err(fail)?;
         let count = collection.GetCount().map_err(fail)?;
@@ -108,8 +108,35 @@ fn enumerate() -> Result<Vec<OutputDevice>, String> {
     }
 }
 
+/// Cria o enumerador de dispositivos do Windows (precisa do COM ligado na thread).
+pub(crate) fn enumerator() -> windows::core::Result<IMMDeviceEnumerator> {
+    unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
+}
+
+/// A saída que deve tocar o som agora: a escolhida, se estiver conectada;
+/// senão (ou sem escolha), a padrão do Windows. None = o PC não tem nenhuma saída.
+pub(crate) fn resolve_output(
+    enumerator: &IMMDeviceEnumerator,
+    chosen: Option<&str>,
+) -> Option<(String, IMMDevice)> {
+    if let Some(id) = chosen {
+        let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+        let device = unsafe { enumerator.GetDevice(PCWSTR(wide.as_ptr())) }.ok();
+        if let Some(device) = device {
+            let active = unsafe { device.GetState() }.is_ok_and(|state| state == DEVICE_STATE_ACTIVE);
+            if active {
+                return Some((id.to_string(), device));
+            }
+        }
+    }
+
+    let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }.ok()?;
+    let id = device_id(&device)?;
+    Some((id, device))
+}
+
 /// Identificador do dispositivo (o texto que o Windows usa para achá-lo de novo).
-fn device_id(device: &IMMDevice) -> Option<String> {
+pub(crate) fn device_id(device: &IMMDevice) -> Option<String> {
     unsafe {
         let raw = device.GetId().ok()?;
         let id = raw.to_string().ok();
