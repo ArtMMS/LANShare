@@ -4,7 +4,7 @@
 
 ![Status](https://img.shields.io/badge/status-active%20development-green)
 ![Version](https://img.shields.io/badge/version-v1.2-lightblue)
-[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPLv3-lightgrey)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
 LANShare is a local network application designed to share a computer's screen with other devices in real time. It aims to provide low-latency screen streaming over a LAN connection, with support for multiple users, multiple monitors, and specific window sharing.
@@ -38,11 +38,15 @@ Looking for an older version? Check the [GitHub Releases](../../releases) page.
 
 ## 📋 License
 
-LANShare is released under the **MIT License**.
+Copyright (C) 2026 ArtMMS
 
-You are free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the software, as long as the copyright notice and license text are included.
+LANShare is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License v3.0** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-See the [LICENSE](LICENSE) file for the complete license terms.
+In short: you are free to use, study, modify, and distribute LANShare, including commercially. However, if you distribute a modified version or a work based on it, you must release its source code under the same GPLv3 license and keep the copyright notices.
+
+LANShare is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY. See the [LICENSE](LICENSE) file for the complete license terms.
+
+> Versions released before v1.2.x remain available under the MIT License.
 
 ---
 
