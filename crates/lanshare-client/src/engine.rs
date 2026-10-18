@@ -142,13 +142,13 @@ impl ClientEngine {
 
     /// Toca um efeito sonoro para a sala: vai ao Host, que repassa a todos (a interface já tocou ele aqui).
     /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
-    /// Erro = não está numa sala, ou cedo demais desde o último som (anti-spam).
+    /// Erro = não está numa sala, ou o som anterior ainda está tocando (anti-spam: um som por vez).
     pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) -> Result<(), String> {
         let allowed = self
             .sfx_cooldown
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .try_start(sfx::MIN_INTERVAL);
+            .try_start(sfx::play_time(packets.len()), sfx::COOLDOWN_SLACK);
         if !allowed {
             return Err(sfx::too_soon_message());
         }
@@ -746,5 +746,7 @@ impl VideoStats {
         Some(report)
     }
 }
+
+
 
 

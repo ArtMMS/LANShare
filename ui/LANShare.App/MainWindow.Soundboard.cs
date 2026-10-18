@@ -20,6 +20,8 @@ namespace LANShare.App;
 /// - ícone de volume no canto do painel: abre um slider deitado, por cima do painel;
 /// - "Adicionar som" abre uma janela (como a do avatar) para escolher/arrastar o arquivo e dar um nome;
 /// - tocar um som toca aqui e manda para a sala: todos ouvem (cada um no seu volume dos efeitos);
+/// - anti-spam: um som por vez. O próximo só pode ser tocado quando o anterior terminar
+///   (o mesmo que o SfxCooldown do sfx.rs; o Host também confere e descarta o que chegar antes);
 /// - quem toca um som fica com a borda azul e um 🎉 na lista de usuários de todos, enquanto o som toca.
 public partial class MainWindow
 {
@@ -47,10 +49,6 @@ public partial class MainWindow
 
     /// O slider do volume some este tempo depois de o mouse sair dele (se não estiver fixado).
     private static readonly TimeSpan SfxVolumeHideDelay = TimeSpan.FromMilliseconds(350);
-
-    /// Anti-spam: depois de tocar um som para a sala, espera este tempo antes do próximo
-    /// (igual ao COOLDOWN do sfx.rs; o Host também confere e descarta o que chegar cedo demais).
-    private static readonly TimeSpan SfxCooldown = TimeSpan.FromSeconds(1.5);
 
     /// Opacidade dos sons enquanto o anti-spam está contando.
     private const double SfxCoolingOpacity = 0.45;
@@ -105,6 +103,12 @@ public partial class MainWindow
     private ProgressBar _sfxCooldownBar = null!;
     private readonly DispatcherTimer _sfxCooldownTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
     private DateTime _sfxCooldownUntil = DateTime.MinValue;
+
+    /// Duração do som que está segurando o anti-spam (a barrinha esvazia ao longo dela).
+    private TimeSpan _sfxCooldownTotal = TimeSpan.Zero;
+
+    /// true = um som está sendo carregado para a sala (ainda sem a duração para o anti-spam).
+    private bool _sfxStarting;
 
     private List<SfxEntry> _sfxEntries = new();
     private bool _sfxPanelOpen;
@@ -597,11 +601,13 @@ public partial class MainWindow
     {
         var device = _preferences.AudioOutputDevice;
 
-        // Anti-spam: só vale para o que vai para a sala ("Ouvir só para mim" é livre)
+        // Anti-spam: só vale para o que vai para a sala ("Ouvir só para mim" é livre).
+        // Um som por vez: enquanto o anterior toca (ou o atual carrega), os cliques são ignorados.
         if (!onlyForMe)
         {
-            if (SfxCoolingDown) return;
-            StartSfxCooldown();
+            if (SfxCoolingDown || _sfxStarting) return;
+            _sfxStarting = true;
+            _sfxGrid.Opacity = SfxCoolingOpacity;
         }
 
         float[] samples;
@@ -612,8 +618,19 @@ public partial class MainWindow
         catch (Exception ex)
         {
             ShowSfxError(ex is SfxException ? ex.Message : Loc.F("Sfx_PlayError", ex.Message));
-            if (!onlyForMe) StopSfxCooldown(); // nada tocou: pode tentar de novo na hora
+            if (!onlyForMe)
+            {
+                _sfxStarting = false; // nada tocou: pode tentar de novo na hora
+                RefreshSfxCooldown();
+            }
             return;
+        }
+
+        // O próximo som só pode sair quando este terminar
+        if (!onlyForMe)
+        {
+            _sfxStarting = false;
+            StartSfxCooldown(SfxDecoder.DurationOf(samples));
         }
 
         // Vai para a sala ao mesmo tempo em que começa a tocar aqui
@@ -638,20 +655,22 @@ public partial class MainWindow
 
     private bool SfxCoolingDown => DateTime.UtcNow < _sfxCooldownUntil;
 
-    /// Começa a contar o 1,5 s: os sons ficam apagados e a barrinha vai esvaziando.
-    private void StartSfxCooldown()
+    /// Começa a contar a duração do som que acabou de ser tocado: os sons ficam apagados
+    /// e a barrinha vai esvaziando até ele terminar.
+    private void StartSfxCooldown(TimeSpan soundDuration)
     {
-        _sfxCooldownUntil = DateTime.UtcNow + SfxCooldown;
+        if (soundDuration <= TimeSpan.Zero)
+        {
+            RefreshSfxCooldown();
+            return;
+        }
+
+        _sfxCooldownTotal = soundDuration;
+        _sfxCooldownUntil = DateTime.UtcNow + soundDuration;
         _sfxGrid.Opacity = SfxCoolingOpacity;
         _sfxCooldownBar.Value = 100;
         _sfxCooldownBar.IsVisible = true;
         _sfxCooldownTimer.Start();
-    }
-
-    private void StopSfxCooldown()
-    {
-        _sfxCooldownUntil = DateTime.MinValue;
-        RefreshSfxCooldown();
     }
 
     private void RefreshSfxCooldown()
@@ -661,11 +680,11 @@ public partial class MainWindow
         {
             _sfxCooldownTimer.Stop();
             _sfxCooldownBar.IsVisible = false;
-            _sfxGrid.Opacity = 1;
+            _sfxGrid.Opacity = _sfxStarting ? SfxCoolingOpacity : 1;
             return;
         }
 
-        _sfxCooldownBar.Value = left / SfxCooldown * 100;
+        _sfxCooldownBar.Value = _sfxCooldownTotal > TimeSpan.Zero ? left / _sfxCooldownTotal * 100 : 0;
     }
 
     /// Manda o som para a sala (o Host manda a todos; o Client manda ao Host, que repassa).
@@ -1435,3 +1454,5 @@ public partial class MainWindow
         return memory.ToArray();
     }
 }
+
+

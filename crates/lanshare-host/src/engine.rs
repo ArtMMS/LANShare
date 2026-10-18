@@ -220,13 +220,13 @@ impl HostEngine {
 
     /// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele aqui).
     /// `packets`: o som já comprimido com `sfx::encode` (comprima antes, fora de qualquer lock).
-    /// Erro = cedo demais desde o último som (anti-spam).
+    /// Erro = o som anterior do Host ainda está tocando (anti-spam: um som por vez).
     pub fn play_sfx(&self, name: &str, packets: Vec<Vec<u8>>) -> Result<(), String> {
         let allowed = self
             .sfx_cooldown
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .try_start(sfx::MIN_INTERVAL);
+            .try_start(sfx::play_time(packets.len()), sfx::COOLDOWN_SLACK);
         if !allowed {
             return Err(sfx::too_soon_message());
         }
@@ -567,8 +567,8 @@ async fn handle_client(
             conn_events.emit(HostEvent::UserAvatar { id, png_base64 });
         }
         ConnectionEvent::Message(Message::Sfx(frame)) => {
-            // Cedo demais desde o último som dele: descarta (ninguém ouve)
-            if !sfx_cooldown.try_start(sfx::MIN_INTERVAL) {
+            // O som anterior dele ainda está tocando: descarta (ninguém ouve)
+            if !sfx_cooldown.try_start(sfx::play_time(frame.packets.len()), sfx::COOLDOWN_SLACK) {
                 return;
             }
 
@@ -834,5 +834,7 @@ fn local_addresses(events: &EventSender) -> Vec<LocalAddress> {
         }
     }
 }
+
+
 
 

@@ -97,6 +97,13 @@
 
 ---
 
+ # V1.2.1 — Soundboard fixes
+
+- [x] One sound at a time: the cooldown lasts as long as the sound that was just played
+- [x] Sound effects can be up to 10 seconds long
+
+---
+
 ## Future Updates
  Optimize
  Support 1440p (Quad HD)
@@ -106,3 +113,4 @@
  Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
  Allow multiples screen transmitions and notify who is showing the screen on the user feed
  Linux Port
+

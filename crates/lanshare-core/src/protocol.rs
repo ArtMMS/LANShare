@@ -14,7 +14,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 11;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -57,8 +57,8 @@ const MAX_AUDIO_SIZE: usize = 64 * 1024;
 /// Cabeçalho do áudio: 8 bytes (timestamp).
 const AUDIO_HEADER_SIZE: usize = 8;
 
-/// Maior efeito sonoro aceito: 5,2 s em pacotes Opus de 20 ms.
-pub const MAX_SFX_PACKETS: usize = 260;
+/// Maior efeito sonoro aceito: 10,4 s em pacotes Opus de 20 ms.
+pub const MAX_SFX_PACKETS: usize = 520;
 
 /// Maior pacote Opus de um efeito sonoro (o Opus nunca passa de 1275 bytes).
 pub const MAX_SFX_PACKET_BYTES: usize = 1500;
@@ -66,8 +66,8 @@ pub const MAX_SFX_PACKET_BYTES: usize = 1500;
 /// Maior nome de efeito sonoro na rede, em bytes UTF-8 (o nome tem no máximo 32 caracteres).
 const MAX_SFX_NAME_BYTES: usize = 256;
 
-/// Tamanho máximo de um efeito sonoro na rede (um som de 5 s fica perto de 60 KB).
-const MAX_SFX_SIZE: usize = 512 * 1024;
+/// Tamanho máximo de um efeito sonoro na rede (um som de 10 s fica perto de 120 KB).
+const MAX_SFX_SIZE: usize = 1024 * 1024;
 
 /// Um usuário conectado, como os Clients o enxergam.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -679,5 +679,7 @@ mod tests {
         assert_eq!(contador.load(Ordering::Relaxed), 0);
     }
 }
+
+
 
 

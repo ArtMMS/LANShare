@@ -3,7 +3,7 @@
 ![LANShare Logo](assets/logo.png)
 
 ![Status](https://img.shields.io/badge/status-active%20development-green)
-![Version](https://img.shields.io/badge/version-v1.2-lightblue)
+![Version](https://img.shields.io/badge/version-v1.2.1-lightblue)
 [![License](https://img.shields.io/badge/license-GPLv3-lightgrey)](LICENSE)
 [![Support LANShare](https://img.shields.io/badge/Support%20LANShare-0078D4?style=flat&logo=github&logoColor=white)](#-support-lanshare)
 
@@ -20,8 +20,8 @@ The project is being developed with performance, stability, and ease of use in m
 
 
 <p align="center">
-  <a href="https://github.com/ArtMMS/LANShare/releases/download/v1.2.0/LANShare.zip">
-    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.2.0-0078D4?style=for-the-badge" alt="Download LANShare v1.2.0">
+  <a href="https://github.com/ArtMMS/LANShare/releases/download/v1.2.1/LANShare.zip">
+    <img src="https://img.shields.io/badge/⬇%20Download-LANShare%20v1.2.1-0078D4?style=for-the-badge" alt="Download LANShare v1.2.1">
   </a>
   <a href="https://lanshareapp.com/">
     <img src="https://img.shields.io/badge/🌐%20Official%20Website-8A2BE2?style=for-the-badge" alt="Official Website">
@@ -58,3 +58,4 @@ Your support helps with development, maintenance, testing, and future improvemen
 
 [![Buy Me a Coffee](https://img.shields.io/badge/☕-Buy%20Me%20a%20Coffee-FF5E5B?style=flat&logo=ko-fi&logoColor=white)](https://ko-fi.com/artmms)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-LANShare-2563EB?logo=github&logoColor=white)](https://github.com/sponsors/ArtMMS)
+

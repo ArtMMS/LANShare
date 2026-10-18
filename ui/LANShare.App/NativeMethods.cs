@@ -370,8 +370,8 @@ internal static class NativeMethods
 
     // ───────────── Efeitos sonoros ─────────────
 
-    /// Maior efeito sonoro, em amostras float intercaladas (igual ao MAX_SAMPLES do sfx.rs: 5,2 s).
-    public const int SfxMaxSamples = 260 * 960 * 2;
+    /// Maior efeito sonoro, em amostras float intercaladas (igual ao MAX_SAMPLES do sfx.rs: 10,4 s).
+    public const int SfxMaxSamples = 520 * 960 * 2;
 
     /// Buffer reaproveitado para receber os sons (cada busca copia só o tamanho certo).
     private static readonly float[] SfxBuffer = new float[SfxMaxSamples];
@@ -447,5 +447,7 @@ internal static class NativeMethods
 
 /// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
 internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);
+
+
 
 

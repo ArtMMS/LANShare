@@ -31,8 +31,8 @@ internal sealed class SfxException(string message, Exception? inner = null) : Ex
 /// Adicionar tem duas etapas: Check (confere o arquivo) e Add (grava com o nome escolhido).
 internal static class SfxStore
 {
-    /// Tamanho máximo do arquivo ao adicionar (um .wav de 5 s em 48 kHz tem ~1 MB).
-    public const long MaxFileBytes = 2 * 1024 * 1024;
+    /// Tamanho máximo do arquivo ao adicionar (um .wav de 10 s em 48 kHz / 16 bits tem ~1,9 MB).
+    public const long MaxFileBytes = 4 * 1024 * 1024;
 
     /// Tamanho máximo do nome, em caracteres "visíveis" (um emoji conta como um).
     public const int MaxNameLength = 32;
@@ -250,3 +250,4 @@ internal static class SfxStore
         }
     }
 }
+

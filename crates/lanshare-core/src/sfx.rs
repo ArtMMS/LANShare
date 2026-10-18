@@ -1,7 +1,7 @@
 //! Efeitos sonoros (soundboard), compartilhado entre o Host e o Client.
 //!
 //! - Quem toca: a interface entrega o som já decodificado (PCM float, 48 kHz, estéreo)
-//!   e `encode` comprime em pacotes Opus de 20 ms para ir pela rede (um som de 5 s fica com ~60 KB).
+//!   e `encode` comprime em pacotes Opus de 20 ms para ir pela rede (um som de 10 s fica com ~120 KB).
 //! - Quem recebe: o som chega ainda comprimido e fica guardado no `SfxInbox` até a interface
 //!   buscar com `take`, que descomprime (fora da conexão: a rede nunca espera a decodificação).
 
@@ -12,13 +12,13 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-/// Anti-spam: cada pessoa toca no máximo um som a cada 1,5 s. A interface (C#) espera este tempo
-/// entre um som e outro: mantenha igual ao SfxCooldown do MainWindow.Soundboard.cs.
-pub const COOLDOWN: Duration = Duration::from_millis(1500);
-
-/// O que o motor de fato confere: um pouco menos que o COOLDOWN, porque dois sons enviados
-/// com 1,5 s de diferença podem chegar mais perto um do outro pela rede.
-pub const MIN_INTERVAL: Duration = Duration::from_millis(1250);
+/// Anti-spam: cada pessoa toca um som por vez. O próximo só pode sair quando o anterior
+/// terminar de tocar (o tempo de espera é a duração do som que acabou de ser tocado).
+/// A interface (C#) faz a mesma conta no MainWindow.Soundboard.cs.
+///
+/// Folga que o motor dá na conferência: dois sons enviados um logo depois do outro podem
+/// chegar mais perto um do outro pela rede (e o último pacote é completado com silêncio).
+pub const COOLDOWN_SLACK: Duration = Duration::from_millis(250);
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const CHANNELS: usize = 2;
@@ -26,7 +26,10 @@ pub const CHANNELS: usize = 2;
 /// Amostras (intercaladas) de um pacote Opus de 20 ms.
 const FRAME_SAMPLES: usize = 960 * CHANNELS;
 
-/// Maior som aceito, em amostras intercaladas (5,2 s). A interface (C#) reserva este tamanho: mantenha igual.
+/// Duração de cada pacote Opus.
+const FRAME_DURATION: Duration = Duration::from_millis(20);
+
+/// Maior som aceito, em amostras intercaladas (10,4 s). A interface (C#) reserva este tamanho: mantenha igual.
 pub const MAX_SAMPLES: usize = MAX_SFX_PACKETS * FRAME_SAMPLES;
 
 /// Tamanho máximo do nome (em caracteres).
@@ -55,9 +58,9 @@ pub fn encode(pcm: &[f32]) -> Result<Vec<Vec<u8>>, String> {
     }
     if pcm.len() > MAX_SAMPLES {
         return Err(tr(
-            "O som é longo demais (máximo de 5 segundos).",
-            "The sound is too long (5 seconds max).",
-            "El sonido es demasiado largo (máximo 5 segundos).",
+            "O som é longo demais (máximo de 10 segundos).",
+            "The sound is too long (10 seconds max).",
+            "El sonido es demasiado largo (máximo 10 segundos).",
         )
         .to_string());
     }
@@ -133,30 +136,40 @@ pub fn clean_name(raw: &str) -> String {
     name.trim().to_string()
 }
 
-/// Conta o tempo desde o último som de uma pessoa (anti-spam).
+/// Quanto tempo um som leva para tocar, pela quantidade de pacotes Opus (20 ms cada).
+pub fn play_time(packet_count: usize) -> Duration {
+    FRAME_DURATION * packet_count.min(MAX_SFX_PACKETS) as u32
+}
+
+/// Anti-spam de uma pessoa: um som por vez. Guarda até quando o último som dela está tocando.
 #[derive(Debug, Default)]
 pub struct SfxCooldown {
-    last: Option<Instant>,
+    busy_until: Option<Instant>,
 }
 
 impl SfxCooldown {
-    /// true = pode tocar (e começa a contar o tempo de novo); false = cedo demais, ignore o som.
-    pub fn try_start(&mut self, min_interval: Duration) -> bool {
+    /// `duration` = quanto tempo o som novo leva para tocar.
+    /// true = pode tocar (e a pessoa fica ocupada até ele acabar); false = o som anterior
+    /// ainda está tocando: ignore este. `slack` tolera sons que chegam um pouco adiantados.
+    pub fn try_start(&mut self, duration: Duration, slack: Duration) -> bool {
         let now = Instant::now();
-        if self.last.is_some_and(|last| now.duration_since(last) < min_interval) {
+        if self
+            .busy_until
+            .is_some_and(|until| now + slack < until)
+        {
             return false;
         }
-        self.last = Some(now);
+        self.busy_until = Some(now + duration);
         true
     }
 }
 
-/// Mensagem de "cedo demais" no idioma do app.
+/// Mensagem de "o som anterior ainda está tocando" no idioma do app.
 pub fn too_soon_message() -> String {
     tr(
-        "Espere um pouco antes de tocar outro som.",
-        "Wait a moment before playing another sound.",
-        "Espera un momento antes de reproducir otro sonido.",
+        "Espere o som anterior terminar antes de tocar outro.",
+        "Wait for the previous sound to finish before playing another.",
+        "Espera a que termine el sonido anterior antes de reproducir otro.",
     )
     .to_string()
 }
@@ -231,8 +244,15 @@ mod tests {
     }
 
     #[test]
+    fn som_de_10_segundos_e_aceito() {
+        let packets = encode(&tone(10.0)).unwrap();
+        assert_eq!(packets.len(), 500); // 10 s / 20 ms
+        assert_eq!(play_time(packets.len()), Duration::from_secs(10));
+    }
+
+    #[test]
     fn som_longo_demais_e_recusado() {
-        assert!(encode(&tone(5.3)).is_err());
+        assert!(encode(&tone(10.5)).is_err());
         assert!(encode(&[]).is_err());
     }
 
@@ -253,14 +273,19 @@ mod tests {
     }
 
     #[test]
-    fn cooldown_segura_o_segundo_som() {
+    fn cooldown_dura_o_tempo_do_som() {
         let mut cooldown = SfxCooldown::default();
-        assert!(cooldown.try_start(MIN_INTERVAL)); // o primeiro sempre pode
-        assert!(!cooldown.try_start(MIN_INTERVAL)); // logo em seguida, não
+        let som = Duration::from_millis(80);
 
-        // Passado o intervalo, pode de novo
-        std::thread::sleep(Duration::from_millis(30));
-        assert!(cooldown.try_start(Duration::from_millis(20)));
+        assert!(cooldown.try_start(som, Duration::ZERO)); // o primeiro sempre pode
+        assert!(!cooldown.try_start(som, Duration::ZERO)); // enquanto ele toca, não
+
+        // A folga deixa passar um som que chega um pouco adiantado
+        assert!(cooldown.try_start(som, Duration::from_millis(200)));
+
+        // Depois que o som termina, pode de novo
+        std::thread::sleep(som + Duration::from_millis(20));
+        assert!(cooldown.try_start(som, Duration::ZERO));
     }
 
     #[test]
@@ -269,3 +294,5 @@ mod tests {
         assert_eq!(clean_name(&"a".repeat(100)).chars().count(), MAX_NAME_LEN);
     }
 }
+
+

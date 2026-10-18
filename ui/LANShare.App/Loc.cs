@@ -214,7 +214,7 @@ internal static class Loc
         ["Sfx_AddTitle"] = new[] { "Adicionar som", "Add sound", "Añadir sonido" },
         ["Sfx_ClickToChoose"] = new[] { "Clique para escolher um som", "Click to choose a sound", "Haz clic para elegir un sonido" },
         ["Sfx_OrDrag"] = new[] { "ou arraste o arquivo para cá", "or drag the file here", "o arrastra el archivo aquí" },
-        ["Sfx_Formats"] = new[] { "MP3, WAV ou OGG · até 5 segundos", "MP3, WAV or OGG · up to 5 seconds", "MP3, WAV u OGG · hasta 5 segundos" },
+        ["Sfx_Formats"] = new[] { "MP3, WAV ou OGG · até 10 segundos", "MP3, WAV or OGG · up to 10 seconds", "MP3, WAV u OGG · hasta 10 segundos" },
         ["Sfx_Checking"] = new[] { "Verificando o arquivo...", "Checking the file...", "Comprobando el archivo..." },
         ["Sfx_ChooseAnother"] = new[] { "Escolher outro arquivo", "Choose another file", "Elegir otro archivo" },
         ["Sfx_Preview"] = new[] { "Ouvir", "Preview", "Escuchar" },
@@ -232,15 +232,15 @@ internal static class Loc
         ["Sfx_Remove"] = new[] { "Remover", "Remove", "Quitar" },
         ["Sfx_RenamePlaceholder"] = new[] { "Nome do som", "Sound name", "Nombre del sonido" },
         ["Sfx_FileType"] = new[] { "Sons", "Sounds", "Sonidos" },
-        ["Sfx_PickerTitle"] = new[] { "Escolha um som (até 5 segundos)", "Choose a sound (up to 5 seconds)", "Elige un sonido (hasta 5 segundos)" },
+        ["Sfx_PickerTitle"] = new[] { "Escolha um som (até 10 segundos)", "Choose a sound (up to 10 seconds)", "Elige un sonido (hasta 10 segundos)" },
         ["Sfx_DefaultName"] = new[] { "Som", "Sound", "Sonido" },
         ["Sfx_TooLong"] = new[]
         {
-            "Esse som tem {0:F1} s. O máximo é 5 segundos.",
-            "This sound is {0:F1} s long. The maximum is 5 seconds.",
-            "Este sonido dura {0:F1} s. El máximo es 5 segundos.",
+            "Esse som tem {0:F1} s. O máximo é 10 segundos.",
+            "This sound is {0:F1} s long. The maximum is 10 seconds.",
+            "Este sonido dura {0:F1} s. El máximo es 10 segundos.",
         },
-        ["Sfx_TooBig"] = new[] { "O arquivo é grande demais (máximo de 2 MB).", "The file is too large (2 MB max).", "El archivo es demasiado grande (máximo 2 MB)." },
+        ["Sfx_TooBig"] = new[] { "O arquivo é grande demais (máximo de 4 MB).", "The file is too large (4 MB max).", "El archivo es demasiado grande (máximo 4 MB)." },
         ["Sfx_Unsupported"] = new[] { "Formato não suportado. Use MP3, WAV ou OGG.", "Unsupported format. Use MP3, WAV or OGG.", "Formato no compatible. Usa MP3, WAV u OGG." },
         ["Sfx_OpenError"] = new[]
         {
@@ -456,3 +456,5 @@ public sealed class TrExtension : MarkupExtension
 
     public override object ProvideValue(IServiceProvider serviceProvider) => Loc.T(Key);
 }
+
+

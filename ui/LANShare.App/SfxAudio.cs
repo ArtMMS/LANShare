@@ -14,7 +14,7 @@ internal static class SfxDecoder
     public const int SampleRate = 48_000;
     public const int Channels = 2;
 
-    public static readonly TimeSpan MaxDuration = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan MaxDuration = TimeSpan.FromSeconds(10);
 
     /// Folga: encoders de MP3 costumam acrescentar alguns milissegundos de silêncio.
     private static readonly TimeSpan Tolerance = TimeSpan.FromMilliseconds(150);
@@ -122,7 +122,7 @@ internal static class SfxPlayer
     /// Mais que isso tocando ao mesmo tempo: o mais antigo para.
     public const int MaxSimultaneous = 4;
 
-    /// Quantos sons decodificados ficam guardados em memória (cada um tem até ~2 MB).
+    /// Quantos sons decodificados ficam guardados em memória (cada um tem até ~4 MB).
     private const int CacheSize = 12;
 
     /// Latência do WASAPI, em milissegundos.
@@ -288,3 +288,5 @@ internal static class SfxPlayer
         }
     }
 }
+
+
