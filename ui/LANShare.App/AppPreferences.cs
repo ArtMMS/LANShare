@@ -19,6 +19,10 @@ internal sealed class AppPreferences
     public int StreamHeight { get; set; } = 1080;
     public int StreamFps { get; set; } = 30;
 
+    /// Botão 🔊 do seletor de monitor/janela: a transmissão leva som? Lembra a última escolha.
+    /// Monitor inteiro = som do PC; janela = só o som do app dela.
+    public bool StreamAudio { get; set; } = true;
+
     /// Saída do som das transmissões que o Client assiste (e dos efeitos sonoros): o id do
     /// dispositivo no Windows. Null = padrão do Windows (acompanha se o padrão mudar). Se o
     /// dispositivo salvo não estiver conectado, o som sai pelo padrão, mas a escolha continua salva.

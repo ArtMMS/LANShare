@@ -106,7 +106,7 @@
 
 # V1.3.0 — Smart Audio Capture
 
-- [ ] Add audio toggle button (🔊) to the monitor/window picker (green = on, red + slash = off, tooltip after 1 s)
+- [x] Add audio toggle button (🔊) to the monitor/window picker (green = on, red + slash = off, tooltip after 1 s)
 - [x] Window mode: capture audio only from the shared app (process tree)
 - [x] Handle UWP/Store apps in window mode
 - [ ] List active audio sessions (apps playing sound)
@@ -118,6 +118,7 @@
 - [ ] Allow adding/removing apps from the excluded list
 - [ ] Update audio mode when using "Change stream" (monitor ↔ window)
 - [ ] Translate new texts (EN / PT / ES)
+- [ ] Bug fix: If streaming an window and close the app, the image freezes. Make it end the stream automaticaly.
 
 ---
 

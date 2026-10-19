@@ -77,6 +77,9 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_host_switch_window(ulong id);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_host_set_stream_audio(int enabled);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_host_stop_stream();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -305,6 +308,11 @@ internal static class NativeMethods
     public static (bool Ok, string? Error) HostSwitchWindow(ulong id) =>
         ParseReply(lanshare_host_switch_window(id));
 
+    /// Liga ou desliga o som da transmissão (botão 🔊 do seletor).
+    /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+    public static (bool Ok, string? Error) HostSetStreamAudio(bool enabled) =>
+        ParseReply(lanshare_host_set_stream_audio(enabled ? 1 : 0));
+
     public static bool HostStopStream() => lanshare_host_stop_stream() != 0;
 
     /// Tamanho máximo da imagem (2560x1440, 4 bytes por pixel BGRA).
@@ -447,7 +455,3 @@ internal static class NativeMethods
 
 /// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
 internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);
-
-
-
-

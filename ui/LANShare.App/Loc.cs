@@ -271,6 +271,7 @@ internal static class Loc
         ["Picker_WindowDefault"] = new[] { "Janela", "Window", "Ventana" },
         ["Picker_Primary"] = new[] { "Principal", "Primary", "Principal" },
         ["Picker_Minimized"] = new[] { "Minimizada", "Minimized", "Minimizada" },
+        ["Picker_AudioTooltip"] = new[] { "Transmissão de som", "Stream audio", "Transmisión de sonido" },
 
         // ── Avatar ──
         ["Avatar_ChangeTooltip"] = new[] { "Alterar avatar", "Change avatar", "Cambiar avatar" },
@@ -456,5 +457,3 @@ public sealed class TrExtension : MarkupExtension
 
     public override object ProvideValue(IServiceProvider serviceProvider) => Loc.T(Key);
 }
-
-

@@ -69,6 +69,40 @@
             <Setter Property="Background" Value="#2A3854" />
         </Style>
 
+        <!-- Botão 🔊 do painel de escolha (som da transmissão) -->
+        <Style Selector="Button.pickerAudio">
+            <Setter Property="Width" Value="56" />
+            <Setter Property="Padding" Value="0,8" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button.pickerAudio.on">
+            <Setter Property="Background" Value="#17301F" />
+            <Setter Property="BorderBrush" Value="#2E7D4F" />
+            <Setter Property="Foreground" Value="#3DDC84" />
+        </Style>
+        <Style Selector="Button.pickerAudio.on:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#1C3B26" />
+            <Setter Property="BorderBrush" Value="#3DDC84" />
+            <Setter Property="Foreground" Value="#3DDC84" />
+        </Style>
+        <Style Selector="Button.pickerAudio.off">
+            <Setter Property="Background" Value="#301717" />
+            <Setter Property="BorderBrush" Value="#7D2E2E" />
+            <Setter Property="Foreground" Value="#FF5C5C" />
+        </Style>
+        <Style Selector="Button.pickerAudio.off:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#3B1C1C" />
+            <Setter Property="BorderBrush" Value="#FF5C5C" />
+            <Setter Property="Foreground" Value="#FF5C5C" />
+        </Style>
+        <Style Selector="Button.pickerAudio:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Opacity" Value="0.85" />
+        </Style>
+
         <!-- Cartão de perfil -->
         <Style Selector="Border#AvatarButton:pointerover">
             <Setter Property="Opacity" Value="0.85" />
@@ -396,11 +430,24 @@
                         </StackPanel>
                     </Border>
 
-                    <Grid ColumnDefinitions="*,12,*">
+                    <Grid ColumnDefinitions="*,12,Auto,12,*">
                         <Button x:Name="PickerCancelButton" Grid.Column="0" Content="{l:Tr Common_Cancel}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
-                        <Button x:Name="PickerConfirmButton" Grid.Column="2" Content="{l:Tr Stream_Start}"
+
+                        <!-- Som da transmissão: verde = ligado; vermelho com risco = desligado -->
+                        <Button x:Name="PickerAudioButton" Grid.Column="2" Classes="pickerAudio on"
+                                ToolTip.Tip="{l:Tr Picker_AudioTooltip}" ToolTip.ShowDelay="1000">
+                            <Panel Width="26" Height="26">
+                                <TextBlock Classes="icon" Text="&#xE995;" FontSize="20"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Line x:Name="PickerAudioSlash" StartPoint="3,3" EndPoint="23,23"
+                                      Stroke="#FF5C5C" StrokeThickness="2.5" StrokeLineCap="Round"
+                                      IsVisible="False" />
+                            </Panel>
+                        </Button>
+
+                        <Button x:Name="PickerConfirmButton" Grid.Column="4" Content="{l:Tr Stream_Start}"
                                 Classes="accent"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
@@ -509,5 +556,7 @@
 
     </Grid>
 </Window>
+
+
 
 

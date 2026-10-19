@@ -50,7 +50,8 @@ public partial class MainWindow
     private ListBox _monitorList = null!, _windowList = null!;
     private TextBlock _pickerStatus = null!;
     private Button _monitorsTabButton = null!, _windowsTabButton = null!;
-    private Button _pickerConfirmButton = null!, _pickerCancelButton = null!;
+    private Button _pickerConfirmButton = null!, _pickerCancelButton = null!, _pickerAudioButton = null!;
+    private Avalonia.Controls.Shapes.Line _pickerAudioSlash = null!;
 
     private bool _pickerOpen;
     private PickerTab _pickerTab = PickerTab.Monitors;
@@ -76,6 +77,17 @@ public partial class MainWindow
         _windowsTabButton = Find<Button>("WindowsTabButton");
         _pickerConfirmButton = Find<Button>("PickerConfirmButton");
         _pickerCancelButton = Find<Button>("PickerCancelButton");
+        _pickerAudioButton = Find<Button>("PickerAudioButton");
+        _pickerAudioSlash = Find<Avalonia.Controls.Shapes.Line>("PickerAudioSlash");
+
+        // 🔊: liga/desliga o som da transmissão; a escolha fica salva para a próxima vez
+        _pickerAudioButton.Click += (_, _) =>
+        {
+            _preferences.StreamAudio = !_preferences.StreamAudio;
+            _preferences.Save();
+            RefreshPickerAudio();
+        };
+        RefreshPickerAudio();
 
         _monitorsTabButton.Click += (_, _) => SelectPickerTab(PickerTab.Monitors);
         _windowsTabButton.Click += (_, _) => SelectPickerTab(PickerTab.Windows);
@@ -146,6 +158,7 @@ public partial class MainWindow
         }
 
         SelectPickerTab(startTab);
+        RefreshPickerAudio();
         _sourcePicker.IsVisible = true;
         _mainLayout.IsEnabled = false; // o fundo fica travado enquanto o painel está aberto
 
@@ -202,6 +215,10 @@ public partial class MainWindow
 
         CloseSourcePicker();
 
+        // Som ligado ou desligado (vale para a transmissão nova e para a que já está no ar)
+        var (audioOk, audioError) = NativeMethods.HostSetStreamAudio(_preferences.StreamAudio);
+        if (!audioOk) _infoText.Text = audioError ?? Loc.T("Stream_StartError");
+
         if (_streaming)
         {
             SwitchStream(tile);
@@ -214,10 +231,19 @@ public partial class MainWindow
         if (_streaming) RememberSource(tile);
     }
 
+    /// Mostra o botão 🔊 verde (som ligado) ou vermelho com o risco (som desligado).
+    private void RefreshPickerAudio()
+    {
+        var on = _preferences.StreamAudio;
+        _pickerAudioButton.Classes.Set("on", on);
+        _pickerAudioButton.Classes.Set("off", !on);
+        _pickerAudioSlash.IsVisible = !on;
+    }
+
     /// Troca o monitor/janela sem parar a transmissão.
     private void SwitchStream(SourceTile tile)
     {
-        // Escolheu o mesmo que já está no ar: nada a fazer
+        // Escolheu o mesmo que já está no ar: só o som (ligado/desligado) pode ter mudado
         if (tile.IsWindow ? tile.WindowId == _streamWindow : tile.MonitorIndex == _streamMonitor) return;
 
         var (ok, error) = tile.IsWindow
