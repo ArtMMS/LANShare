@@ -96,6 +96,13 @@ pub fn window_process_id(id: u64) -> Option<u32> {
     process_of(hwnd)
 }
 
+/// A janela ainda está aberta? false = foi fechada (ou o app foi para a bandeja e a escondeu).
+/// Janela minimizada continua contando como aberta.
+pub fn window_is_open(id: u64) -> bool {
+    // Para uma janela que não existe mais, o Windows também responde "não visível"
+    unsafe { IsWindowVisible(to_hwnd(id)) }.as_bool()
+}
+
 fn process_of(hwnd: HWND) -> Option<u32> {
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32)) };

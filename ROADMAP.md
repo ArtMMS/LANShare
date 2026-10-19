@@ -116,7 +116,7 @@
 - [x] Monitor mode: capture the whole system except blocked apps
 - [x] Add "Apps excluded from audio" list in Settings (call apps blocked by default)
 - [x] Allow adding/removing apps from the excluded list
-- [ ] Update audio mode when using "Change stream" (monitor ↔ window)
+- [x] Update audio mode when using "Change stream" (monitor ↔ window)
 - [ ] Translate new texts (EN / PT / ES)
 - [ ] Bug fix: If streaming an window and close the app, the image freezes. Make it end the stream automaticaly.
 

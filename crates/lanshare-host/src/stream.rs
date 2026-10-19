@@ -324,7 +324,22 @@ fn run(
 
         let frame = match capture.frames.recv_timeout(Duration::from_millis(100)) {
             Ok(frame) => frame,
-            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Timeout) => {
+                // Janela fechada: o Windows simplesmente para de mandar imagens (a captura não
+                // avisa). Sem esta conferência, a última imagem ficava congelada para todos.
+                if let CaptureTarget::Window(id) = current {
+                    if !app_windows::window_is_open(id) {
+                        let _ = capture.stop();
+                        return Err(tr(
+                            "a janela compartilhada foi fechada",
+                            "the shared window was closed",
+                            "la ventana compartida se cerró",
+                        )
+                        .into());
+                    }
+                }
+                continue;
+            }
             Err(RecvTimeoutError::Disconnected) => {
                 let reason = match current {
                     CaptureTarget::Window(_) => tr(
