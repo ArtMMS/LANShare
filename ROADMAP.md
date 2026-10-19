@@ -109,13 +109,13 @@
 - [x] Add audio toggle button (🔊) to the monitor/window picker (green = on, red + slash = off, tooltip after 1 s)
 - [x] Window mode: capture audio only from the shared app (process tree)
 - [x] Handle UWP/Store apps in window mode
-- [ ] List active audio sessions (apps playing sound)
+- [x] List active audio sessions (apps playing sound)
 - [ ] Capture each allowed app separately (process loopback INCLUDE)
 - [ ] Mix all app captures into a single audio stream
 - [ ] Detect apps that start/stop playing sound during the stream
 - [ ] Monitor mode: capture the whole system except blocked apps
-- [ ] Add "Apps excluded from audio" list in Settings (call apps blocked by default)
-- [ ] Allow adding/removing apps from the excluded list
+- [x] Add "Apps excluded from audio" list in Settings (call apps blocked by default)
+- [x] Allow adding/removing apps from the excluded list
 - [ ] Update audio mode when using "Change stream" (monitor ↔ window)
 - [ ] Translate new texts (EN / PT / ES)
 - [ ] Bug fix: If streaming an window and close the app, the image freezes. Make it end the stream automaticaly.

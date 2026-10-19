@@ -344,6 +344,29 @@ internal static class Loc
         ["Settings_NotificationSounds"] = new[] { "Sons de notificação", "Notification sounds", "Sonidos de notificación" },
         ["Settings_SoundJoinLeave"] = new[] { "Quando um usuário entra ou sai", "When a user joins or leaves", "Cuando un usuario entra o sale" },
         ["Settings_SoundStream"] = new[] { "Quando a transmissão começa", "When the stream starts", "Cuando empieza la transmisión" },
+        ["Settings_ExcludedApps"] = new[] { "Apps que não transmitem som", "Apps excluded from stream audio", "Apps que no transmiten sonido" },
+        ["Settings_ExcludedAppsHint"] = new[]
+        {
+            "Ao transmitir um monitor inteiro, o som dos apps ligados aqui fica de fora (ideal para chamadas). Ao transmitir uma janela, só o som dela vai.",
+            "When streaming an entire monitor, the sound of the apps turned on here is left out (ideal for calls). When streaming a window, only its sound goes.",
+            "Al transmitir un monitor completo, el sonido de las apps activadas aquí queda fuera (ideal para llamadas). Al transmitir una ventana, solo va su sonido.",
+        },
+        ["Settings_AddAudioApp"] = new[] { "Adicionar app", "Add app", "Añadir app" },
+        ["Settings_BrowseExe"] = new[] { "Escolher .exe…", "Choose .exe…", "Elegir .exe…" },
+        ["Settings_AudioAppsTitle"] = new[] { "Apps com som abertos agora", "Apps with sound open now", "Apps con sonido abiertas ahora" },
+        ["Settings_AudioAppsLoading"] = new[] { "Procurando apps...", "Searching for apps...", "Buscando apps..." },
+        ["Settings_AudioAppsEmpty"] = new[]
+        {
+            "Nenhum app com som aberto agora. Abra o app (ou toque algo nele) e tente de novo, ou escolha o .exe.",
+            "No apps with sound open right now. Open the app (or play something in it) and try again, or choose the .exe.",
+            "No hay apps con sonido abiertas ahora. Abre la app (o reproduce algo en ella) e inténtalo de nuevo, o elige el .exe.",
+        },
+        ["Settings_AudioAppsError"] = new[] { "Não foi possível listar os apps: {0}", "Could not list the apps: {0}", "No se pudieron listar las apps: {0}" },
+        ["Settings_AppPlayingNow"] = new[] { "tocando agora", "playing now", "sonando ahora" },
+        ["Settings_AppInList"] = new[] { "já está na lista", "already in the list", "ya está en la lista" },
+        ["Settings_RemoveApp"] = new[] { "Remover da lista", "Remove from the list", "Quitar de la lista" },
+        ["Settings_ExeFileType"] = new[] { "Programas", "Programs", "Programas" },
+        ["Settings_ExePickerTitle"] = new[] { "Escolha o programa", "Choose the program", "Elige el programa" },
         ["Settings_Updates"] = new[] { "Atualizações", "Updates", "Actualizaciones" },
         ["Settings_AutoUpdate"] = new[] { "Verificar atualizações automaticamente", "Check for updates automatically", "Buscar actualizaciones automáticamente" },
         ["Settings_AutoUpdateHint"] = new[]

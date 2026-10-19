@@ -93,7 +93,7 @@
             </Grid>
 
             <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,16,Auto" Margin="20,4,20,20">
+                <Grid ColumnDefinitions="*,16,*" RowDefinitions="Auto,16,Auto,16,Auto" Margin="20,4,20,20">
 
                     <!-- Coluna da esquerda -->
                     <StackPanel Grid.Column="0" Spacing="16">
@@ -205,8 +205,42 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- Idioma (largura inteira, no fim do painel) -->
+                    <!-- Apps que não transmitem som (largura inteira) -->
                     <Border Grid.Row="2" Grid.ColumnSpan="3" Classes="settingsCard">
+                        <StackPanel>
+                            <TextBlock Classes="cardHeader" Text="{l:Tr Settings_ExcludedApps}" />
+                            <Border Classes="divider" />
+                            <StackPanel Margin="16,12" Spacing="10">
+                                <TextBlock Classes="hint" Text="{l:Tr Settings_ExcludedAppsHint}" />
+
+                                <!-- Uma linha por app (montadas no SettingsView.axaml.cs) -->
+                                <StackPanel x:Name="ExcludedAppsPanel" Spacing="6" />
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="AddAudioAppButton">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Classes="icon" Text="&#xE710;" FontSize="12" />
+                                            <TextBlock Text="{l:Tr Settings_AddAudioApp}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="BrowseExeButton" Content="{l:Tr Settings_BrowseExe}" />
+                                </StackPanel>
+
+                                <!-- Apps com som abertos agora: aparece ao clicar em "Adicionar app" -->
+                                <Border x:Name="AudioAppsBox" Background="#0F1216" CornerRadius="8"
+                                        Padding="10" IsVisible="False">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{l:Tr Settings_AudioAppsTitle}" FontSize="12" Opacity="0.8" />
+                                        <TextBlock x:Name="AudioAppsStatus" Classes="hint" IsVisible="False" />
+                                        <StackPanel x:Name="AudioAppsPanel" Spacing="4" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Idioma (largura inteira, no fim do painel) -->
+                    <Border Grid.Row="4" Grid.ColumnSpan="3" Classes="settingsCard">
                         <StackPanel>
                             <TextBlock Classes="cardHeader" Text="{l:Tr Settings_Language}" />
                             <Border Classes="divider" />
@@ -242,3 +276,5 @@
         </DockPanel>
     </Border>
 </UserControl>
+
+

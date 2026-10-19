@@ -9,7 +9,7 @@ use lanshare_core::i18n::{self, tr, Language};
 use lanshare_core::settings::{self, Settings};
 use lanshare_core::sfx;
 use lanshare_host::monitors::{self, Thumbnail};
-use lanshare_host::{app_windows, CaptureTarget, HostConfig, HostEngine, StreamSettings};
+use lanshare_host::{app_windows, audio_sessions, CaptureTarget, HostConfig, HostEngine, StreamSettings};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, MutexGuard};
@@ -687,6 +687,34 @@ pub extern "C" fn lanshare_audio_output_devices() -> *mut c_char {
             to_c(serde_json::json!({ "ok": true, "devices": list }).to_string())
         }
         Err(error) => reply_err(&error),
+    }
+}
+
+/// Apps com som aberto no PC (os que tocam agora primeiro), para a lista "Adicionar app":
+/// {"ok":true,"apps":[{"exe":"discord.exe","name":"Discord","active":true}]} ou {"ok":false,"error":".."}.
+/// Não precisa da sala aberta. Leva alguns milissegundos: chame fora da thread da interface.
+#[no_mangle]
+pub extern "C" fn lanshare_audio_apps() -> *mut c_char {
+    match audio_sessions::list_audio_apps() {
+        Ok(apps) => to_c(serde_json::json!({ "ok": true, "apps": apps }).to_string()),
+        Err(error) => reply_err(&error),
+    }
+}
+
+/// Apps que não transmitem som ao transmitir um monitor inteiro.
+/// `exes_json`: lista de .exe, ex.: ["discord.exe","ms-teams.exe"]. Não precisa da sala aberta.
+#[no_mangle]
+pub extern "C" fn lanshare_set_audio_exclusions(exes_json: *const c_char) -> *mut c_char {
+    let text = read_c_string(exes_json).unwrap_or_else(|| "[]".to_string());
+    match serde_json::from_str::<Vec<String>>(&text) {
+        Ok(exes) => {
+            audio_sessions::set_excluded_apps(exes);
+            reply_ok()
+        }
+        Err(error) => reply_err(&format!(
+            "{}: {error}",
+            tr("Lista de apps inválida", "Invalid app list", "Lista de apps no válida")
+        )),
     }
 }
 

@@ -1,7 +1,11 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
 
 namespace LANShare.App;
 
@@ -21,6 +25,15 @@ public partial class SettingsView : UserControl
     private readonly TextBlock _updateStatusText, _restartText, _audioDeviceHint;
     private readonly ComboBox _audioDeviceBox;
     private readonly Grid _restartRow;
+
+    // Apps que não transmitem som
+    private readonly StackPanel _excludedAppsPanel, _audioAppsPanel;
+    private readonly Button _addAudioAppButton, _browseExeButton;
+    private readonly Border _audioAppsBox;
+    private readonly TextBlock _audioAppsStatus;
+
+    /// Muda a cada busca de apps com som: uma resposta atrasada é ignorada.
+    private int _audioAppsRequest;
 
     /// Botões de idioma, na mesma ordem de Loc.All.
     private readonly Button[] _languageButtons;
@@ -101,6 +114,21 @@ public partial class SettingsView : UserControl
             _languageButtons[i].Click += (_, _) => Change(p => p.Language = Loc.CodeOf(language));
         }
         _restartButton.Click += (_, _) => RestartRequested?.Invoke(this, EventArgs.Empty);
+
+        // Apps que não transmitem som
+        _excludedAppsPanel = Find<StackPanel>("ExcludedAppsPanel");
+        _audioAppsPanel = Find<StackPanel>("AudioAppsPanel");
+        _addAudioAppButton = Find<Button>("AddAudioAppButton");
+        _browseExeButton = Find<Button>("BrowseExeButton");
+        _audioAppsBox = Find<Border>("AudioAppsBox");
+        _audioAppsStatus = Find<TextBlock>("AudioAppsStatus");
+
+        _addAudioAppButton.Click += (_, _) =>
+        {
+            if (_audioAppsBox.IsVisible) _audioAppsBox.IsVisible = false;
+            else ShowAudioApps();
+        };
+        _browseExeButton.Click += async (_, _) => await BrowseExeAsync();
     }
 
     /// Idioma escolhido nas preferências (sem escolha = o que está em uso).
@@ -185,6 +213,8 @@ public partial class SettingsView : UserControl
         if (pending && !_restartRow.IsVisible) SetRestartMessage(null);
         _restartRow.IsVisible = pending;
 
+        RefreshExcludedApps();
+
         _loading = false;
     }
 
@@ -246,6 +276,160 @@ public partial class SettingsView : UserControl
 
         Change(p => p.AudioOutputDevice = id);
         SetAudioHint(Loc.T("Settings_AudioOutputHint"), warning: false);
+    }
+
+    // ───────────────────────── Apps que não transmitem som ─────────────────────────
+
+    /// Uma linha por app: nome, os .exe, o interruptor (ligado = não transmite) e,
+    /// para os adicionados pelo usuário, o botão de remover.
+    private void RefreshExcludedApps()
+    {
+        _excludedAppsPanel.Children.Clear();
+
+        foreach (var app in _prefs.ExcludedAudioApps)
+        {
+            var text = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+            text.Children.Add(new TextBlock { Text = app.Name, TextTrimming = TextTrimming.CharacterEllipsis });
+            text.Children.Add(new TextBlock
+            {
+                Text = string.Join(", ", app.Exes),
+                FontSize = 11,
+                Opacity = 0.5,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+
+            var toggle = new ToggleSwitch
+            {
+                IsChecked = app.Enabled,
+                OnContent = "",
+                OffContent = "",
+                MinWidth = 0,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            toggle.IsCheckedChanged += (_, _) => Change(_ => app.Enabled = toggle.IsChecked == true);
+            Grid.SetColumn(toggle, 1);
+
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
+            row.Children.Add(text);
+            row.Children.Add(toggle);
+
+            if (!app.BuiltIn)
+            {
+                var remove = new Button
+                {
+                    Content = new TextBlock { Classes = { "icon" }, Text = "", FontSize = 13 },
+                    Background = Brushes.Transparent,
+                    Padding = new Thickness(8, 6),
+                    Margin = new Thickness(6, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                ToolTip.SetTip(remove, Loc.T("Settings_RemoveApp"));
+                remove.Click += (_, _) => Change(p => p.ExcludedAudioApps.Remove(app));
+                Grid.SetColumn(remove, 2);
+                row.Children.Add(remove);
+            }
+
+            _excludedAppsPanel.Children.Add(new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#1B1F24")),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12, 8),
+                Child = row,
+            });
+        }
+    }
+
+    /// "Adicionar app": lista os apps com som abertos agora (fora da thread da interface).
+    private async void ShowAudioApps()
+    {
+        var request = ++_audioAppsRequest;
+        _audioAppsBox.IsVisible = true;
+        _audioAppsPanel.Children.Clear();
+        SetAudioAppsStatus(Loc.T("Settings_AudioAppsLoading"));
+
+        List<AudioApp> apps;
+        string? error;
+        try
+        {
+            (apps, error) = await Task.Run(() => NativeMethods.AudioApps());
+        }
+        catch (Exception ex)
+        {
+            (apps, error) = (new List<AudioApp>(), ex.Message);
+        }
+
+        if (request != _audioAppsRequest || !_audioAppsBox.IsVisible) return;
+
+        if (error is not null)
+        {
+            SetAudioAppsStatus(Loc.F("Settings_AudioAppsError", error));
+            return;
+        }
+        if (apps.Count == 0)
+        {
+            SetAudioAppsStatus(Loc.T("Settings_AudioAppsEmpty"));
+            return;
+        }
+
+        SetAudioAppsStatus(null);
+        foreach (var app in apps)
+        {
+            var inList = ExcludedAudioApp.Contains(_prefs.ExcludedAudioApps, app.Exe);
+            var detail = inList ? Loc.T("Settings_AppInList")
+                : app.Active ? $"{app.Exe} · {Loc.T("Settings_AppPlayingNow")}"
+                : app.Exe;
+
+            var content = new StackPanel { Spacing = 1 };
+            content.Children.Add(new TextBlock { Text = app.Name });
+            content.Children.Add(new TextBlock { Text = detail, FontSize = 11, Opacity = 0.55 });
+
+            var button = new Button
+            {
+                Content = content,
+                IsEnabled = !inList,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Padding = new Thickness(10, 6),
+            };
+            button.Click += (_, _) => AddExcludedApp(app.Name, app.Exe);
+            _audioAppsPanel.Children.Add(button);
+        }
+    }
+
+    /// "Escolher .exe…": adiciona um programa escolhido no disco.
+    private async Task BrowseExeAsync()
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
+
+        var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("Settings_ExePickerTitle"),
+            AllowMultiple = false,
+            FileTypeFilter = new[] { new FilePickerFileType(Loc.T("Settings_ExeFileType")) { Patterns = new[] { "*.exe" } } },
+        });
+        if (files.Count == 0) return;
+
+        var exe = files[0].Name;
+        if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return;
+
+        var stem = Path.GetFileNameWithoutExtension(exe);
+        var name = stem.Length > 0 ? char.ToUpper(stem[0]) + stem[1..] : exe;
+        AddExcludedApp(name, exe);
+    }
+
+    /// Põe o app no fim da lista, já ligado (se ainda não estiver nela).
+    private void AddExcludedApp(string name, string exe)
+    {
+        if (ExcludedAudioApp.Contains(_prefs.ExcludedAudioApps, exe)) return;
+
+        _audioAppsBox.IsVisible = false;
+        Change(p => p.ExcludedAudioApps.Add(ExcludedAudioApp.Custom(name, exe)));
+    }
+
+    private void SetAudioAppsStatus(string? text)
+    {
+        _audioAppsStatus.Text = text ?? "";
+        _audioAppsStatus.IsVisible = !string.IsNullOrEmpty(text);
     }
 
     private void SetAudioHint(string text, bool warning)

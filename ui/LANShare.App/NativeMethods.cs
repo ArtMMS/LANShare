@@ -128,6 +128,12 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_audio_output_devices();
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_audio_apps();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_set_audio_exclusions(IntPtr exesJson);
+
     // ── Efeitos sonoros ──
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -451,7 +457,45 @@ internal static class NativeMethods
 
         return (devices, null);
     }
+
+    /// Apps com som aberto no PC (os que tocam agora primeiro). Demora alguns milissegundos:
+    /// chame fora da thread da interface. Em caso de erro, a lista vem vazia e Error explica.
+    public static (List<AudioApp> Apps, string? Error) AudioApps()
+    {
+        var json = TakeString(lanshare_audio_apps()) ?? "{}";
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var apps = new List<AudioApp>();
+
+        if (!(root.TryGetProperty("ok", out var ok) && ok.GetBoolean()))
+        {
+            var error = root.TryGetProperty("error", out var e) ? e.GetString() : null;
+            return (apps, error ?? "?");
+        }
+
+        if (root.TryGetProperty("apps", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var a in list.EnumerateArray())
+            {
+                var exe = a.GetProperty("exe").GetString();
+                if (string.IsNullOrEmpty(exe)) continue;
+                apps.Add(new AudioApp(
+                    exe,
+                    a.GetProperty("name").GetString() ?? exe,
+                    a.TryGetProperty("active", out var act) && act.ValueKind == JsonValueKind.True));
+            }
+        }
+
+        return (apps, null);
+    }
+
+    /// Apps que não transmitem som ao transmitir um monitor inteiro (lista de .exe).
+    public static (bool Ok, string? Error) SetAudioExclusions(IEnumerable<string> exes) =>
+        CallWithString(JsonSerializer.Serialize(exes.ToList()), lanshare_set_audio_exclusions);
 }
+
+/// Um app com som aberto no PC. `Exe` em minúsculas (ex.: "discord.exe"); `Active` = tocando agora.
+internal sealed record AudioApp(string Exe, string Name, bool Active);
 
 /// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
 internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);

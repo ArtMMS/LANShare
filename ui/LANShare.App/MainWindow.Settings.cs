@@ -32,6 +32,7 @@ public partial class MainWindow
         {
             ApplyStreamDefaults();
             ApplyAudioOutput();
+            ApplyAudioExclusions();
         };
         _settingsView.RestartRequested += (_, _) => RestartForLanguage();
 
@@ -58,6 +59,20 @@ public partial class MainWindow
         AddHandler(KeyDownEvent, OnSettingsKeyDown, RoutingStrategies.Tunnel);
 
         ApplyStreamDefaults();
+        ApplyAudioExclusions();
+    }
+
+    /// Diz ao motor quais apps não transmitem som (monitor inteiro). Não precisa da sala aberta.
+    private void ApplyAudioExclusions()
+    {
+        try
+        {
+            NativeMethods.SetAudioExclusions(_preferences.ExcludedExes);
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            // Motor Rust indisponível: a tela inicial já mostra o problema
+        }
     }
 
     private void OpenSettings()

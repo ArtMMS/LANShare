@@ -6,6 +6,7 @@
 
 pub mod app_windows;
 mod audio_capture;
+pub mod audio_sessions;
 mod audio_stream;
 mod capture;
 mod cli;
