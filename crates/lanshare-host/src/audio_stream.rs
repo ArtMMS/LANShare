@@ -2,15 +2,19 @@
 //!
 //! Roda numa thread própria, ao lado da transmissão da tela. Se o som falhar,
 //! a imagem continua: o problema vira só um aviso.
+//!
+//! Monitor inteiro: o som vem do mixer (audio_mixer.rs), sem os apps bloqueados.
+//! Janela: uma captura só, do app da janela.
 
-use crate::audio_capture::{AudioCapture, AudioSource, CHANNELS, SAMPLE_RATE};
+use crate::audio_capture::{AudioCapture, AudioChunk, AudioSource, CHANNELS, SAMPLE_RATE};
+use crate::audio_mixer::MixedCapture;
 use crate::events::EventSender;
 use crate::registry::Registry;
 use lanshare_core::i18n::tr;
 use opus::{Application, Bitrate, Channels, Encoder};
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -86,13 +90,18 @@ fn run(
     events: &EventSender,
     source: AudioSource,
 ) -> Result<(), BoxError> {
-    let capture = AudioCapture::start(source)?;
+    let capture = Capture::start(source)?;
 
     let mut encoder = Encoder::new(SAMPLE_RATE, Channels::Stereo, Application::Audio)?;
     encoder.set_bitrate(Bitrate::Bits(BITRATE_BPS))?;
 
     let what = match source {
         AudioSource::SystemExceptSelf => tr("som do PC", "PC audio", "sonido del PC"),
+        AudioSource::SystemWithoutExcluded => tr(
+            "som do PC, sem os apps bloqueados",
+            "PC audio, without the blocked apps",
+            "sonido del PC, sin las apps bloqueadas",
+        ),
         AudioSource::ProcessTree(_) => tr(
             "só o som da janela",
             "only the window's audio",
@@ -113,7 +122,7 @@ fn run(
     let mut packet = vec![0u8; MAX_PACKET];
 
     while !stop.load(Ordering::Relaxed) {
-        let chunk = match capture.chunks.recv_timeout(Duration::from_millis(100)) {
+        let chunk = match capture.chunks().recv_timeout(Duration::from_millis(100)) {
             Ok(chunk) => chunk,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => break, // a captura caiu (o erro vem no stop)
@@ -133,6 +142,38 @@ fn run(
     }
 
     capture.stop()
+}
+
+/// De onde vêm os blocos de som: uma captura só ou o mixer (vários apps somados).
+enum Capture {
+    Single(AudioCapture),
+    Mixed(MixedCapture),
+}
+
+impl Capture {
+    fn start(source: AudioSource) -> Result<Self, BoxError> {
+        Ok(match source {
+            AudioSource::SystemWithoutExcluded => Self::Mixed(MixedCapture::start()?),
+            other => Self::Single(AudioCapture::start(other)?),
+        })
+    }
+
+    fn chunks(&self) -> &Receiver<AudioChunk> {
+        match self {
+            Self::Single(capture) => &capture.chunks,
+            Self::Mixed(mixer) => &mixer.chunks,
+        }
+    }
+
+    fn stop(self) -> Result<(), BoxError> {
+        match self {
+            Self::Single(capture) => capture.stop(),
+            Self::Mixed(mixer) => {
+                mixer.stop();
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Junta os blocos da captura (tamanhos variados) em quadros de 20 ms para o Opus,

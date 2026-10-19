@@ -70,6 +70,10 @@ pub enum AudioSource {
     SystemExceptSelf,
     /// Só o som deste processo (e dos filhos dele).
     ProcessTree(u32),
+    /// O som do PC, menos o LANShare e os apps bloqueados nas Configurações (Discord, Teams...).
+    /// Quem monta esse som é o mixer (audio_mixer.rs), com uma captura por app.
+    /// Pedido direto aqui, vira SystemExceptSelf.
+    SystemWithoutExcluded,
 }
 
 /// Um bloco de som capturado.
@@ -366,7 +370,9 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
 /// Pede ao Windows um IAudioClient que captura conforme a `source`.
 fn activate_process_loopback(source: AudioSource) -> Result<IAudioClient, String> {
     let (target_process_id, loopback_mode) = match source {
-        AudioSource::SystemExceptSelf => (std::process::id(), LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE),
+        AudioSource::SystemExceptSelf | AudioSource::SystemWithoutExcluded => {
+            (std::process::id(), LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE)
+        }
         AudioSource::ProcessTree(pid) => (pid, LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE),
     };
 

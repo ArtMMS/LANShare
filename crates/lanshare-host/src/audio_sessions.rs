@@ -96,7 +96,8 @@ impl Drop for ComGuard {
 }
 
 /// Passa por todas as saídas de áudio e junta as sessões de cada app.
-unsafe fn enumerate() -> Result<Vec<AudioApp>, String> {
+/// Precisa do COM ligado na thread (o mixer chama direto, da thread dele).
+pub(crate) unsafe fn enumerate() -> Result<Vec<AudioApp>, String> {
     let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
         .map_err(|e| format!("IMMDeviceEnumerator: {e}"))?;
     let collection = devices

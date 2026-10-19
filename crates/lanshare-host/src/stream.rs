@@ -1,6 +1,6 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
 //! O som vai junto, numa thread própria (audio_stream.rs), com o mesmo relógio da imagem:
-//! - monitor inteiro: o som do PC (menos o LANShare);
+//! - monitor inteiro: o som do PC, menos o LANShare e os apps bloqueados nas Configurações;
 //! - janela: só o som do app daquela janela;
 //! - som desligado (botão 🔊 do seletor): nenhum som.
 //! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
@@ -250,8 +250,8 @@ fn audio_source(target: CaptureTarget, enabled: bool, events: &EventSender) -> O
                 None
             }
         },
-        // Monitor inteiro: o som do PC (menos o LANShare)
-        CaptureTarget::PrimaryMonitor | CaptureTarget::Monitor(_) => Some(AudioSource::SystemExceptSelf),
+        // Monitor inteiro: o som do PC, menos o LANShare e os apps bloqueados (Discord, Teams...)
+        CaptureTarget::PrimaryMonitor | CaptureTarget::Monitor(_) => Some(AudioSource::SystemWithoutExcluded),
     }
 }
 

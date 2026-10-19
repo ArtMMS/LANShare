@@ -110,10 +110,10 @@
 - [x] Window mode: capture audio only from the shared app (process tree)
 - [x] Handle UWP/Store apps in window mode
 - [x] List active audio sessions (apps playing sound)
-- [ ] Capture each allowed app separately (process loopback INCLUDE)
-- [ ] Mix all app captures into a single audio stream
-- [ ] Detect apps that start/stop playing sound during the stream
-- [ ] Monitor mode: capture the whole system except blocked apps
+- [x] Capture each allowed app separately (process loopback INCLUDE)
+- [x] Mix all app captures into a single audio stream
+- [x] Detect apps that start/stop playing sound during the stream
+- [x] Monitor mode: capture the whole system except blocked apps
 - [x] Add "Apps excluded from audio" list in Settings (call apps blocked by default)
 - [x] Allow adding/removing apps from the excluded list
 - [ ] Update audio mode when using "Change stream" (monitor ↔ window)
