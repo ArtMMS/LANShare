@@ -352,14 +352,14 @@ internal static class Loc
             "Al transmitir un monitor completo, el sonido de las apps activadas aquí queda fuera (ideal para llamadas). Al transmitir una ventana, solo va su sonido.",
         },
         ["Settings_AddAudioApp"] = new[] { "Adicionar app", "Add app", "Añadir app" },
-        ["Settings_BrowseExe"] = new[] { "Escolher .exe…", "Choose .exe…", "Elegir .exe…" },
+        ["Settings_BrowseExe"] = new[] { "Selecionar diretório", "Select directory", "Seleccionar directorio" },
         ["Settings_AudioAppsTitle"] = new[] { "Apps com som abertos agora", "Apps with sound open now", "Apps con sonido abiertas ahora" },
         ["Settings_AudioAppsLoading"] = new[] { "Procurando apps...", "Searching for apps...", "Buscando apps..." },
         ["Settings_AudioAppsEmpty"] = new[]
         {
-            "Nenhum app com som aberto agora. Abra o app (ou toque algo nele) e tente de novo, ou escolha o .exe.",
-            "No apps with sound open right now. Open the app (or play something in it) and try again, or choose the .exe.",
-            "No hay apps con sonido abiertas ahora. Abre la app (o reproduce algo en ella) e inténtalo de nuevo, o elige el .exe.",
+            "Nenhum app com som aberto agora. Abra o app (ou toque algo nele) e tente de novo, ou use Selecionar diretório.",
+            "No apps with sound open right now. Open the app (or play something in it) and try again, or use Select directory.",
+            "No hay apps con sonido abiertas ahora. Abre la app (o reproduce algo en ella) e inténtalo de nuevo, o usa Seleccionar directorio.",
         },
         ["Settings_AudioAppsError"] = new[] { "Não foi possível listar os apps: {0}", "Could not list the apps: {0}", "No se pudieron listar las apps: {0}" },
         ["Settings_AppPlayingNow"] = new[] { "tocando agora", "playing now", "sonando ahora" },

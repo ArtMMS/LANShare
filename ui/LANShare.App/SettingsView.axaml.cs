@@ -27,8 +27,9 @@ public partial class SettingsView : UserControl
     private readonly Grid _restartRow;
 
     // Apps que não transmitem som
-    private readonly StackPanel _excludedAppsPanel, _audioAppsPanel;
-    private readonly Button _addAudioAppButton, _browseExeButton;
+    private readonly StackPanel _excludedAppsPanel, _audioAppsPanel, _excludedAppsContent;
+    private readonly Button _addAudioAppButton, _browseExeButton, _excludedAppsHeader;
+    private readonly TextBlock _excludedAppsChevron;
     private readonly Border _audioAppsBox;
     private readonly TextBlock _audioAppsStatus;
 
@@ -122,6 +123,12 @@ public partial class SettingsView : UserControl
         _browseExeButton = Find<Button>("BrowseExeButton");
         _audioAppsBox = Find<Border>("AudioAppsBox");
         _audioAppsStatus = Find<TextBlock>("AudioAppsStatus");
+        _excludedAppsContent = Find<StackPanel>("ExcludedAppsContent");
+        _excludedAppsHeader = Find<Button>("ExcludedAppsHeader");
+        _excludedAppsChevron = Find<TextBlock>("ExcludedAppsChevron");
+
+        // O cartão começa recolhido: clicar no título abre (e fecha) as opções
+        _excludedAppsHeader.Click += (_, _) => SetExcludedAppsOpen(!_excludedAppsContent.IsVisible);
 
         _addAudioAppButton.Click += (_, _) =>
         {
@@ -148,6 +155,7 @@ public partial class SettingsView : UserControl
         _prefs = prefs;
         IsCapturingKey = false;
         _shortcutButton.Classes.Set("capturing", false);
+        SetExcludedAppsOpen(false); // toda vez que as Configurações abrem, o cartão vem recolhido
         Refresh();
         RefreshAudioDevices();
     }
@@ -279,6 +287,14 @@ public partial class SettingsView : UserControl
     }
 
     // ───────────────────────── Apps que não transmitem som ─────────────────────────
+
+    /// Abre ou fecha o cartão "Apps que não transmitem som" (fechado, some também a lista de "Adicionar app").
+    private void SetExcludedAppsOpen(bool open)
+    {
+        _excludedAppsContent.IsVisible = open;
+        _excludedAppsChevron.Text = open ? "" : ""; // seta para cima / para baixo
+        if (!open) _audioAppsBox.IsVisible = false;
+    }
 
     /// Uma linha por app: nome, os .exe, o interruptor (ligado = não transmite) e,
     /// para os adicionados pelo usuário, o botão de remover.
