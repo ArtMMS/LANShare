@@ -1,8 +1,10 @@
 //! Captura do som do Host via WASAPI "process loopback" (Windows 10 2004+ / Windows 11).
 //!
-//! Captura tudo o que toca no PC, MENOS o próprio LANShare (e os processos filhos dele):
-//! - os sons de notificação do app não vão para a transmissão;
-//! - com Host e Client no mesmo PC, o som que o Client toca não volta para a captura (sem microfonia).
+//! Dois jeitos de capturar (AudioSource):
+//! - SystemExceptSelf: tudo o que toca no PC, MENOS o próprio LANShare (e os processos filhos dele).
+//!   Os sons de notificação do app não vão para a transmissão e, com Host e Client no mesmo PC,
+//!   o som que o Client toca não volta para a captura (sem microfonia).
+//! - ProcessTree(pid): SÓ o som de um processo e dos filhos dele (transmissão de uma janela).
 //!
 //! Sai: blocos de PCM 16 bits, 48 kHz, estéreo (o formato que o Opus usa).
 
@@ -52,6 +54,7 @@ const WAIT_MS: u32 = 100;
 // Constantes do WASAPI (audioclient.h / audioclientactivationparams.h)
 const VT_BLOB: u16 = 65;
 const ACTIVATION_TYPE_PROCESS_LOOPBACK: i32 = 1;
+const LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE: i32 = 0;
 const LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE: i32 = 1;
 const STREAMFLAGS_LOOPBACK: u32 = 0x0002_0000;
 const STREAMFLAGS_EVENTCALLBACK: u32 = 0x0004_0000;
@@ -59,6 +62,15 @@ const STREAMFLAGS_AUTOCONVERTPCM: u32 = 0x8000_0000;
 const BUFFERFLAGS_SILENT: u32 = 0x2;
 const BUFFERFLAGS_TIMESTAMP_ERROR: u32 = 0x4;
 const WAVE_FORMAT_PCM: u16 = 1;
+
+/// De onde vem o som capturado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioSource {
+    /// Todo o som do PC, menos o do LANShare.
+    SystemExceptSelf,
+    /// Só o som deste processo (e dos filhos dele).
+    ProcessTree(u32),
+}
 
 /// Um bloco de som capturado.
 pub struct AudioChunk {
@@ -78,9 +90,9 @@ pub struct AudioCapture {
 }
 
 impl AudioCapture {
-    /// Começa a capturar o som do PC (menos o do LANShare) numa thread própria.
+    /// Começa a capturar o som numa thread própria.
     /// Só volta depois que a captura começou de verdade (ou falhou).
-    pub fn start() -> Result<Self, BoxError> {
+    pub fn start(source: AudioSource) -> Result<Self, BoxError> {
         let (sender, chunks) = mpsc::sync_channel(QUEUE_SIZE);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
@@ -88,7 +100,7 @@ impl AudioCapture {
 
         let thread = std::thread::Builder::new()
             .name("lanshare-audio-capture".to_string())
-            .spawn(move || run(sender, thread_stop, ready_tx))?;
+            .spawn(move || run(source, sender, thread_stop, ready_tx))?;
 
         match ready_rx.recv_timeout(ACTIVATE_TIMEOUT + Duration::from_secs(1)) {
             Ok(Ok(())) => Ok(Self {
@@ -161,12 +173,13 @@ impl Drop for EventHandle {
 
 /// A thread da captura: prepara tudo, avisa em `ready` e fica lendo o som até pedirem para parar.
 fn run(
+    source: AudioSource,
     sender: SyncSender<AudioChunk>,
     stop: Arc<AtomicBool>,
     ready: SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let prepared = ComGuard::new().and_then(|com| {
-        let (client, capture, event) = open_capture()?;
+        let (client, capture, event) = open_capture(source)?;
         Ok((com, client, capture, event))
     });
 
@@ -199,8 +212,8 @@ fn run(
 }
 
 /// Ativa o "process loopback" e deixa a captura pronta e rodando.
-fn open_capture() -> Result<(IAudioClient, IAudioCaptureClient, EventHandle), String> {
-    let client = activate_process_loopback()?;
+fn open_capture(source: AudioSource) -> Result<(IAudioClient, IAudioCaptureClient, EventHandle), String> {
+    let client = activate_process_loopback(source)?;
 
     let format = WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_PCM,
@@ -350,12 +363,17 @@ impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
     }
 }
 
-/// Pede ao Windows um IAudioClient que captura tudo, menos este processo (e os filhos dele).
-fn activate_process_loopback() -> Result<IAudioClient, String> {
+/// Pede ao Windows um IAudioClient que captura conforme a `source`.
+fn activate_process_loopback(source: AudioSource) -> Result<IAudioClient, String> {
+    let (target_process_id, loopback_mode) = match source {
+        AudioSource::SystemExceptSelf => (std::process::id(), LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE),
+        AudioSource::ProcessTree(pid) => (pid, LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE),
+    };
+
     let params = ProcessLoopbackParams {
         activation_type: ACTIVATION_TYPE_PROCESS_LOOPBACK,
-        target_process_id: std::process::id(),
-        loopback_mode: LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+        target_process_id,
+        loopback_mode,
     };
     let prop = BlobPropVariant {
         vt: VT_BLOB,
@@ -399,7 +417,7 @@ fn activate_process_loopback() -> Result<IAudioClient, String> {
 // ───────────────────────────── Relógio ─────────────────────────────
 
 /// Converte o horário que o Windows marca em cada pacote (QPC) para `Instant`,
-/// o mesmo relógio que o vídeo usa. Isso vai ser a base da sincronia entre som e imagem.
+/// o mesmo relógio que o vídeo usa. É a base da sincronia entre som e imagem.
 struct QpcClock {
     frequency: i64,
 }
@@ -445,7 +463,7 @@ impl QpcClock {
 
 /// Teste temporário: captura o som por alguns segundos, mostra o resultado e grava um .wav.
 pub fn test_audio_capture(seconds: u64) -> Result<(), BoxError> {
-    let capture = AudioCapture::start()?;
+    let capture = AudioCapture::start(AudioSource::SystemExceptSelf)?;
     println!("[audio] Captura iniciada. Toque algum som no PC (o som do LANShare fica de fora).");
 
     let start = Instant::now();

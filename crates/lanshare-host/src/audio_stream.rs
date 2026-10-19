@@ -3,7 +3,7 @@
 //! Roda numa thread própria, ao lado da transmissão da tela. Se o som falhar,
 //! a imagem continua: o problema vira só um aviso.
 
-use crate::audio_capture::{AudioCapture, CHANNELS, SAMPLE_RATE};
+use crate::audio_capture::{AudioCapture, AudioSource, CHANNELS, SAMPLE_RATE};
 use crate::events::EventSender;
 use crate::registry::Registry;
 use lanshare_core::i18n::tr;
@@ -41,14 +41,14 @@ pub struct AudioStreamer {
 impl AudioStreamer {
     /// Começa a capturar e enviar o som. `started` é o início da transmissão (o mesmo do vídeo).
     /// Não trava: a captura é ligada dentro da thread.
-    pub fn start(registry: Registry, started: Instant, events: EventSender) -> Self {
+    pub fn start(registry: Registry, started: Instant, events: EventSender, source: AudioSource) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
 
         let thread = std::thread::Builder::new()
             .name("lanshare-audio-stream".to_string())
             .spawn(move || {
-                if let Err(erro) = run(&registry, started, &thread_stop, &events) {
+                if let Err(erro) = run(&registry, started, &thread_stop, &events, source) {
                     events.warn(format!(
                         "{}: {erro}",
                         tr(
@@ -84,14 +84,23 @@ fn run(
     started: Instant,
     stop: &AtomicBool,
     events: &EventSender,
+    source: AudioSource,
 ) -> Result<(), BoxError> {
-    let capture = AudioCapture::start()?;
+    let capture = AudioCapture::start(source)?;
 
     let mut encoder = Encoder::new(SAMPLE_RATE, Channels::Stereo, Application::Audio)?;
     encoder.set_bitrate(Bitrate::Bits(BITRATE_BPS))?;
 
+    let what = match source {
+        AudioSource::SystemExceptSelf => tr("som do PC", "PC audio", "sonido del PC"),
+        AudioSource::ProcessTree(_) => tr(
+            "só o som da janela",
+            "only the window's audio",
+            "solo el sonido de la ventana",
+        ),
+    };
     events.info(format!(
-        "{} (Opus {} kbps)",
+        "{}: {what} (Opus {} kbps)",
         tr(
             "Som da transmissão ativo",
             "Stream audio active",

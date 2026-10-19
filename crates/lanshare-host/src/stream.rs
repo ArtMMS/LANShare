@@ -1,7 +1,12 @@
 //! Transmissão da tela do Host: captura -> encoder de GPU -> todos os Clients.
-//! O som vai junto, numa thread própria (audio_stream.rs), com o mesmo relógio da imagem.
+//! O som vai junto, numa thread própria (audio_stream.rs), com o mesmo relógio da imagem:
+//! - monitor inteiro: o som do PC (menos o LANShare);
+//! - janela: só o som do app daquela janela;
+//! - som desligado (botão 🔊 do seletor): nenhum som.
 //! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
 
+use crate::app_windows;
+use crate::audio_capture::AudioSource;
 use crate::audio_stream::AudioStreamer;
 use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
 use crate::events::{EventSender, HostEvent};
@@ -14,7 +19,7 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -46,39 +51,54 @@ struct SwitchRequest {
     reply: SyncSender<Result<(), String>>,
 }
 
+/// O som da transmissão e o que decide de onde ele vem.
+struct AudioState {
+    /// O que está sendo transmitido agora (monitor ou janela).
+    target: CaptureTarget,
+    /// Botão 🔊 do seletor: false = transmissão sem som.
+    enabled: bool,
+    /// De onde o som está vindo agora (None = sem som).
+    source: Option<AudioSource>,
+    streamer: Option<AudioStreamer>,
+}
+
 /// A transmissão em andamento (roda numa thread própria).
 pub struct StreamHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     events: EventSender,
     switch_tx: Sender<SwitchRequest>,
-    /// O som da transmissão (Option só para poder tirá-lo no stop).
-    audio: Option<AudioStreamer>,
+    registry: Registry,
+    /// Início da transmissão: relógio comum da imagem e do som.
+    started: Instant,
+    audio: Mutex<AudioState>,
 }
 
 impl StreamHandle {
     /// Começa a capturar, comprimir e enviar um monitor ou uma janela aos Clients.
+    /// `audio_enabled` = false transmite só a imagem.
     pub fn start_on(
         registry: Registry,
         settings: StreamSettings,
         events: EventSender,
         preview: PreviewSlot,
         target: CaptureTarget,
+        audio_enabled: bool,
     ) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread_events = events.clone();
         let thread_preview = preview.clone();
+        let thread_registry = registry.clone();
         let (switch_tx, switch_rx) = mpsc::channel();
 
         // Relógio comum da imagem e do som (os timestamps dos dois contam a partir daqui)
         let started = Instant::now();
-        let audio = AudioStreamer::start(registry.clone(), started, events.clone());
 
         // O encoder de GPU precisa nascer e morrer na mesma thread: tudo fica dentro de run()
         let thread = std::thread::spawn(move || {
             let result = run(
-                registry,
+                thread_registry,
                 thread_stop,
                 started,
                 settings,
@@ -93,17 +113,26 @@ impl StreamHandle {
             });
         });
 
-        Self {
+        let handle = Self {
             stop,
             thread: Some(thread),
             events,
             switch_tx,
-            audio: Some(audio),
-        }
+            registry,
+            started,
+            audio: Mutex::new(AudioState {
+                target,
+                enabled: audio_enabled,
+                source: None,
+                streamer: None,
+            }),
+        };
+        handle.refresh_audio(&mut handle.lock_audio());
+        handle
     }
 
     /// Troca o que está sendo transmitido sem parar a transmissão.
-    /// Espera a troca acontecer e devolve o resultado.
+    /// Espera a troca acontecer e devolve o resultado. O som acompanha a troca.
     pub fn switch_source(&self, target: CaptureTarget) -> Result<(), String> {
         let (reply, answer) = mpsc::sync_channel(1);
         self.switch_tx
@@ -124,7 +153,19 @@ impl StreamHandle {
                 "El cambio tardó demasiado. Inténtalo de nuevo.",
             )
             .to_string()
-        })?
+        })??;
+
+        let mut audio = self.lock_audio();
+        audio.target = target;
+        self.refresh_audio(&mut audio);
+        Ok(())
+    }
+
+    /// Liga ou desliga o som da transmissão em andamento (botão 🔊).
+    pub fn set_audio_enabled(&self, enabled: bool) {
+        let mut audio = self.lock_audio();
+        audio.enabled = enabled;
+        self.refresh_audio(&mut audio);
     }
 
     /// false se a transmissão já terminou sozinha (por erro).
@@ -141,15 +182,76 @@ impl StreamHandle {
         }
         self.events.debug("stop: a thread terminou");
 
-        if let Some(audio) = self.audio.take() {
-            audio.stop();
+        let streamer = self
+            .audio
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner())
+            .streamer
+            .take();
+        if let Some(streamer) = streamer {
+            streamer.stop();
         }
+    }
+
+    /// Confere de onde o som deve vir agora e, se mudou, troca a captura do som.
+    /// O relógio continua o mesmo: o som novo segue sincronizado com a imagem.
+    fn refresh_audio(&self, audio: &mut AudioState) {
+        let wanted = audio_source(audio.target, audio.enabled, &self.events);
+        if wanted == audio.source && (audio.streamer.is_some() || wanted.is_none()) {
+            return;
+        }
+
+        if let Some(old) = audio.streamer.take() {
+            old.stop();
+        }
+
+        audio.source = wanted;
+        audio.streamer = wanted.map(|source| {
+            AudioStreamer::start(self.registry.clone(), self.started, self.events.clone(), source)
+        });
+
+        if wanted.is_none() && !audio.enabled {
+            self.events.info(tr(
+                "Transmissão sem som.",
+                "Streaming without audio.",
+                "Transmisión sin sonido.",
+            ));
+        }
+    }
+
+    fn lock_audio(&self) -> MutexGuard<'_, AudioState> {
+        self.audio.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
 impl Drop for StreamHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+/// De onde vem o som de cada tipo de transmissão (None = sem som).
+fn audio_source(target: CaptureTarget, enabled: bool, events: &EventSender) -> Option<AudioSource> {
+    if !enabled {
+        return None;
+    }
+
+    match target {
+        // Janela: só o som do app dela (e dos processos filhos)
+        CaptureTarget::Window(id) => match app_windows::window_process_id(id) {
+            Some(pid) => Some(AudioSource::ProcessTree(pid)),
+            None => {
+                // Sem saber o app, não arrisca mandar o som do PC inteiro (pode ter uma chamada)
+                events.warn(tr(
+                    "Não foi possível descobrir o app da janela: a transmissão segue sem som.",
+                    "Could not find the window's app: the stream continues without audio.",
+                    "No se pudo identificar la app de la ventana: la transmisión sigue sin sonido.",
+                ));
+                None
+            }
+        },
+        // Monitor inteiro: o som do PC (menos o LANShare)
+        CaptureTarget::PrimaryMonitor | CaptureTarget::Monitor(_) => Some(AudioSource::SystemExceptSelf),
     }
 }
 

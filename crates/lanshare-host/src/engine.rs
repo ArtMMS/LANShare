@@ -22,6 +22,7 @@ use lanshare_net::{run_connection, ConnectionEvent};
 use serde::Deserialize;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self as std_mpsc, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -93,6 +94,8 @@ pub struct HostEngine {
     sfx_inbox: SfxInbox,
     /// Anti-spam dos sons do próprio Host.
     sfx_cooldown: Mutex<SfxCooldown>,
+    /// Botão 🔊 do seletor: a transmissão leva som? (vale para a próxima e para a atual)
+    stream_audio: AtomicBool,
 }
 
 impl HostEngine {
@@ -171,6 +174,7 @@ impl HostEngine {
             host_avatar,
             sfx_inbox,
             sfx_cooldown: Mutex::new(SfxCooldown::default()),
+            stream_audio: AtomicBool::new(true),
         })
     }
 
@@ -287,7 +291,8 @@ impl HostEngine {
         self.start_stream_on(settings, CaptureTarget::PrimaryMonitor)
     }
 
-    /// Começa a transmitir um monitor ou uma janela para os Clients.
+    /// Começa a transmitir um monitor ou uma janela para os Clients
+    /// (com ou sem som, conforme o último `set_stream_audio`).
     pub fn start_stream_on(
         &self,
         settings: StreamSettings,
@@ -318,8 +323,25 @@ impl HostEngine {
             self.events.clone(),
             self.preview.clone(),
             target,
+            self.stream_audio.load(Ordering::Relaxed),
         ));
         Ok(())
+    }
+
+    /// Liga ou desliga o som da transmissão (botão 🔊 do seletor).
+    /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+    pub fn set_stream_audio(&self, enabled: bool) {
+        self.stream_audio.store(enabled, Ordering::Relaxed);
+
+        let streaming = self.lock_streaming();
+        if let Some(handle) = streaming.as_ref().filter(|h| h.is_running()) {
+            handle.set_audio_enabled(enabled);
+        }
+    }
+
+    /// A transmissão leva som?
+    pub fn stream_audio(&self) -> bool {
+        self.stream_audio.load(Ordering::Relaxed)
     }
 
     /// Troca o monitor ou a janela transmitida sem parar a transmissão.
@@ -543,7 +565,7 @@ async fn handle_client(
     let conn_events = shared.events.clone();
     let conn_registry = shared.registry.clone();
     let conn_inbox = shared.sfx_inbox.clone();
-    // Anti-spam deste Client: quem é garante é o Host (um Client modificado não consegue burlar)
+    // Anti-spam deste Client: quem garante é o Host (um Client modificado não consegue burlar)
     let mut sfx_cooldown = SfxCooldown::default();
     let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| match event {
         ConnectionEvent::Rtt(rtt) => conn_events.emit(HostEvent::Ping {
@@ -834,7 +856,3 @@ fn local_addresses(events: &EventSender) -> Vec<LocalAddress> {
         }
     }
 }
-
-
-
-

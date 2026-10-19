@@ -1,5 +1,6 @@
 //! Janelas do Host: lista as janelas abertas (as mesmas da barra de tarefas),
 //! com título, ícone e foto (usado na aba "Janela específica").
+//! Também descobre qual processo toca o som de uma janela (para transmitir só o áudio dela).
 
 use crate::capture::{CaptureTarget, ScreenCapture};
 use crate::monitors::{shrink, Thumbnail};
@@ -7,6 +8,7 @@ use serde::Serialize;
 use std::error::Error;
 use std::ffi::c_void;
 use std::time::Duration;
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
@@ -14,10 +16,10 @@ use windows::Win32::Graphics::Gdi::{
     BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    DrawIconEx, GetClassLongPtrW, GetClassNameW, GetTopWindow, GetWindow, GetWindowLongPtrW,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
-    SendMessageTimeoutW, DI_NORMAL, GCLP_HICON, GCLP_HICONSM, GWL_EXSTYLE, GW_HWNDNEXT,
-    GW_OWNER, HICON, SMTO_ABORTIFHUNG, WM_GETICON, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    DrawIconEx, FindWindowExW, GetClassLongPtrW, GetClassNameW, GetTopWindow, GetWindow,
+    GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, SendMessageTimeoutW, DI_NORMAL, GCLP_HICON, GCLP_HICONSM, GWL_EXSTYLE,
+    GW_HWNDNEXT, GW_OWNER, HICON, SMTO_ABORTIFHUNG, WM_GETICON, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
 };
 
 type BoxError = Box<dyn Error + Send + Sync>;
@@ -42,6 +44,9 @@ const ICON_SMALL2: usize = 2;
 
 /// Janelas do próprio Windows (área de trabalho, barra de tarefas) que nunca entram na lista.
 const SHELL_CLASSES: [&str; 4] = ["Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"];
+
+/// Moldura dos apps da Microsoft Store (pertence ao ApplicationFrameHost, não ao app).
+const STORE_FRAME_CLASS: &str = "ApplicationFrameWindow";
 
 /// Uma janela, como a interface a enxerga.
 #[derive(Debug, Clone, Serialize)]
@@ -73,6 +78,30 @@ pub fn list_windows() -> Vec<WindowInfo> {
     found
 }
 
+/// Processo que toca o som da janela (o som dele e dos processos filhos é o que vai na transmissão).
+/// Apps da Microsoft Store: a janela de fora é do ApplicationFrameHost; o app de verdade
+/// é a CoreWindow que fica dentro dela.
+pub fn window_process_id(id: u64) -> Option<u32> {
+    let hwnd = to_hwnd(id);
+
+    if class_name(hwnd) == STORE_FRAME_CLASS {
+        let core = unsafe {
+            FindWindowExW(Some(hwnd), None, w!("Windows.UI.Core.CoreWindow"), PCWSTR::null())
+        };
+        if let Some(pid) = core.ok().and_then(process_of) {
+            return Some(pid);
+        }
+    }
+
+    process_of(hwnd)
+}
+
+fn process_of(hwnd: HWND) -> Option<u32> {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32)) };
+    (pid != 0).then_some(pid)
+}
+
 /// Devolve a janela se ela é uma "janela de verdade" (aparece na barra de tarefas).
 fn describe(hwnd: HWND, own_pid: u32) -> Option<WindowInfo> {
     unsafe {
@@ -96,9 +125,7 @@ fn describe(hwnd: HWND, own_pid: u32) -> Option<WindowInfo> {
         }
 
         // O próprio LANShare não aparece
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid as *mut u32));
-        if pid == own_pid {
+        if process_of(hwnd) == Some(own_pid) {
             return None;
         }
 

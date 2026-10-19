@@ -305,6 +305,21 @@ pub extern "C" fn lanshare_host_switch_window(id: u64) -> *mut c_char {
     switch_source(CaptureTarget::Window(id))
 }
 
+/// Liga (`enabled` diferente de 0) ou desliga o som da transmissão (botão 🔊 do seletor).
+/// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+/// Monitor inteiro = som do PC; janela = só o som do app dela.
+#[no_mangle]
+pub extern "C" fn lanshare_host_set_stream_audio(enabled: i32) -> *mut c_char {
+    let host = HOST.lock().unwrap();
+    match host.as_ref() {
+        None => reply_err(room_not_open()),
+        Some(engine) => {
+            engine.set_stream_audio(enabled != 0);
+            reply_ok()
+        }
+    }
+}
+
 /// Para a transmissão. Retorna 1 se havia uma transmissão, 0 se não.
 #[no_mangle]
 pub extern "C" fn lanshare_host_stop_stream() -> i32 {
@@ -750,5 +765,3 @@ mod tests {
         assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
     }
 }
-
-
