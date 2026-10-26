@@ -115,11 +115,11 @@ public partial class MainWindow
         _fpsBox.SelectedIndex = _preferences.StreamFps == 15 ? 0 : 1;
     }
 
-    /// Diz ao motor por onde sai o som das transmissões (só com o modo Client ligado).
-    /// Se já houver som tocando, ele muda de saída na hora.
+    /// Diz ao motor por onde sai o som das transmissões assistidas (Host com a sala aberta
+    /// ou modo Client ligado). Se já houver som tocando, ele muda de saída na hora.
     private void ApplyAudioOutput()
     {
-        if (_clientActive) NativeMethods.ClientSetAudioOutput(_preferences.AudioOutputDevice);
+        if (_roomOpen || _clientActive) NativeMethods.SetAudioOutput(_preferences.AudioOutputDevice);
     }
 
     /// "Reiniciar agora" depois de trocar o idioma: abre o LANShare de novo e fecha este.

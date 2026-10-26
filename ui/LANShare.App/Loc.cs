@@ -109,7 +109,12 @@ internal static class Loc
         ["Host_Streaming"] = new[] { "Transmitindo", "Streaming", "Transmitiendo" },
         ["Host_OpenToStart"] = new[] { "Abra a sala para começar.", "Open the room to get started.", "Abre la sala para empezar." },
         ["Host_OpenError"] = new[] { "Erro ao abrir a sala.", "Error opening the room.", "Error al abrir la sala." },
-        ["Host_RoomOpenHint"] = new[] { "Sala aberta. Clique em Iniciar transmissão.", "Room open. Click Start stream.", "Sala abierta. Haz clic en Iniciar transmisión." },
+        ["Host_RoomOpenHint"] = new[]
+        {
+            "Sala aberta. Clique em Iniciar transmissão, ou no ícone de tela ao lado de um nome para assistir.",
+            "Room open. Click Start stream, or the screen icon next to a name to watch.",
+            "Sala abierta. Haz clic en Iniciar transmisión, o en el icono de pantalla junto a un nombre para ver.",
+        },
 
         // ── Lista de usuários ──
         ["Room_UsersHeader"] = new[] { "USUÁRIOS NA SALA", "USERS IN THE ROOM", "USUARIOS EN LA SALA" },
@@ -142,6 +147,26 @@ internal static class Loc
         ["Stream_Stats"] = new[] { "Transmitindo — {0:F1} Mbps, {1} usuário(s)", "Streaming — {0:F1} Mbps, {1} user(s)", "Transmitiendo — {0:F1} Mbps, {1} usuario(s)" },
         ["Stream_Interrupted"] = new[] { "Transmissão interrompida: {0}", "Stream interrupted: {0}", "Transmisión interrumpida: {0}" },
         ["Stream_Stopped"] = new[] { "Transmissão parada.", "Stream stopped.", "Transmisión detenida." },
+
+        // ── Assistir ──
+        ["Watch_Tooltip"] = new[] { "Assistir a transmissão", "Watch the stream", "Ver la transmisión" },
+        ["Watch_StopTooltip"] = new[] { "Parar de assistir", "Stop watching", "Dejar de ver" },
+        ["Watch_OwnTooltip"] = new[] { "Você está transmitindo", "You are streaming", "Estás transmitiendo" },
+        ["Watch_PickHint"] = new[]
+        {
+            "Clique no ícone de tela ao lado de um nome para assistir a transmissão.",
+            "Click the screen icon next to a name to watch their stream.",
+            "Haz clic en el icono de pantalla junto a un nombre para ver su transmisión.",
+        },
+        ["Watch_Connecting"] = new[] { "Conectando à transmissão de {0}...", "Connecting to {0}'s stream...", "Conectando a la transmisión de {0}..." },
+        ["Watch_Watching"] = new[] { "Assistindo {0}", "Watching {0}", "Viendo a {0}" },
+        ["Watch_Error"] = new[] { "Não foi possível assistir: {0}", "Could not watch: {0}", "No se pudo ver: {0}" },
+        ["Watch_Failed"] = new[] { "Não foi possível assistir {0}: {1}", "Could not watch {0}: {1}", "No se pudo ver a {0}: {1}" },
+        ["Watch_Ended"] = new[] { "A transmissão de {0} terminou.", "{0}'s stream ended.", "La transmisión de {0} terminó." },
+        ["Watch_Lost"] = new[] { "A transmissão de {0} caiu: {1}", "{0}'s stream dropped: {1}", "Se cayó la transmisión de {0}: {1}" },
+        ["Watch_DeniedNotStreaming"] = new[] { "{0} não está transmitindo.", "{0} isn't streaming.", "{0} no está transmitiendo." },
+        ["Watch_DeniedSelf"] = new[] { "Você não pode assistir a própria transmissão.", "You can't watch your own stream.", "No puedes ver tu propia transmisión." },
+        ["Watch_DeniedBusy"] = new[] { "Pare a sua transmissão para assistir outra pessoa.", "Stop your stream to watch someone else.", "Detén tu transmisión para ver a otra persona." },
 
         // ── Avisos (canto da janela) ──
         ["Notify_Joined"] = new[] { "{0} entrou na sala.", "{0} joined the room.", "{0} entró en la sala." },

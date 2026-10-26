@@ -45,9 +45,8 @@ public partial class MainWindow
 
     private static bool IsFunctionKey(Key key) => key >= Key.F1 && key <= Key.F24;
 
-    /// Só o Client conectado pode usar a tela cheia (no Host ela fica desativada).
-    private bool FullscreenAvailable =>
-        _mode == Mode.Client && _clientState == ClientState.Connected;
+    /// A tela cheia só vale assistindo a transmissão de alguém (Host ou Client).
+    private bool FullscreenAvailable => VolumeAvailable;
 
     private void ToggleFullscreen()
     {
@@ -55,7 +54,7 @@ public partial class MainWindow
         else if (FullscreenAvailable) SetFullscreen(true);
     }
 
-    /// Sai da tela cheia se ela deixou de fazer sentido (desconectado, expulso, voltou ao início...).
+    /// Sai da tela cheia se ela deixou de fazer sentido (a transmissão acabou, desconectou...).
     private void UpdateFullscreenAvailability()
     {
         if (!FullscreenAvailable) SetFullscreen(false);

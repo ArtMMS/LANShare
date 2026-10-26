@@ -130,9 +130,9 @@
 - [ ] Host coordinates streams: announce, watch tickets, revoke on kick/leave
 - [ ] Host can watch other users' streams (video, audio, volume, fullscreen)
 - [ ] Stream controls for Clients (resolution, FPS, monitor/window picker, audio toggle)
-- [ ] Screen-sharing indicator next to the user's name in the user list
-- [ ] Select a stream by clicking the user (the user you're watching has a green border)
-- [ ] "X started streaming" notification for any user
+- [x] Screen-sharing indicator next to the user's name in the user list
+- [x] Select a stream by clicking the user (the user you're watching has a green border)
+- [x] "X started streaming" notification for any user
 - [ ] Clear error when a streamer can't be reached (firewall)
 - [ ] Handle streamer leaving, viewer kicked and room closing while watching
 - [ ] If a user is kicked from the room more than 3 times, they will not be able to re-enter that room (based on their IP address). Unless they create another room.

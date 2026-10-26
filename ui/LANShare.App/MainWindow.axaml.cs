@@ -13,9 +13,6 @@ namespace LANShare.App;
 
 public partial class MainWindow : Window
 {
-    /// Client que entra no meio da transmissão não ouve o som de "transmissão iniciada".
-    private static readonly TimeSpan StreamSoundGrace = TimeSpan.FromSeconds(3);
-
     private enum Mode { Home, Host, Client }
     private enum ClientState { Idle, Connecting, Connected }
 
@@ -66,7 +63,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly DispatcherTimer _scanTimer = new() { Interval = TimeSpan.FromSeconds(5) };
 
-    // Buffer reaproveitado para receber a imagem do Rust (preview do Host ou tela do Client)
+    // Buffer reaproveitado para receber a imagem do Rust (prévia ou transmissão assistida)
     private readonly byte[] _previewBuffer = new byte[NativeMethods.PreviewBufferSize];
     private WriteableBitmap? _previewBitmap;
 
@@ -89,10 +86,11 @@ public partial class MainWindow : Window
     private int _roomCount;
     private string? _kickedReason;
     private int _pingMs = -1;
+
+    // Transmissão assistida (Host e Client)
     private double _videoFps, _videoMbps;
     private double? _syncMs; // diferença média entre imagem e som (null = sem som)
     private string? _videoSize;
-    private DateTime _connectedAt;
 
     public MainWindow()
     {
@@ -403,13 +401,15 @@ public partial class MainWindow : Window
             if (_roomOpen)
             {
                 PollHostEvents();
+                // Transmitindo, o Host vê a própria prévia; senão, a transmissão que assiste
                 if (_streaming) UpdatePreview();
+                else if (_watchState != WatchState.None) UpdateWatchFrame();
             }
 
             if (_clientActive)
             {
                 PollClientEvents();
-                if (_clientState == ClientState.Connected) UpdateClientFrame();
+                if (_clientState == ClientState.Connected && _watchState != WatchState.None) UpdateWatchFrame();
             }
         }
         catch (Exception ex)
@@ -429,6 +429,7 @@ public partial class MainWindow : Window
             _streaming = false;
             _peerAvatars.Clear();
             _sfxHighlights.Clear();
+            ResetWatch();
             StopTimerIfIdle();
             _usersPanel.Children.Clear();
             UpdateUi();
@@ -447,8 +448,12 @@ public partial class MainWindow : Window
         }
 
         _roomOpen = true;
+        _roomJoinedAt = DateTime.UtcNow;
         _peerAvatars.Clear();
+        ResetWatch();
         NativeMethods.HostSetAvatar(AvatarStore.ExportForNetwork()); // vai para quem entrar
+        ApplyAudioOutput(); // o Host também assiste: som na saída escolhida...
+        ApplyVolume(); // ...e no volume salvo
         _timer.Start();
         UpdateUi();
     }
@@ -478,7 +483,12 @@ public partial class MainWindow : Window
             using (doc)
             {
                 var e = doc.RootElement;
-                switch (e.GetProperty("type").GetString())
+                var type = e.GetProperty("type").GetString() ?? "";
+
+                // Transmissões da sala e a transmissão que o Host assiste
+                if (HandleWatchEvent(type, e)) continue;
+
+                switch (type)
                 {
                     case "started":
                         _placeholderText.Text = Loc.T("Host_RoomOpenHint");
@@ -549,23 +559,27 @@ public partial class MainWindow : Window
     }
 
     /// Lista da sala: primeiro o próprio Host, depois os clients (com o botão Expulsar).
-    /// Quem acabou de tocar um efeito sonoro aparece com a borda azul e um 🎉.
+    /// Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
     private void RefreshUsers()
     {
         _usersPanel.Children.Clear();
+        _hostUserNames.Clear();
         if (!_roomOpen) return;
 
-        _usersPanel.Children.Add(WithSfxHighlight(UserRow(_myAvatar, Loc.F("Users_YouHost", _username)), HostUserId));
+        _hostUserNames[HostUserId] = _username ?? "Host";
+        _usersPanel.Children.Add(BuildUserRow(_myAvatar, Loc.F("Users_YouHost", _username), HostUserId));
 
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
         {
             var id = user.GetProperty("id").GetUInt64();
             var name = user.GetProperty("name").GetString() ?? "?";
+            _hostUserNames[id] = name;
+
             var kick = new Button { Content = Loc.T("Users_Kick") };
             kick.Click += (_, _) => NativeMethods.HostKick(id);
 
-            _usersPanel.Children.Add(WithSfxHighlight(UserRow(PeerAvatar(id), name, kick), id));
+            _usersPanel.Children.Add(BuildUserRow(PeerAvatar(id), name, id, kick));
         }
     }
 
@@ -649,9 +663,7 @@ public partial class MainWindow : Window
         _hostName = "Host";
         _kickedReason = null;
         _pingMs = -1;
-        _videoFps = _videoMbps = 0;
-        _videoSize = null;
-        _syncMs = null;
+        ResetWatch();
     }
 
     private void ScanRooms()
@@ -741,7 +753,12 @@ public partial class MainWindow : Window
             using (doc)
             {
                 var e = doc.RootElement;
-                switch (e.GetProperty("type").GetString())
+                var type = e.GetProperty("type").GetString() ?? "";
+
+                // Transmissões da sala e a transmissão que o Client assiste
+                if (HandleWatchEvent(type, e)) continue;
+
+                switch (type)
                 {
                     case "rooms":
                         ApplyRooms(e.GetProperty("rooms"));
@@ -768,7 +785,7 @@ public partial class MainWindow : Window
 
                     case "connected":
                         _clientState = ClientState.Connected;
-                        _connectedAt = DateTime.UtcNow;
+                        _roomJoinedAt = DateTime.UtcNow;
                         _myId = e.GetProperty("client_id").GetUInt64();
                         _hostName = e.TryGetProperty("host_name", out var hn)
                                     && hn.ValueKind == JsonValueKind.String
@@ -779,10 +796,8 @@ public partial class MainWindow : Window
                         foreach (var u in e.GetProperty("users").EnumerateArray())
                             _clientUsers[u.GetProperty("id").GetUInt64()] = u.GetProperty("name").GetString() ?? "?";
                         _pingMs = -1;
-                        _videoFps = _videoMbps = 0;
-                        _videoSize = null;
                         _passwordPanel.IsVisible = false;
-                        HidePreview(Loc.T("Client_WaitingStream"));
+                        HidePreview(Loc.T("Watch_PickHint"));
                         RefreshClientUsers();
                         UpdateClientUi();
                         RefreshClientInfo();
@@ -798,7 +813,7 @@ public partial class MainWindow : Window
                     case "user_kicked":
                     {
                         var id = e.GetProperty("id").GetUInt64();
-                        var kickedOut = e.GetProperty("type").GetString() == "user_kicked";
+                        var kickedOut = type == "user_kicked";
                         _clientUsers.Remove(id);
                         _peerAvatars.Remove(id);
                         Notify(
@@ -828,48 +843,6 @@ public partial class MainWindow : Window
                     case "ping":
                         _pingMs = (int)e.GetProperty("rtt_ms").GetUInt64();
                         RefreshClientInfo();
-                        break;
-
-                    case "video_started":
-                    {
-                        // Primeira imagem de uma transmissão nova (não de uma troca de monitor/janela)
-                        var newStream = _videoSize is null;
-                        _videoSize = $"{e.GetProperty("width").GetInt32()}x{e.GetProperty("height").GetInt32()}";
-                        if (newStream && DateTime.UtcNow - _connectedAt > StreamSoundGrace)
-                            Notify(Loc.F("Notify_HostStarted", _hostName), StreamGlyph, Sound.StreamStarted);
-                        RefreshClientInfo();
-                        break;
-                    }
-
-                    case "sync_stats":
-                        _syncMs = e.TryGetProperty("offset_ms", out var off) && off.ValueKind == JsonValueKind.Number
-                            ? off.GetDouble()
-                            : null;
-                        RefreshClientInfo();
-                        break;
-
-                    case "video_stats":
-                        _videoFps = e.GetProperty("fps").GetDouble();
-                        _videoMbps = e.GetProperty("mbps").GetDouble();
-                        RefreshClientInfo();
-                        break;
-
-                    case "stream_stopped":
-                        // O Host parou de transmitir: a conexão continua, só a imagem acaba
-                        _videoFps = _videoMbps = 0;
-                        _videoSize = null;
-                        _syncMs = null;
-                        HidePreview(Loc.T("Stream_Stopped"));
-                        RefreshClientInfo();
-                        break;
-
-                    case "audio_error":
-                        // O vídeo continua; só avisa (uma vez por problema) que o som não está saindo
-                        Notify(e.GetProperty("error").GetString() ?? Loc.T("Client_AudioError"), AudioErrorGlyph);
-                        break;
-
-                    case "video_error":
-                        _infoText.Text = e.GetProperty("error").GetString() ?? Loc.T("Client_VideoError");
                         break;
 
                     case "rejected":
@@ -986,36 +959,29 @@ public partial class MainWindow : Window
     }
 
     /// Lista da sala: primeiro o Host, depois os clients (você marcado), cada um com o avatar.
-    /// Quem acabou de tocar um efeito sonoro aparece com a borda azul e um 🎉.
+    /// Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
         _clientUsersPanel.Children.Add(
-            WithSfxHighlight(UserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName)), HostUserId));
+            BuildUserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName), HostUserId));
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
             var mine = id == _myId;
             _clientUsersPanel.Children.Add(
-                WithSfxHighlight(UserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name), id));
+                BuildUserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name, id));
         }
     }
 
-    /// Linha de informações embaixo do vídeo: ping, resolução, FPS e Mbps.
+    /// Linha de informações embaixo do vídeo: conectado, ping e a transmissão assistida.
     private void RefreshClientInfo()
     {
         if (_clientState != ClientState.Connected || _kickedReason is not null) return;
 
         var parts = new List<string> { Loc.T("Client_Connected") };
         if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
-        if (_videoSize is not null) parts.Add($"{_videoSize} @ {_videoFps:F0} FPS, {_videoMbps:F1} Mbps");
-        if (_videoSize is not null && _syncMs is { } sync) parts.Add($"A/V {sync:+0;-0;0} ms");
+        if (WatchInfoText() is { } watch) parts.Add(watch);
         _infoText.Text = string.Join(" — ", parts);
-    }
-
-    private void UpdateClientFrame()
-    {
-        if (!NativeMethods.ClientFrame(_previewBuffer, out var width, out var height)) return;
-        PaintFrame(width, height);
     }
 
     private void UpdateClientUi()
@@ -1036,7 +1002,7 @@ public partial class MainWindow : Window
 
         UpdateProfileState();
         UpdateStage();
-        UpdateVolumeControls(); // os botões de volume e 🎉 só existem com o Client conectado
+        UpdateVolumeControls(); // os botões de volume e 🎉 dependem da conexão
     }
 
     // ───────────────────────── Imagem (Host e Client) ─────────────────────────

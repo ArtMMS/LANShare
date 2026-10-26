@@ -9,10 +9,10 @@ using Avalonia.VisualTree;
 
 namespace LANShare.App;
 
-/// Volume do som da transmissão (só no Client): botão no canto inferior esquerdo do vídeo
-/// e, ao clicar, um painel com o slider vertical e o mudo. O volume fica salvo nas preferências.
-/// Em tela cheia o botão (e o cursor) somem quando o mouse fica parado, como num player de vídeo.
-/// O botão 🎉 dos efeitos sonoros (MainWindow.Soundboard.cs) some e volta junto com ele.
+/// Volume do som da transmissão assistida (Host e Client): botão no canto inferior esquerdo
+/// do vídeo e, ao clicar, um painel com o slider vertical e o mudo. O volume fica salvo nas
+/// preferências. Em tela cheia o botão (e o cursor) somem quando o mouse fica parado, como num
+/// player de vídeo. O botão 🎉 dos efeitos sonoros (MainWindow.Soundboard.cs) some e volta junto com ele.
 public partial class MainWindow
 {
     /// Em tela cheia, depois deste tempo sem mexer o mouse, o botão e o cursor somem.
@@ -49,8 +49,12 @@ public partial class MainWindow
     private bool _volumeHiddenByIdle;
     private bool _updatingVolumeSlider;
 
-    /// O botão de volume faz sentido agora? (Client conectado.)
-    private bool VolumeAvailable => _mode == Mode.Client && _clientState == ClientState.Connected;
+    /// O botão de volume faz sentido agora? (Assistindo alguém, no Host com a sala aberta
+    /// ou no Client conectado.)
+    private bool VolumeAvailable =>
+        _watchState != WatchState.None
+        && ((_mode == Mode.Client && _clientState == ClientState.Connected)
+            || (_mode == Mode.Host && _roomOpen));
 
     /// Chamado uma vez no construtor (antes do InitSoundboard e do InitFullscreen).
     private void InitVolume()
@@ -210,10 +214,11 @@ public partial class MainWindow
         RefreshVolumeVisuals();
     }
 
-    /// Manda o volume salvo para o motor (ao entrar no modo Client).
+    /// Manda o volume salvo para o motor (ao abrir a sala ou entrar no modo Client).
     private void ApplyVolume()
     {
-        if (_clientActive) NativeMethods.ClientSetVolume(_preferences.StreamVolume, _preferences.StreamMuted);
+        if (_roomOpen || _clientActive)
+            NativeMethods.SetVolume(_preferences.StreamVolume, _preferences.StreamMuted);
     }
 
     /// Muda o volume: aplica na hora, atualiza o visual e salva logo depois.
@@ -265,7 +270,8 @@ public partial class MainWindow
         _volumeSlider.Opacity = muted ? 0.45 : 1;
     }
 
-    /// Mostra ou esconde o botão conforme a conexão (chamado pelo UpdateClientUi e pelo ShowMode).
+    /// Mostra ou esconde o botão conforme o que está acontecendo (chamado pelo UpdateClientUi,
+    /// pelo ShowMode e quando começa/termina uma transmissão assistida).
     /// Também atualiza o botão 🎉 dos efeitos sonoros.
     private void UpdateVolumeControls()
     {
@@ -285,7 +291,7 @@ public partial class MainWindow
 
         UpdateSoundboardControls();
 
-        // A tela cheia também só vale com o Client conectado
+        // A tela cheia também só vale assistindo alguém
         UpdateFullscreenAvailability();
     }
 
