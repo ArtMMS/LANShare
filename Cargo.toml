@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "crates/lanshare-core",
     "crates/lanshare-net",
+    "crates/lanshare-stream",
     "crates/lanshare-host",
     "crates/lanshare-client",
     "crates/lanshare-app",
@@ -19,6 +20,7 @@ license = "MIT"
 [workspace.dependencies]
 lanshare-core = { path = "crates/lanshare-core" }
 lanshare-net = { path = "crates/lanshare-net" }
+lanshare-stream = { path = "crates/lanshare-stream" }
 lanshare-host = { path = "crates/lanshare-host" }
 lanshare-client = { path = "crates/lanshare-client" }
 

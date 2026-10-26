@@ -117,18 +117,45 @@
 - [x] Add "Apps excluded from audio" list in Settings (call apps blocked by default)
 - [x] Allow adding/removing apps from the excluded list
 - [x] Update audio mode when using "Change stream" (monitor ↔ window)
-- [ ] Translate new texts (EN / PT / ES)
-- [ ] Bug fix: If streaming an window and close the app, the image freezes. Make it end the stream automaticaly.
+
+---
+
+# V2.0.0 — Multi-Streaming
+
+- [x] Split capture/encode and decode/playback into shared crates (lanshare-stream / lanshare-viewer)
+- [ ] Protocol v12: stream announcements and watch tickets
+- [ ] Every user can share their screen (Host and Clients)
+- [ ] Streams go directly from the streamer to the viewers (no relay through the Host)
+- [ ] Viewers only receive the streams they chose to watch
+- [ ] Host coordinates streams: announce, watch tickets, revoke on kick/leave
+- [ ] Host can watch other users' streams (video, audio, volume, fullscreen)
+- [ ] Stream controls for Clients (resolution, FPS, monitor/window picker, audio toggle)
+- [ ] Screen-sharing indicator next to the user's name in the user list
+- [ ] Select a stream by clicking the user (the user you're watching has a green border)
+- [ ] "X started streaming" notification for any user
+- [ ] Clear error when a streamer can't be reached (firewall)
+- [ ] Handle streamer leaving, viewer kicked and room closing while watching
+- [ ] If a user is kicked from the room more than 3 times, they will not be able to re-enter that room (based on their IP address). Unless they create another room.
+
+# V2.1.0 — Multi-View
+
+- [ ] Screen that shows all active streams
+- [ ] Customizable layout (change position and size)
 
 ---
 
 ## Future Updates
  Optimize
- Support 1440p (Quad HD)
- Support 4K
+ Support 1440p (Quad HD) and 4K
  Reach 60 FPS
- Stream multiple monitors at the same time as one large screen
+ Stream multiple monitors at the same time (only one user)
+    - Show untill 3 monitors, one on top of the other, and focus by click in one of them (showing the other ones on the bottom)
  Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
+    - Only cameras and avatars screen (like discord or skype); clickable on the user feed
  Allow multiples screen transmitions and notify who is showing the screen on the user feed
+    - Select screen transmission by click on the "blue border or screen-sharing icon" (The user you're watching has a green border)
+    - Screen that shows all screen transmission with a customazible layout (change position and size)
+    - Show or hide webcam options
+    - Customize all webcam positions and sizes (automatic is on bottom)
  Linux Port
 

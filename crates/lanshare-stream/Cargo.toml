@@ -1,0 +1,32 @@
+[package]
+name = "lanshare-stream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+lanshare-core = { workspace = true }
+serde = { workspace = true }
+windows-capture = "2.0.1"
+# O macro #[implement] (objetos COM feitos em Rust) gera código que chama o windows-core direto
+windows-core = "0.62"
+openh264 = "0.9"
+opus = { workspace = true }
+rayon = "1"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_MediaFoundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_WindowsAndMessaging",
+] }

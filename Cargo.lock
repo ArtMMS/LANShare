@@ -343,15 +343,10 @@ dependencies = [
  "if-addrs",
  "lanshare-core",
  "lanshare-net",
- "openh264",
- "opus",
- "rayon",
+ "lanshare-stream",
  "rpassword",
  "serde",
  "tokio",
- "windows",
- "windows-capture",
- "windows-core",
 ]
 
 [[package]]
@@ -360,6 +355,20 @@ version = "0.1.0"
 dependencies = [
  "lanshare-core",
  "tokio",
+]
+
+[[package]]
+name = "lanshare-stream"
+version = "0.1.0"
+dependencies = [
+ "lanshare-core",
+ "openh264",
+ "opus",
+ "rayon",
+ "serde",
+ "windows",
+ "windows-capture",
+ "windows-core",
 ]
 
 [[package]]
