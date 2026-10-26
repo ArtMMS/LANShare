@@ -307,6 +307,7 @@ dependencies = [
  "if-addrs",
  "lanshare-core",
  "lanshare-net",
+ "lanshare-stream",
  "lanshare-viewer",
  "minifb",
  "rayon",
@@ -343,8 +344,10 @@ dependencies = [
  "lanshare-core",
  "lanshare-net",
  "lanshare-stream",
+ "lanshare-viewer",
  "rpassword",
  "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -377,9 +380,12 @@ name = "lanshare-viewer"
 version = "0.1.0"
 dependencies = [
  "lanshare-core",
+ "lanshare-net",
+ "lanshare-stream",
  "opus",
  "rayon",
  "serde_json",
+ "tokio",
  "windows",
 ]
 

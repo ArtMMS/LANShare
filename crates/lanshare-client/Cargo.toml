@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 lanshare-core = { workspace = true }
 lanshare-net = { workspace = true }
+lanshare-stream = { workspace = true }
 lanshare-viewer = { workspace = true }
 tokio = { workspace = true }
 rpassword = { workspace = true }

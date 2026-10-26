@@ -1,8 +1,10 @@
-//! Motor do Host: abre a sala, aceita Clients, transmite a tela do Host e coordena
-//! as transmissões de todos (quem transmite e os ingressos para assistir).
+//! Motor do Host: abre a sala, aceita Clients, transmite a tela do Host, assiste as
+//! transmissões dos Clients e coordena as transmissões de todos (quem transmite e os ingressos).
 //!
 //! Este módulo NÃO imprime nada e NÃO lê o teclado. Quem usa (o terminal ou a janela)
-//! manda comandos pelos métodos de `HostEngine` e recebe o que acontece pelos eventos.
+//! manda comandos pelos métodos de `HostEngine` e recebe o que acontece pelos eventos:
+//! - `try_next_event`: a sala e a transmissão do Host (HostEvent);
+//! - `try_next_viewer_event`: a transmissão que o Host assiste (JSON do lanshare-viewer).
 //!
 //! v2.0: o vídeo não passa pela conexão da sala. Quem transmite (o Host ou um Client) tem o
 //! próprio StreamServer; o Host só diz onde assistir e entrega os ingressos.
@@ -23,7 +25,10 @@ use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use lanshare_stream::{CaptureTarget, PreviewSlot, StreamHandle, StreamServer, StreamSettings};
+use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
+use lanshare_viewer::Watcher;
 use serde::Deserialize;
+use serde_json::Value;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +101,8 @@ struct Shared {
     streams: StreamDirectory,
     /// A transmissão do Host (None = não está transmitindo).
     host_stream: Arc<Mutex<Option<HostStream>>>,
+    /// A transmissão que o Host está assistindo.
+    watcher: Watcher,
 }
 
 impl Shared {
@@ -112,6 +119,9 @@ impl Shared {
 
     /// Alguém parou de transmitir (ou saiu da sala): tira do catálogo e avisa a sala.
     fn end_stream(&self, id: u64) {
+        // Se o Host assistia essa transmissão, a conexão fecha já
+        self.watcher.stream_ended(id);
+
         if !self.streams.remove(id) {
             return;
         }
@@ -194,6 +204,8 @@ pub struct HostEngine {
     kicker: Kicker,
     events: EventSender,
     event_rx: Mutex<Receiver<HostEvent>>,
+    /// Eventos da transmissão que o Host assiste (JSON, iguais aos do Client).
+    viewer_rx: Mutex<Receiver<Value>>,
     shutdown_tx: watch::Sender<bool>,
     shared: Shared,
     /// Miniatura do que o Host está transmitindo (preview do Host).
@@ -206,6 +218,10 @@ pub struct HostEngine {
     sfx_cooldown: Mutex<SfxCooldown>,
     /// Botão 🔊 do seletor: a transmissão leva som? (vale para a próxima e para a atual)
     stream_audio: AtomicBool,
+    /// Por onde sai o som da transmissão que o Host assiste (escolhido nas Configurações).
+    audio_output: AudioOutputSetting,
+    /// Volume do som da transmissão que o Host assiste.
+    audio_volume: AudioVolume,
 }
 
 impl HostEngine {
@@ -222,6 +238,16 @@ impl HostEngine {
 
         let (event_tx, event_rx) = std_mpsc::channel();
         let events = EventSender::new(event_tx);
+
+        let (viewer_tx, viewer_rx) = std_mpsc::channel::<Value>();
+        let audio_output = AudioOutputSetting::default();
+        let audio_volume = AudioVolume::default();
+        let watcher = Watcher::new(
+            runtime.handle().clone(),
+            viewer_tx,
+            audio_output.clone(),
+            audio_volume.clone(),
+        );
 
         let password = config
             .password
@@ -243,6 +269,7 @@ impl HostEngine {
             sfx_inbox: sfx_inbox.clone(),
             streams: StreamDirectory::default(),
             host_stream: Arc::new(Mutex::new(None)),
+            watcher,
         };
 
         events.emit(HostEvent::Started {
@@ -275,6 +302,7 @@ impl HostEngine {
             kicker,
             events,
             event_rx: Mutex::new(event_rx),
+            viewer_rx: Mutex::new(viewer_rx),
             shutdown_tx,
             shared,
             preview: PreviewSlot::default(),
@@ -282,12 +310,23 @@ impl HostEngine {
             sfx_inbox,
             sfx_cooldown: Mutex::new(SfxCooldown::default()),
             stream_audio: AtomicBool::new(true),
+            audio_output,
+            audio_volume,
         })
     }
 
-    /// Próximo evento que ainda não foi lido (None = não há nenhum no momento).
+    /// Próximo evento da sala ou da transmissão do Host (None = não há nenhum no momento).
     pub fn try_next_event(&self) -> Option<HostEvent> {
         self.event_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .try_recv()
+            .ok()
+    }
+
+    /// Próximo evento da transmissão que o Host assiste (watch_started, video_stats...).
+    pub fn try_next_viewer_event(&self) -> Option<Value> {
+        self.viewer_rx
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .try_recv()
@@ -393,6 +432,87 @@ impl HostEngine {
         Ok(target.name)
     }
 
+    // ───────────────────────────── Assistir ─────────────────────────────
+
+    /// Assiste a transmissão de um Client: o próprio Host cria o ingresso, avisa quem
+    /// transmite e conecta direto. O andamento chega por `try_next_viewer_event`.
+    pub fn watch(&self, user_id: u64) -> Result<(), String> {
+        if user_id == HOST_USER_ID {
+            return Err(tr(
+                "Você não pode assistir a própria transmissão.",
+                "You can't watch your own stream.",
+                "No puedes ver tu propia transmisión.",
+            )
+            .to_string());
+        }
+        if self.is_streaming() {
+            return Err(tr(
+                "Pare a sua transmissão para assistir outra pessoa.",
+                "Stop your stream to watch someone else.",
+                "Detén tu transmisión para ver a otra persona.",
+            )
+            .to_string());
+        }
+
+        let not_streaming = || {
+            tr(
+                "Essa pessoa não está transmitindo.",
+                "This person isn't streaming.",
+                "Esta persona no está transmitiendo.",
+            )
+            .to_string()
+        };
+
+        let spot = self.shared.streams.get(user_id).ok_or_else(not_streaming)?;
+        let ip = spot
+            .ip
+            .as_deref()
+            .and_then(|text| text.parse::<IpAddr>().ok())
+            .ok_or_else(not_streaming)?;
+
+        let ticket = new_watch_ticket();
+        let allowed = Message::ViewerAllowed {
+            viewer_id: HOST_USER_ID,
+            ticket: ticket.clone(),
+        };
+        if !self.registry.send_to(user_id, allowed) {
+            return Err(not_streaming());
+        }
+
+        self.shared
+            .watcher
+            .watch_now(user_id, SocketAddr::new(ip, spot.port), ticket);
+        Ok(())
+    }
+
+    /// Para de assistir.
+    pub fn stop_watching(&self) {
+        self.shared.watcher.stop();
+    }
+
+    /// Quem o Host está assistindo (None = ninguém).
+    pub fn watching(&self) -> Option<u64> {
+        self.shared.watcher.watching()
+    }
+
+    /// Copia a imagem mais recente da transmissão assistida (BGRA) para `out`,
+    /// só se for NOVA desde a última leitura. Devolve (largura, altura).
+    pub fn frame_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.shared.watcher.frame_into(out)
+    }
+
+    /// Escolhe a saída do som da transmissão assistida (None = padrão do Windows).
+    pub fn set_audio_output(&self, device_id: Option<String>) {
+        self.audio_output.set(device_id);
+    }
+
+    /// Volume do som da transmissão assistida (0 a 100) e mudo. Muda na hora.
+    pub fn set_volume(&self, percent: u32, muted: bool) {
+        self.audio_volume.set(percent, muted);
+    }
+
+    // ───────────────────────────── Transmitir ─────────────────────────────
+
     /// Começa a transmitir o monitor principal.
     pub fn start_stream(&self, settings: StreamSettings) -> Result<(), String> {
         self.start_stream_on(settings, CaptureTarget::PrimaryMonitor)
@@ -400,6 +520,7 @@ impl HostEngine {
 
     /// Começa a transmitir um monitor ou uma janela (com ou sem som, conforme o último
     /// `set_stream_audio`) e avisa a sala. Só quem pedir ingresso recebe a imagem.
+    /// Para de assistir o que estava vendo (na v2.0 quem transmite não assiste).
     pub fn start_stream_on(
         &self,
         settings: StreamSettings,
@@ -428,6 +549,8 @@ impl HostEngine {
         if let Some(old) = slot.take() {
             old.stop();
         }
+
+        self.shared.watcher.stop();
 
         let server = StreamServer::start(self.runtime.handle(), self.events.clone().into())
             .map_err(|erro| {
@@ -522,9 +645,10 @@ impl HostEngine {
         self.runtime.handle().clone()
     }
 
-    /// Fecha a sala: para a transmissão, avisa os Clients e encerra tudo.
+    /// Fecha a sala: para de assistir, para a transmissão, avisa os Clients e encerra tudo.
     /// Devolve os eventos que ainda não tinham sido lidos (inclui o `Stopped`).
     pub fn stop(self) -> Vec<HostEvent> {
+        self.shared.watcher.stop();
         self.stop_stream();
         let _ = self.shutdown_tx.send(true);
 

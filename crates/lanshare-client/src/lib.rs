@@ -1,15 +1,18 @@
-//! Biblioteca do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
+//! Biblioteca do Client: acha uma sala, conecta no Host, acompanha quem está na sala,
+//! assiste transmissões e transmite a própria tela.
 //! O executável único (`lanshare-app`) chama `run()` para iniciar o Client em modo console.
 //! A interface gráfica usa o `ClientEngine` (engine.rs) e a lista de saídas de áudio (audio_devices).
-//! Decodificar e tocar a transmissão fica no crate lanshare-viewer.
+//! Assistir fica no crate lanshare-viewer; transmitir, no lanshare-stream (streaming.rs liga os dois).
+//!
+//! O modo console (v2.0) só entra na sala: assistir uma transmissão é pela interface.
 
 mod discovery;
 mod engine;
+mod streaming;
 mod viewer;
 
-// Atalhos com os caminhos antigos (crate::video, crate::decoder...): o engine.rs e o viewer.rs
-// continuam iguais. Saem quando o motor for refeito (Etapa 5 da v2.0).
-use lanshare_viewer::{audio_player, decoder, sync_clock, video};
+// Atalho com o caminho antigo (crate::decoder): a janela do modo terminal (viewer.rs) continua igual
+use lanshare_viewer::decoder;
 
 pub use engine::ClientEngine;
 pub use lanshare_viewer::audio_devices;
@@ -369,8 +372,17 @@ fn handle_message(
         // Fomos nós: a conexão será encerrada em seguida pelo Host
         Message::Kicked { reason } => println!("[client] {reason}."),
 
-        // Avatares, som, efeitos sonoros e fim de transmissão: o modo terminal não mostra nem toca
-        Message::UserAvatar { .. } | Message::Audio(_) | Message::Sfx(_) | Message::StreamStopped => {}
+        // Avatares, som, efeitos sonoros e transmissões: o modo terminal não mostra nem toca
+        Message::UserAvatar { .. }
+        | Message::Audio(_)
+        | Message::Sfx(_)
+        | Message::StreamStopped
+        | Message::UserStreaming { .. }
+        | Message::UserStreamStopped { .. }
+        | Message::WatchGranted { .. }
+        | Message::WatchDenied { .. }
+        | Message::ViewerAllowed { .. }
+        | Message::ViewerRevoked { .. } => {}
 
         outra => println!("[client] Mensagem inesperada: {outra:?}"),
     }

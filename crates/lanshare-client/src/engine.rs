@@ -1,40 +1,39 @@
-//! Motor do Client: procura salas, conecta num Host e recebe a tela.
+//! Motor do Client: procura salas, conecta num Host, assiste transmissões e transmite a própria tela.
 //!
-//! Não imprime nada e não lê o teclado. Quem usa (a interface) manda comandos pelos
-//! métodos de `ClientEngine` e recebe o que acontece como eventos em JSON.
+//! Não imprime nada e não lê o teclado. Quem usa (a interface) manda comandos pelos métodos de
+//! `ClientEngine` e recebe o que acontece como eventos em JSON.
+//!
+//! v2.0: a conexão com o Host é só a sala (usuários, avatares, efeitos sonoros e a coordenação).
+//! Assistir alguém abre uma conexão direta com quem transmite (Watcher, do lanshare-viewer);
+//! transmitir abre o próprio StreamServer (streaming.rs).
 
-use crate::audio_player::{AudioOutputSetting, AudioPlayer, AudioVolume};
 use crate::discovery;
 use crate::normalize_address;
-use crate::sync_clock::SyncClock;
-use crate::video::{FrameSlot, VideoPipeline};
+use crate::streaming::OwnStream;
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
-    read_message, write_message, Message, SfxFrame, UserInfo, VideoFrame, MAX_AVATAR_LEN,
-    PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL,
-    REJECT_WRONG_PASSWORD,
+    read_message, write_message, Message, SfxFrame, UserInfo, MAX_AVATAR_LEN, PROTOCOL_VERSION,
+    REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
+use lanshare_stream::{CaptureTarget, PreviewSlot, StreamSettings};
+use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
+use lanshare_viewer::{EventTx, Watcher};
 use serde_json::{json, Value};
 use std::io;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self as std_mpsc, Receiver, Sender};
+use std::sync::mpsc::{self as std_mpsc, Receiver};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 
-/// Canal por onde o motor avisa a interface (cada evento é um JSON com "type").
-pub(crate) type EventTx = Sender<Value>;
-
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// De quanto em quanto tempo o motor avisa FPS e Mbps do vídeo recebido.
-const STATS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Tempo para o Bye chegar ao Host antes de fechar tudo.
 const STOP_GRACE: Duration = Duration::from_millis(300);
@@ -61,7 +60,6 @@ pub struct ClientEngine {
     event_rx: Mutex<Receiver<Value>>,
     session: Arc<Mutex<Option<Session>>>,
     scanning: Arc<AtomicBool>,
-    frame: FrameSlot,
     /// O meu avatar (PNG em base64), enviado ao entrar numa sala. None = sem avatar.
     avatar: Mutex<Option<String>>,
     /// Por onde sai o som das transmissões (escolhido nas Configurações).
@@ -72,6 +70,14 @@ pub struct ClientEngine {
     sfx_inbox: SfxInbox,
     /// Anti-spam dos meus sons (o Host também confere: isto só evita mandar à toa).
     sfx_cooldown: Mutex<SfxCooldown>,
+    /// Quem estou assistindo (no máximo uma transmissão por vez).
+    watcher: Watcher,
+    /// A minha transmissão.
+    own_stream: OwnStream,
+    /// Miniatura da minha transmissão (a prévia).
+    preview: PreviewSlot,
+    /// Botão 🔊 do seletor: a minha transmissão leva som?
+    stream_audio: AtomicBool,
 }
 
 impl ClientEngine {
@@ -83,6 +89,14 @@ impl ClientEngine {
             .build()?;
 
         let (events, event_rx) = std_mpsc::channel();
+        let audio_output = AudioOutputSetting::default();
+        let audio_volume = AudioVolume::default();
+        let watcher = Watcher::new(
+            runtime.handle().clone(),
+            events.clone(),
+            audio_output.clone(),
+            audio_volume.clone(),
+        );
 
         Ok(Self {
             runtime,
@@ -90,12 +104,15 @@ impl ClientEngine {
             event_rx: Mutex::new(event_rx),
             session: Arc::new(Mutex::new(None)),
             scanning: Arc::new(AtomicBool::new(false)),
-            frame: FrameSlot::default(),
             avatar: Mutex::new(None),
-            audio_output: AudioOutputSetting::default(),
-            audio_volume: AudioVolume::default(),
+            audio_output,
+            audio_volume,
             sfx_inbox: SfxInbox::default(),
             sfx_cooldown: Mutex::new(SfxCooldown::default()),
+            watcher,
+            own_stream: OwnStream::default(),
+            preview: PreviewSlot::default(),
+            stream_audio: AtomicBool::new(true),
         })
     }
 
@@ -167,12 +184,7 @@ impl ClientEngine {
         if sent {
             Ok(())
         } else {
-            Err(tr(
-                "Você não está numa sala.",
-                "You are not in a room.",
-                "No estás en ninguna sala.",
-            )
-            .to_string())
+            Err(not_in_room())
         }
     }
 
@@ -266,10 +278,9 @@ impl ClientEngine {
 
         let session_slot = self.session.clone();
         let events = self.events.clone();
-        let frame = self.frame.clone();
-        let audio_output = self.audio_output.clone();
-        let audio_volume = self.audio_volume.clone();
         let sfx_inbox = self.sfx_inbox.clone();
+        let watcher = self.watcher.clone();
+        let own_stream = self.own_stream.clone();
 
         self.runtime.spawn(async move {
             let end = run_session(
@@ -279,16 +290,18 @@ impl ClientEngine {
                 password_rx,
                 outgoing_rx,
                 events.clone(),
-                frame.clone(),
-                audio_output,
-                audio_volume,
                 sfx_inbox,
+                watcher.clone(),
+                own_stream.clone(),
             )
             .await;
 
+            // Fora da sala: para de assistir e de transmitir (parar a captura espera a thread dela)
+            watcher.stop();
+            let _ = tokio::task::spawn_blocking(move || own_stream.stop()).await;
+
             // Libera a sessão ANTES de avisar: quem recebe o aviso já pode conectar de novo
             *session_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            frame.end_session();
             send(&events, end.into_event());
         });
         Ok(())
@@ -298,17 +311,14 @@ impl ClientEngine {
     pub fn submit_password(&self, password: String) -> Result<(), String> {
         let session = self.lock_session();
         match session.as_ref() {
-            Some(s) => s
-                .password_tx
-                .send(password)
-                .map_err(|_| {
-                    tr(
-                        "A conexão já foi encerrada.",
-                        "The connection has already ended.",
-                        "La conexión ya terminó.",
-                    )
-                    .to_string()
-                }),
+            Some(s) => s.password_tx.send(password).map_err(|_| {
+                tr(
+                    "A conexão já foi encerrada.",
+                    "The connection has already ended.",
+                    "La conexión ya terminó.",
+                )
+                .to_string()
+            }),
             None => Err(tr(
                 "Não há conexão em andamento.",
                 "There is no connection in progress.",
@@ -331,10 +341,94 @@ impl ClientEngine {
         }
     }
 
-    /// Copia a imagem mais recente (BGRA) para `out`, só se for NOVA desde a última leitura.
-    /// Devolve (largura, altura).
+    // ───────────────────────────── Assistir ─────────────────────────────
+
+    /// Pede ao Host para assistir alguém (o id da lista da sala; 0 = o Host).
+    /// O andamento chega por eventos: watch_connecting, watch_started, watch_denied,
+    /// watch_failed e watch_ended.
+    pub fn watch(&self, user_id: u64) -> Result<(), String> {
+        if self.own_stream.is_running() {
+            return Err(busy_streaming());
+        }
+
+        let session = self.lock_session();
+        let Some(session) = session.as_ref() else {
+            return Err(not_in_room());
+        };
+
+        self.watcher.request(user_id);
+        session
+            .outgoing_tx
+            .send(Message::WatchRequest { user_id })
+            .map_err(|_| not_in_room())
+    }
+
+    /// Para de assistir.
+    pub fn stop_watching(&self) {
+        self.watcher.stop();
+    }
+
+    /// Quem estou assistindo (ou pedi para assistir). None = ninguém.
+    pub fn watching(&self) -> Option<u64> {
+        self.watcher.watching()
+    }
+
+    /// Copia a imagem mais recente da transmissão assistida (BGRA) para `out`,
+    /// só se for NOVA desde a última leitura. Devolve (largura, altura).
     pub fn frame_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
-        self.frame.read_into(out)
+        self.watcher.frame_into(out)
+    }
+
+    // ───────────────────────────── Transmitir ─────────────────────────────
+
+    /// Começa a transmitir um monitor ou uma janela e avisa a sala.
+    /// Para de assistir o que estava vendo (na v2.0 quem transmite não assiste).
+    pub fn start_stream_on(&self, settings: StreamSettings, target: CaptureTarget) -> Result<(), String> {
+        check_settings(settings)?;
+
+        let room = self
+            .lock_session()
+            .as_ref()
+            .map(|session| session.outgoing_tx.clone())
+            .ok_or_else(not_in_room)?;
+
+        self.watcher.stop();
+        self.own_stream.start(
+            self.runtime.handle(),
+            &self.events,
+            room,
+            self.preview.clone(),
+            settings,
+            target,
+            self.stream_audio.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Liga ou desliga o som da minha transmissão (botão 🔊 do seletor).
+    /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+    pub fn set_stream_audio(&self, enabled: bool) {
+        self.stream_audio.store(enabled, Ordering::Relaxed);
+        self.own_stream.set_audio_enabled(enabled);
+    }
+
+    /// Troca o monitor ou a janela transmitida sem parar a transmissão.
+    pub fn switch_source(&self, target: CaptureTarget) -> Result<(), String> {
+        self.own_stream.switch_source(target)
+    }
+
+    /// Para a minha transmissão e avisa a sala. Devolve false se não estava transmitindo.
+    pub fn stop_stream(&self) -> bool {
+        self.own_stream.stop()
+    }
+
+    /// Estou transmitindo? (false também se a transmissão caiu por erro)
+    pub fn is_streaming(&self) -> bool {
+        self.own_stream.is_running()
+    }
+
+    /// Copia a prévia da minha transmissão (BGRA) para `out`. Devolve (largura, altura).
+    pub fn preview_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.preview.read_into(out)
     }
 
     /// Desconecta e encerra o motor.
@@ -342,11 +436,45 @@ impl ClientEngine {
         if self.disconnect() {
             std::thread::sleep(STOP_GRACE);
         }
+        self.watcher.stop();
+        self.own_stream.stop();
         self.runtime.shutdown_timeout(Duration::from_secs(2));
     }
 
     fn lock_session(&self) -> MutexGuard<'_, Option<Session>> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+fn not_in_room() -> String {
+    tr(
+        "Você não está numa sala.",
+        "You are not in a room.",
+        "No estás en ninguna sala.",
+    )
+    .to_string()
+}
+
+fn busy_streaming() -> String {
+    tr(
+        "Pare a sua transmissão para assistir outra pessoa.",
+        "Stop your stream to watch someone else.",
+        "Detén tu transmisión para ver a otra persona.",
+    )
+    .to_string()
+}
+
+/// Resolução 720/1080 e FPS 15/30.
+fn check_settings(settings: StreamSettings) -> Result<(), String> {
+    if matches!(settings.height, 720 | 1080) && matches!(settings.fps, 15 | 30) {
+        Ok(())
+    } else {
+        Err(tr(
+            "Resolução ou FPS inválidos (use 720 ou 1080, e 15 ou 30).",
+            "Invalid resolution or FPS (use 720 or 1080, and 15 or 30).",
+            "Resolución o FPS no válidos (usa 720 o 1080, y 15 o 30).",
+        )
+        .to_string())
     }
 }
 
@@ -423,6 +551,7 @@ fn rejection_text(code: &str, reason: String) -> String {
 }
 
 /// Conecta, entra na sala e mantém a conexão até ela acabar.
+#[allow(clippy::too_many_arguments)]
 async fn run_session(
     address: String,
     username: String,
@@ -430,10 +559,9 @@ async fn run_session(
     mut password_rx: mpsc::UnboundedReceiver<String>,
     outgoing_rx: mpsc::UnboundedReceiver<Message>,
     events: EventTx,
-    frame: FrameSlot,
-    audio_output: AudioOutputSetting,
-    audio_volume: AudioVolume,
     sfx_inbox: SfxInbox,
+    watcher: Watcher,
+    own_stream: OwnStream,
 ) -> SessionEnd {
     send(&events, json!({ "type": "connecting", "address": address }));
 
@@ -467,8 +595,11 @@ async fn run_session(
         }
     };
 
-    // Sem isso o TCP junta pacotes pequenos e atrasa o vídeo
+    // Sem isso o TCP junta pacotes pequenos e atrasa as mensagens
     let _ = stream.set_nodelay(true);
+
+    // O IP do Host como eu o enxergo: é onde fica a transmissão dele ("ip: None" no protocolo)
+    let host_ip: Option<IpAddr> = stream.peer_addr().ok().map(|addr| addr.ip());
 
     let (client_id, display_name, users, host_name) = match handshake(
         &mut stream,
@@ -511,20 +642,9 @@ async fn run_session(
         }),
     );
 
-    // Número da "geração" do vídeo: muda quando a transmissão para, para descartar imagens velhas
-    let mut generation = frame.begin_session();
-
-    // O decodificador só nasce quando chegar o primeiro pacote de vídeo
-    let mut video: Option<VideoPipeline> = None;
-
-    // O som também só nasce quando chegar o primeiro pacote de áudio
-    let mut audio: Option<AudioPlayer> = None;
-
-    // Relógio da sincronia: o som anota, o vídeo segue. Um novo a cada transmissão.
-    let mut clock = SyncClock::default();
-    let mut stats = VideoStats::new();
     let cb_events = events.clone();
-    let cb_frame = frame.clone();
+    let cb_watcher = watcher.clone();
+    let cb_stream = own_stream.clone();
 
     let reason = run_connection(stream, shutdown.clone(), outgoing_rx, move |event| match event {
         ConnectionEvent::Rtt(rtt) => send(
@@ -532,43 +652,6 @@ async fn run_session(
             json!({ "type": "ping", "rtt_ms": rtt.as_millis() as u64 }),
         ),
         ConnectionEvent::Message(message) => match message {
-            Message::Video(video_frame) => {
-                if let Some(report) = stats.record(&video_frame) {
-                    send(&cb_events, report);
-                }
-                video
-                    .get_or_insert_with(|| {
-                        VideoPipeline::start(
-                            cb_frame.clone(),
-                            generation,
-                            cb_events.clone(),
-                            clock.clone(),
-                        )
-                    })
-                    .push(video_frame);
-            }
-            Message::Audio(audio_frame) => {
-                audio
-                    .get_or_insert_with(|| {
-                        AudioPlayer::start(
-                            audio_output.clone(),
-                            audio_volume.clone(),
-                            cb_events.clone(),
-                            clock.clone(),
-                        )
-                    })
-                    .push(audio_frame);
-            }
-            Message::StreamStopped => {
-                // O Host parou de transmitir: o decodificador e o som antigos terminam sozinhos
-                video = None;
-                audio = None;
-                clock = SyncClock::default();
-                // Imagens que ainda estavam sendo decodificadas são descartadas
-                generation = cb_frame.begin_session();
-                stats = VideoStats::new();
-                send(&cb_events, json!({ "type": "stream_stopped" }));
-            }
             Message::UserJoined { user } => send(
                 &cb_events,
                 json!({ "type": "user_joined", "id": user.id, "name": user.name }),
@@ -585,6 +668,7 @@ async fn run_session(
                 &cb_events,
                 json!({ "type": "user_avatar", "id": id, "png_base64": png_base64 }),
             ),
+
             // Alguém tocou um efeito sonoro: guarda o som e avisa quem foi (a interface busca e toca)
             Message::Sfx(SfxFrame {
                 user_id,
@@ -602,6 +686,60 @@ async fn run_session(
                     }),
                 );
             }
+
+            // ── Transmissões ──
+            Message::UserStreaming { user_id, .. } => send(
+                &cb_events,
+                json!({ "type": "user_streaming", "id": user_id }),
+            ),
+            Message::UserStreamStopped { user_id } => {
+                cb_watcher.stream_ended(user_id);
+                send(
+                    &cb_events,
+                    json!({ "type": "user_stream_stopped", "id": user_id }),
+                );
+            }
+            Message::WatchGranted {
+                user_id,
+                ip,
+                port,
+                ticket,
+            } => {
+                let ip = match ip {
+                    Some(text) => text.parse::<IpAddr>().ok(),
+                    None => host_ip,
+                };
+                match ip {
+                    Some(ip) => {
+                        cb_watcher.granted(user_id, SocketAddr::new(ip, port), ticket);
+                    }
+                    None => send(
+                        &cb_events,
+                        json!({
+                            "type": "watch_failed",
+                            "user_id": user_id,
+                            "watch_id": 0,
+                            "error": tr(
+                                "Endereço de quem transmite inválido.",
+                                "Invalid streamer address.",
+                                "Dirección de quien transmite no válida.",
+                            ),
+                        }),
+                    ),
+                }
+            }
+            Message::WatchDenied { user_id, code } => {
+                if cb_watcher.denied(user_id) {
+                    send(
+                        &cb_events,
+                        json!({ "type": "watch_denied", "user_id": user_id, "code": code }),
+                    );
+                }
+            }
+            // Pedidos do Host para a MINHA transmissão
+            Message::ViewerAllowed { viewer_id, ticket } => cb_stream.allow_viewer(viewer_id, ticket),
+            Message::ViewerRevoked { viewer_id } => cb_stream.revoke_viewer(viewer_id),
+
             // O motivo que vem da rede está no idioma do Host: usa o texto no idioma deste app
             Message::Kicked { .. } => send(
                 &cb_events,
@@ -700,53 +838,3 @@ async fn handshake(
         }
     }
 }
-
-/// Conta o vídeo que chega e gera o evento "video_stats" de tempos em tempos.
-struct VideoStats {
-    started: bool,
-    since: Instant,
-    frames: u32,
-    bytes: u64,
-}
-
-impl VideoStats {
-    fn new() -> Self {
-        Self {
-            started: false,
-            since: Instant::now(),
-            frames: 0,
-            bytes: 0,
-        }
-    }
-
-    fn record(&mut self, frame: &VideoFrame) -> Option<Value> {
-        if !self.started {
-            self.started = true;
-            self.since = Instant::now();
-        }
-
-        self.frames += 1;
-        self.bytes += frame.data.len() as u64;
-
-        let elapsed = self.since.elapsed();
-        if elapsed < STATS_INTERVAL {
-            return None;
-        }
-
-        let secs = elapsed.as_secs_f64();
-        let report = json!({
-            "type": "video_stats",
-            "fps": self.frames as f64 / secs,
-            "mbps": self.bytes as f64 * 8.0 / secs / 1_000_000.0,
-        });
-
-        self.since = Instant::now();
-        self.frames = 0;
-        self.bytes = 0;
-        Some(report)
-    }
-}
-
-
-
-
