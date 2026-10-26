@@ -3,6 +3,10 @@
 //! Só funções em C ABI (`extern "C"`). A interface chama cada uma via P/Invoke.
 //! Textos que voltam do Rust (JSON) são alocados aqui e DEVEM ser liberados
 //! pelo C# com `lanshare_free_string`.
+//!
+//! O app está em modo Host OU Client (nunca os dois). As funções `lanshare_stream_*`,
+//! `lanshare_watch_*`, `lanshare_set_audio_output` e `lanshare_set_volume` valem para
+//! o modo que estiver ativo.
 
 use lanshare_client::{audio_devices, ClientEngine};
 use lanshare_core::i18n::{self, tr, Language};
@@ -108,7 +112,7 @@ pub extern "C" fn lanshare_settings_set_username(name: *const c_char) -> *mut c_
 /// Retorna JSON: {"ok":true} ou {"ok":false,"error":"..."}.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start(config_json: *const c_char) -> *mut c_char {
-    let mut host = HOST.lock().unwrap();
+    let mut host = lock_host();
     if host.is_some() {
         return reply_err(tr(
             "A sala já está aberta.",
@@ -151,11 +155,22 @@ pub extern "C" fn lanshare_host_start(config_json: *const c_char) -> *mut c_char
 }
 
 /// Próximo evento do Host como JSON (ex.: {"type":"user_joined",...}), ou NULL se não há nenhum.
+/// Primeiro os eventos da sala e da transmissão do Host; depois os da transmissão que o Host
+/// assiste (watch_started, video_stats...).
 #[no_mangle]
 pub extern "C" fn lanshare_host_poll_event() -> *mut c_char {
-    let host = HOST.lock().unwrap();
-    match host.as_ref().and_then(|engine| engine.try_next_event()) {
-        Some(event) => to_c(serde_json::to_string(&event).unwrap_or_default()),
+    let host = lock_host();
+    let Some(engine) = host.as_ref() else {
+        return std::ptr::null_mut();
+    };
+
+    let json = engine
+        .try_next_event()
+        .map(|event| serde_json::to_string(&event).unwrap_or_default())
+        .or_else(|| engine.try_next_viewer_event().map(|event| event.to_string()));
+
+    match json {
+        Some(text) => to_c(text),
         None => std::ptr::null_mut(),
     }
 }
@@ -163,7 +178,7 @@ pub extern "C" fn lanshare_host_poll_event() -> *mut c_char {
 /// Lista de Clients conectados, como JSON: [{"id":1,"name":"..","addr":"..","connected_secs":5}].
 #[no_mangle]
 pub extern "C" fn lanshare_host_users() -> *mut c_char {
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     let users = host
         .as_ref()
         .map(|engine| engine.users())
@@ -174,7 +189,7 @@ pub extern "C" fn lanshare_host_users() -> *mut c_char {
 /// Expulsa um Client pelo id. Retorna {"ok":true,"name":".."} ou {"ok":false,"error":".."}.
 #[no_mangle]
 pub extern "C" fn lanshare_host_kick(id: u64) -> *mut c_char {
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => match engine.kick(id) {
@@ -188,7 +203,7 @@ pub extern "C" fn lanshare_host_kick(id: u64) -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn lanshare_host_set_avatar(png_base64: *const c_char) -> *mut c_char {
     let avatar = read_c_string(png_base64).filter(|text| !text.is_empty());
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => match engine.set_avatar(avatar) {
@@ -200,7 +215,7 @@ pub extern "C" fn lanshare_host_set_avatar(png_base64: *const c_char) -> *mut c_
 
 /// Monitores do computador, como JSON (principal primeiro):
 /// [{"index":0,"name":"Monitor 1 - DELL U2419H","model":"DELL U2419H","width":1920,"height":1080,"primary":true}].
-/// Não precisa da sala aberta.
+/// Não precisa da sala aberta (o Client também usa).
 #[no_mangle]
 pub extern "C" fn lanshare_host_monitors() -> *mut c_char {
     let list = monitors::list_monitors().unwrap_or_default();
@@ -210,7 +225,7 @@ pub extern "C" fn lanshare_host_monitors() -> *mut c_char {
 /// Tira uma foto reduzida de um monitor e copia para `buffer` (BGRA, 4 bytes por pixel).
 /// `capacity` = tamanho do buffer em bytes (use 400*240*4). Preenche o tamanho da foto
 /// e o tamanho real do monitor. Retorna 1 se deu certo, 0 se não.
-/// Leva uma fração de segundo: chame fora da thread da interface.
+/// Leva uma fração de segundo: chame fora da thread da interface. Não precisa da sala aberta.
 ///
 /// # Safety
 /// `buffer` deve apontar para `capacity` bytes graváveis; os outros ponteiros, para um u32 cada.
@@ -230,6 +245,7 @@ pub unsafe extern "C" fn lanshare_host_monitor_thumbnail(
 
 /// Janelas que dá para transmitir, como JSON (a mais recente primeiro):
 /// [{"id":123456,"title":"Documento - Bloco de Notas","minimized":false}].
+/// Não precisa da sala aberta (o Client também usa).
 #[no_mangle]
 pub extern "C" fn lanshare_host_windows() -> *mut c_char {
     let list = app_windows::list_windows();
@@ -274,35 +290,38 @@ pub unsafe extern "C" fn lanshare_host_window_icon(id: u64, buffer: *mut u8, cap
     1
 }
 
+// Funções antigas de transmissão do Host: a interface ainda usa estas.
+// Saem na parte 3D-3 (a interface passa a usar as `lanshare_stream_*`).
+
 /// Começa a transmitir o monitor principal. `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream(height: u32, fps: u32) -> *mut c_char {
-    start_stream(height, fps, CaptureTarget::PrimaryMonitor)
+    host_start_stream(height, fps, CaptureTarget::PrimaryMonitor)
 }
 
 /// Começa a transmitir um monitor. `monitor`: o "index" da lista de monitores
 /// (negativo = principal). `height`: 720 ou 1080; `fps`: 15 ou 30.
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream_on(height: u32, fps: u32, monitor: i32) -> *mut c_char {
-    start_stream(height, fps, monitor_target(monitor))
+    host_start_stream(height, fps, monitor_target(monitor))
 }
 
 /// Começa a transmitir uma janela (o "id" da lista de janelas).
 #[no_mangle]
 pub extern "C" fn lanshare_host_start_stream_window(height: u32, fps: u32, id: u64) -> *mut c_char {
-    start_stream(height, fps, CaptureTarget::Window(id))
+    host_start_stream(height, fps, CaptureTarget::Window(id))
 }
 
 /// Troca a transmissão em andamento para outro monitor (negativo = principal), sem parar.
 #[no_mangle]
 pub extern "C" fn lanshare_host_switch_monitor(monitor: i32) -> *mut c_char {
-    switch_source(monitor_target(monitor))
+    host_switch_source(monitor_target(monitor))
 }
 
 /// Troca a transmissão em andamento para uma janela (o "id" da lista), sem parar.
 #[no_mangle]
 pub extern "C" fn lanshare_host_switch_window(id: u64) -> *mut c_char {
-    switch_source(CaptureTarget::Window(id))
+    host_switch_source(CaptureTarget::Window(id))
 }
 
 /// Liga (`enabled` diferente de 0) ou desliga o som da transmissão (botão 🔊 do seletor).
@@ -310,7 +329,7 @@ pub extern "C" fn lanshare_host_switch_window(id: u64) -> *mut c_char {
 /// Monitor inteiro = som do PC; janela = só o som do app dela.
 #[no_mangle]
 pub extern "C" fn lanshare_host_set_stream_audio(enabled: i32) -> *mut c_char {
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => {
@@ -323,14 +342,14 @@ pub extern "C" fn lanshare_host_set_stream_audio(enabled: i32) -> *mut c_char {
 /// Para a transmissão. Retorna 1 se havia uma transmissão, 0 se não.
 #[no_mangle]
 pub extern "C" fn lanshare_host_stop_stream() -> i32 {
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     host.as_ref().map(|e| e.stop_stream()).unwrap_or(false) as i32
 }
 
 /// 1 se está transmitindo, 0 se não.
 #[no_mangle]
 pub extern "C" fn lanshare_host_is_streaming() -> i32 {
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     host.as_ref().map(|e| e.is_streaming()).unwrap_or(false) as i32
 }
 
@@ -350,20 +369,13 @@ pub unsafe extern "C" fn lanshare_host_preview(
     if buffer.is_null() || width.is_null() || height.is_null() {
         return 0;
     }
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     let Some(engine) = host.as_ref() else {
         return 0;
     };
 
     let out = std::slice::from_raw_parts_mut(buffer, capacity);
-    match engine.preview_into(out) {
-        Some((w, h)) => {
-            *width = w;
-            *height = h;
-            1
-        }
-        None => 0,
-    }
+    write_size(engine.preview_into(out), width, height)
 }
 
 /// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele no Host).
@@ -380,7 +392,7 @@ pub unsafe extern "C" fn lanshare_host_play_sfx(name: *const c_char, pcm: *const
     };
     let name = read_c_string(name).unwrap_or_default();
 
-    let host = HOST.lock().unwrap();
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => match engine.play_sfx(&name, packets) {
@@ -400,16 +412,16 @@ pub unsafe extern "C" fn lanshare_host_play_sfx(name: *const c_char, pcm: *const
 #[no_mangle]
 pub unsafe extern "C" fn lanshare_host_take_sfx(sfx_id: u64, buffer: *mut f32, capacity: usize) -> i64 {
     let samples = {
-        let host = HOST.lock().unwrap();
+        let host = lock_host();
         host.as_ref().and_then(|engine| engine.take_sfx(sfx_id))
     };
     write_pcm(samples, buffer, capacity)
 }
 
-/// Fecha a sala (para a transmissão e desconecta todos).
+/// Fecha a sala (para de assistir, para a transmissão e desconecta todos).
 #[no_mangle]
 pub extern "C" fn lanshare_host_stop() {
-    let engine = HOST.lock().unwrap().take();
+    let engine = lock_host().take();
     if let Some(engine) = engine {
         let _ = engine.stop();
     }
@@ -423,8 +435,8 @@ fn monitor_target(monitor: i32) -> CaptureTarget {
     }
 }
 
-fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
-    let host = HOST.lock().unwrap();
+fn host_start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, target) {
@@ -434,8 +446,8 @@ fn start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
     }
 }
 
-fn switch_source(target: CaptureTarget) -> *mut c_char {
-    let host = HOST.lock().unwrap();
+fn host_switch_source(target: CaptureTarget) -> *mut c_char {
+    let host = lock_host();
     match host.as_ref() {
         None => reply_err(room_not_open()),
         Some(engine) => match engine.switch_source(target) {
@@ -543,7 +555,7 @@ pub extern "C" fn lanshare_client_set_avatar(png_base64: *const c_char) -> *mut 
 
 /// Escolhe por onde sai o som das transmissões: o "id" da lista de `lanshare_audio_output_devices`.
 /// Vazio ou NULL = padrão do Windows (acompanha se o padrão mudar). Se já houver som tocando,
-/// ele muda de saída na hora.
+/// ele muda de saída na hora. (Antiga: a nova é `lanshare_set_audio_output`, que vale também no Host.)
 #[no_mangle]
 pub extern "C" fn lanshare_client_set_audio_output(device_id: *const c_char) -> *mut c_char {
     let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
@@ -554,7 +566,7 @@ pub extern "C" fn lanshare_client_set_audio_output(device_id: *const c_char) -> 
 }
 
 /// Volume do som das transmissões: `percent` de 0 a 100; `muted` diferente de 0 = mudo.
-/// Muda na hora, mesmo com som tocando.
+/// Muda na hora, mesmo com som tocando. (Antiga: a nova é `lanshare_set_volume`.)
 #[no_mangle]
 pub extern "C" fn lanshare_client_set_volume(percent: u32, muted: i32) -> *mut c_char {
     with_client(|engine| {
@@ -610,8 +622,9 @@ pub extern "C" fn lanshare_client_poll_event() -> *mut c_char {
     }
 }
 
-/// Copia a imagem recebida do Host para `buffer` (BGRA, 4 bytes por pixel).
+/// Copia a imagem da transmissão assistida para `buffer` (BGRA, 4 bytes por pixel).
 /// Retorna 1 só se há uma imagem NOVA desde a última chamada; 0 se não.
+/// (Antiga: a nova é `lanshare_watch_frame`, que vale também no Host.)
 ///
 /// # Safety
 /// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
@@ -631,14 +644,7 @@ pub unsafe extern "C" fn lanshare_client_frame(
     };
 
     let out = std::slice::from_raw_parts_mut(buffer, capacity);
-    match engine.frame_into(out) {
-        Some((w, h)) => {
-            *width = w;
-            *height = h;
-            1
-        }
-        None => 0,
-    }
+    write_size(engine.frame_into(out), width, height)
 }
 
 /// Desliga o modo Client (desconecta e encerra o motor).
@@ -648,10 +654,6 @@ pub extern "C" fn lanshare_client_stop() {
     if let Some(engine) = engine {
         engine.stop();
     }
-}
-
-fn lock_client() -> MutexGuard<'static, Option<ClientEngine>> {
-    CLIENT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Roda uma ação no motor do Client e devolve {"ok":true} ou {"ok":false,"error":".."}.
@@ -670,11 +672,227 @@ fn with_client(action: impl FnOnce(&ClientEngine) -> Result<(), String>) -> *mut
     }
 }
 
+// ───────────────────────────── Transmitir (modo ativo) ─────────────────────────────
+
+/// Começa a transmitir um monitor (Host ou Client, conforme o modo ativo) e avisa a sala.
+/// `monitor`: o "index" da lista de monitores (negativo = principal).
+/// `height`: 720 ou 1080; `fps`: 15 ou 30. Para de assistir o que estava vendo.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_start(height: u32, fps: u32, monitor: i32) -> *mut c_char {
+    stream_start(height, fps, monitor_target(monitor))
+}
+
+/// Começa a transmitir uma janela (o "id" da lista de janelas).
+#[no_mangle]
+pub extern "C" fn lanshare_stream_start_window(height: u32, fps: u32, id: u64) -> *mut c_char {
+    stream_start(height, fps, CaptureTarget::Window(id))
+}
+
+/// Troca a transmissão em andamento para outro monitor (negativo = principal), sem parar.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_switch_monitor(monitor: i32) -> *mut c_char {
+    stream_switch(monitor_target(monitor))
+}
+
+/// Troca a transmissão em andamento para uma janela (o "id" da lista), sem parar.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_switch_window(id: u64) -> *mut c_char {
+    stream_switch(CaptureTarget::Window(id))
+}
+
+/// Liga (`enabled` diferente de 0) ou desliga o som da minha transmissão (botão 🔊 do seletor).
+/// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_set_audio(enabled: i32) -> *mut c_char {
+    let enabled = enabled != 0;
+    reply_result(with_engine(|engine| {
+        match engine {
+            Active::Host(host) => host.set_stream_audio(enabled),
+            Active::Client(client) => client.set_stream_audio(enabled),
+        }
+        Ok(())
+    }))
+}
+
+/// Para a minha transmissão e avisa a sala. Retorna 1 se havia uma transmissão, 0 se não.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_stop() -> i32 {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.stop_stream(),
+        Active::Client(client) => client.stop_stream(),
+    })
+    .unwrap_or(false) as i32
+}
+
+/// 1 se estou transmitindo, 0 se não.
+#[no_mangle]
+pub extern "C" fn lanshare_stream_is_active() -> i32 {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.is_streaming(),
+        Active::Client(client) => client.is_streaming(),
+    })
+    .unwrap_or(false) as i32
+}
+
+/// Copia a prévia da minha transmissão para `buffer` (BGRA, 4 bytes por pixel).
+/// `capacity` = tamanho do buffer em bytes (use 2560*1440*4). Preenche `width` e `height`.
+/// Retorna 1 se copiou, 0 se não há prévia nova (ou o buffer é pequeno).
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_stream_preview(
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    let size = with_engine(|engine| match engine {
+        Active::Host(host) => host.preview_into(out),
+        Active::Client(client) => client.preview_into(out),
+    })
+    .flatten();
+    write_size(size, width, height)
+}
+
+fn stream_start(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
+    let settings = StreamSettings { height, fps };
+    reply_result(with_engine(|engine| match engine {
+        Active::Host(host) => host.start_stream_on(settings, target),
+        Active::Client(client) => client.start_stream_on(settings, target),
+    }))
+}
+
+fn stream_switch(target: CaptureTarget) -> *mut c_char {
+    reply_result(with_engine(|engine| match engine {
+        Active::Host(host) => host.switch_source(target),
+        Active::Client(client) => client.switch_source(target),
+    }))
+}
+
+// ───────────────────────────── Assistir (modo ativo) ─────────────────────────────
+
+/// Assiste a transmissão de alguém (o id da lista da sala; 0 = o Host).
+/// Retorna {"ok":true} (o andamento chega por eventos: watch_connecting, watch_started,
+/// watch_denied, watch_failed, watch_ended) ou {"ok":false,"error":".."}.
+#[no_mangle]
+pub extern "C" fn lanshare_watch(user_id: u64) -> *mut c_char {
+    reply_result(with_engine(|engine| match engine {
+        Active::Host(host) => host.watch(user_id),
+        Active::Client(client) => client.watch(user_id),
+    }))
+}
+
+/// Para de assistir.
+#[no_mangle]
+pub extern "C" fn lanshare_watch_stop() {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.stop_watching(),
+        Active::Client(client) => client.stop_watching(),
+    });
+}
+
+/// Quem estou assistindo (ou pedi para assistir). -1 = ninguém.
+#[no_mangle]
+pub extern "C" fn lanshare_watch_current() -> i64 {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.watching(),
+        Active::Client(client) => client.watching(),
+    })
+    .flatten()
+    .map(|id| id as i64)
+    .unwrap_or(-1)
+}
+
+/// Copia a imagem da transmissão assistida para `buffer` (BGRA, 4 bytes por pixel).
+/// Retorna 1 só se há uma imagem NOVA desde a última chamada; 0 se não.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_watch_frame(
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    let size = with_engine(|engine| match engine {
+        Active::Host(host) => host.frame_into(out),
+        Active::Client(client) => client.frame_into(out),
+    })
+    .flatten();
+    write_size(size, width, height)
+}
+
+/// Por onde sai o som da transmissão assistida: o "id" da lista de `lanshare_audio_output_devices`.
+/// Vazio ou NULL = padrão do Windows. Se já houver som tocando, ele muda de saída na hora.
+#[no_mangle]
+pub extern "C" fn lanshare_set_audio_output(device_id: *const c_char) -> *mut c_char {
+    let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
+    reply_result(with_engine(|engine| {
+        match engine {
+            Active::Host(host) => host.set_audio_output(device_id),
+            Active::Client(client) => client.set_audio_output(device_id),
+        }
+        Ok(())
+    }))
+}
+
+/// Volume da transmissão assistida: `percent` de 0 a 100; `muted` diferente de 0 = mudo.
+/// Muda na hora, mesmo com som tocando.
+#[no_mangle]
+pub extern "C" fn lanshare_set_volume(percent: u32, muted: i32) -> *mut c_char {
+    let (percent, muted) = (percent.min(100), muted != 0);
+    reply_result(with_engine(|engine| {
+        match engine {
+            Active::Host(host) => host.set_volume(percent, muted),
+            Active::Client(client) => client.set_volume(percent, muted),
+        }
+        Ok(())
+    }))
+}
+
+/// O motor do modo ativo (o app é Host OU Client, nunca os dois).
+enum Active<'a> {
+    Host(&'a HostEngine),
+    Client(&'a ClientEngine),
+}
+
+/// Roda `action` no motor ativo. None = nenhum modo ativo (nem sala aberta, nem modo Client).
+fn with_engine<T>(action: impl FnOnce(Active<'_>) -> T) -> Option<T> {
+    {
+        let host = lock_host();
+        if let Some(engine) = host.as_ref() {
+            return Some(action(Active::Host(engine)));
+        }
+    }
+
+    let client = lock_client();
+    client.as_ref().map(|engine| action(Active::Client(engine)))
+}
+
+/// Resultado de uma ação no motor ativo -> {"ok":true} ou {"ok":false,"error":".."}.
+fn reply_result(result: Option<Result<(), String>>) -> *mut c_char {
+    match result {
+        None => reply_err(no_active_mode()),
+        Some(Ok(())) => reply_ok(),
+        Some(Err(error)) => reply_err(&error),
+    }
+}
+
 // ───────────────────────────── Áudio ─────────────────────────────
 
-/// Dispositivos de saída de áudio (por onde o Client toca o som das transmissões), como JSON:
+/// Dispositivos de saída de áudio (por onde tocam as transmissões assistidas), como JSON:
 /// {"ok":true,"devices":[{"id":"{0.0.0.00000000}.{...}","name":"Alto-falantes (Realtek)","default":true}]}
-/// ou {"ok":false,"error":".."}. O padrão do Windows vem primeiro. Não precisa do modo Client ativo.
+/// ou {"ok":false,"error":".."}. O padrão do Windows vem primeiro. Não precisa de modo ativo.
 /// Leva alguns milissegundos: chame fora da thread da interface.
 #[no_mangle]
 pub extern "C" fn lanshare_audio_output_devices() -> *mut c_char {
@@ -692,7 +910,7 @@ pub extern "C" fn lanshare_audio_output_devices() -> *mut c_char {
 
 /// Apps com som aberto no PC (os que tocam agora primeiro), para a lista "Adicionar app":
 /// {"ok":true,"apps":[{"exe":"discord.exe","name":"Discord","active":true}]} ou {"ok":false,"error":".."}.
-/// Não precisa da sala aberta. Leva alguns milissegundos: chame fora da thread da interface.
+/// Não precisa de modo ativo. Leva alguns milissegundos: chame fora da thread da interface.
 #[no_mangle]
 pub extern "C" fn lanshare_audio_apps() -> *mut c_char {
     match audio_sessions::list_audio_apps() {
@@ -702,7 +920,7 @@ pub extern "C" fn lanshare_audio_apps() -> *mut c_char {
 }
 
 /// Apps que não transmitem som ao transmitir um monitor inteiro.
-/// `exes_json`: lista de .exe, ex.: ["discord.exe","ms-teams.exe"]. Não precisa da sala aberta.
+/// `exes_json`: lista de .exe, ex.: ["discord.exe","ms-teams.exe"]. Não precisa de modo ativo.
 #[no_mangle]
 pub extern "C" fn lanshare_set_audio_exclusions(exes_json: *const c_char) -> *mut c_char {
     let text = read_c_string(exes_json).unwrap_or_else(|| "[]".to_string());
@@ -720,12 +938,43 @@ pub extern "C" fn lanshare_set_audio_exclusions(exes_json: *const c_char) -> *mu
 
 // ───────────────────────────── Ajudantes ─────────────────────────────
 
+fn lock_host() -> MutexGuard<'static, Option<HostEngine>> {
+    HOST.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn lock_client() -> MutexGuard<'static, Option<ClientEngine>> {
+    CLIENT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn room_not_open() -> &'static str {
     tr(
         "A sala não está aberta.",
         "The room is not open.",
         "La sala no está abierta.",
     )
+}
+
+fn no_active_mode() -> &'static str {
+    tr(
+        "Abra uma sala ou entre em uma primeiro.",
+        "Open or join a room first.",
+        "Abre una sala o únete a una primero.",
+    )
+}
+
+/// Preenche a largura e a altura de uma imagem copiada. 1 = copiou; 0 = não havia imagem.
+///
+/// # Safety
+/// `width` e `height` devem apontar para um u32 cada.
+unsafe fn write_size(size: Option<(u32, u32)>, width: *mut u32, height: *mut u32) -> i32 {
+    match size {
+        Some((w, h)) => {
+            *width = w;
+            *height = h;
+            1
+        }
+        None => 0,
+    }
 }
 
 /// Lê as amostras que vieram da interface e comprime em Opus (antes de pegar o lock do motor:
@@ -791,5 +1040,18 @@ mod tests {
         let text = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
         lanshare_free_string(ptr);
         assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok());
+    }
+
+    #[test]
+    fn sem_modo_ativo_as_funcoes_novas_respondem_com_erro() {
+        let ptr = lanshare_watch(1);
+        let text = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        lanshare_free_string(ptr);
+        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(reply["ok"], false);
+
+        assert_eq!(lanshare_watch_current(), -1);
+        assert_eq!(lanshare_stream_is_active(), 0);
+        assert_eq!(lanshare_stream_stop(), 0);
     }
 }
