@@ -1,20 +1,28 @@
-//! Protocolo Host <-> Client.
-//! Formato na rede: [4 bytes: tamanho N][1 byte: tipo][N-1 bytes: conteúdo]
+//! Protocolo do LANShare. Formato na rede: [4 bytes: tamanho N][1 byte: tipo][N-1 bytes: conteúdo]
 //!   tipo 0 = mensagem em JSON
 //!   tipo 1 = pacote de vídeo, em binário: [1 byte: keyframe][8 bytes: timestamp em µs][bytes H.264]
 //!   tipo 2 = pacote de áudio, em binário: [8 bytes: timestamp em µs][bytes Opus]
 //!   tipo 3 = efeito sonoro, em binário: [8 bytes: id de quem tocou][2 bytes: tamanho do nome][nome UTF-8]
 //!            [2 bytes: quantos pacotes][cada pacote: 2 bytes de tamanho + bytes Opus]
+//!
+//! Dois tipos de conexão usam este formato:
+//! - SALA (Client <-> Host): entrar/sair, avatares, efeitos sonoros e a coordenação das
+//!   transmissões (quem transmite, pedidos para assistir, ingressos).
+//! - TRANSMISSÃO (espectador -> transmissor): aberta ao clicar no ícone de tela de alguém.
+//!   Começa com WatchHello (com o ingresso) e depois leva Video, Audio e StreamStopped.
+//!   Vai direto ao transmissor: o vídeo não passa pelo Host.
 
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::RandomState;
+use std::hash::BuildHasher;
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 11;
+pub const PROTOCOL_VERSION: u16 = 12;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -23,7 +31,7 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Sem receber nada por este tempo, o outro lado é considerado desconectado.
 pub const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
 
-/// Id usado para o Host nos avatares (os Clients começam em 1).
+/// Id usado para o Host nos avatares e nas transmissões (os Clients começam em 1).
 pub const HOST_USER_ID: u64 = 0;
 
 /// Tamanho máximo de um avatar na rede (PNG em base64).
@@ -35,6 +43,22 @@ pub const REJECT_PROTOCOL_MISMATCH: &str = "protocol_mismatch";
 pub const REJECT_ROOM_FULL: &str = "room_full";
 pub const REJECT_WRONG_PASSWORD: &str = "wrong_password";
 pub const REJECT_PASSWORD_TIMEOUT: &str = "password_timeout";
+/// Conexão de transmissão: o ingresso não existe, já foi usado ou venceu.
+pub const REJECT_INVALID_TICKET: &str = "invalid_ticket";
+
+/// Motivos de um WatchDenied (campo `code`).
+/// A pessoa não está transmitindo (parou, ou nunca começou).
+pub const WATCH_NOT_STREAMING: &str = "not_streaming";
+/// Pediu para assistir a si mesmo (a própria transmissão aparece pela prévia local).
+pub const WATCH_SELF: &str = "self";
+/// Quem está transmitindo não assiste outra pessoa ao mesmo tempo (fica para a v2.1).
+pub const WATCH_BUSY_STREAMING: &str = "busy_streaming";
+
+/// Um ingresso vale por este tempo depois de emitido (e só uma vez).
+pub const WATCH_TICKET_TTL: Duration = Duration::from_secs(30);
+
+/// Tamanho máximo de um ingresso na rede (os nossos têm 32 caracteres).
+pub const MAX_TICKET_LEN: usize = 64;
 
 /// Tipos de mensagem na rede.
 const KIND_JSON: u8 = 0;
@@ -76,14 +100,14 @@ pub struct UserInfo {
     pub name: String,
 }
 
-/// Um pacote de vídeo H.264 (Host -> Clients). Não passa pelo JSON.
+/// Um pacote de vídeo H.264 (transmissor -> espectadores). Não passa pelo JSON.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoFrame {
     /// true = quadro completo (dá para começar a decodificar a partir dele).
     pub keyframe: bool,
-    /// Momento do envio, em microssegundos desde o início da transmissão.
+    /// Momento da captura, em microssegundos desde o início da transmissão.
     pub timestamp_us: u64,
-    /// Bytes H.264 (compartilhados entre os Clients, sem copiar).
+    /// Bytes H.264 (compartilhados entre os espectadores, sem copiar).
     pub data: Arc<Vec<u8>>,
     queue_ticket: QueueTicket,
 }
@@ -98,7 +122,7 @@ impl VideoFrame {
         }
     }
 
-    /// Usado pelo Host: ligado a um contador de "frames esperando na fila de um Client".
+    /// Usado por quem transmite: ligado a um contador de "frames esperando na fila de um espectador".
     /// O contador diminui sozinho quando este frame deixa de existir
     /// (foi enviado pela rede ou descartado).
     pub fn with_queue_counter(mut self, counter: Arc<AtomicUsize>) -> Self {
@@ -107,13 +131,13 @@ impl VideoFrame {
     }
 }
 
-/// Um pacote de áudio Opus (Host -> Clients): 20 ms de som estéreo a 48 kHz. Não passa pelo JSON.
+/// Um pacote de áudio Opus (transmissor -> espectadores): 20 ms de som estéreo a 48 kHz. Não passa pelo JSON.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioFrame {
-    /// Quando o som tocou no Host, em microssegundos desde o início da transmissão
+    /// Quando o som tocou no transmissor, em microssegundos desde o início da transmissão
     /// (o mesmo relógio do vídeo).
     pub timestamp_us: u64,
-    /// Bytes Opus (compartilhados entre os Clients, sem copiar).
+    /// Bytes Opus (compartilhados entre os espectadores, sem copiar).
     pub data: Arc<Vec<u8>>,
 }
 
@@ -155,6 +179,8 @@ impl Drop for QueueTicket {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Message {
+    // ───────────── Conexão da sala ─────────────
+
     /// Client -> Host: primeira mensagem.
     Hello {
         protocol_version: u16,
@@ -178,10 +204,11 @@ pub enum Message {
         host_name: String,
     },
 
-    /// Host -> Client: recusado, com o motivo (texto) e o código do motivo (REJECT_*).
+    /// Recusado, com o motivo (texto) e o código do motivo (REJECT_*).
+    /// Host -> Client na sala; transmissor -> espectador na conexão de transmissão.
     Rejected {
         reason: String,
-        /// Vazio quando o Host é de uma versão que ainda não envia o código.
+        /// Vazio quando o outro lado é de uma versão que ainda não envia o código.
         #[serde(default)]
         code: String,
     },
@@ -204,8 +231,61 @@ pub enum Message {
     /// Host -> Clients: o avatar de alguém (id 0 = o Host). Vazio = sem avatar.
     UserAvatar { id: u64, png_base64: String },
 
-    /// Host -> Clients: o Host parou de transmitir a tela (a conexão continua aberta).
+    // ───────────── Transmissões (sala) ─────────────
+
+    /// Client -> Host: comecei a transmitir; quem tiver ingresso me assiste nesta porta TCP.
+    StreamAnnounce { port: u16 },
+
+    /// Client -> Host: parei de transmitir.
+    StreamEnded,
+
+    /// Host -> Clients: alguém está transmitindo (aparece o ícone de tela ao lado do nome).
+    /// `ip` None = o IP do próprio Host (o mesmo em que você está conectado).
+    UserStreaming {
+        user_id: u64,
+        ip: Option<String>,
+        port: u16,
+    },
+
+    /// Host -> Clients: alguém parou de transmitir.
+    UserStreamStopped { user_id: u64 },
+
+    /// Client -> Host: quero assistir a transmissão de `user_id`.
+    WatchRequest { user_id: u64 },
+
+    /// Host -> Client: pode assistir. Conecte em ip:port e mande o WatchHello com o ingresso.
+    /// `ip` None = o IP do próprio Host.
+    WatchGranted {
+        user_id: u64,
+        ip: Option<String>,
+        port: u16,
+        ticket: String,
+    },
+
+    /// Host -> Client: não dá para assistir `user_id` (código WATCH_*).
+    WatchDenied { user_id: u64, code: String },
+
+    /// Host -> Client que transmite: vai chegar `viewer_id` com este ingresso; aceite.
+    ViewerAllowed { viewer_id: u64, ticket: String },
+
+    /// Host -> Client que transmite: derrube `viewer_id` (saiu da sala ou foi expulso).
+    ViewerRevoked { viewer_id: u64 },
+
+    // ───────────── Conexão de transmissão ─────────────
+
+    /// Espectador -> transmissor: primeira mensagem, com o ingresso que o Host deu.
+    WatchHello {
+        protocol_version: u16,
+        ticket: String,
+    },
+
+    /// Transmissor -> espectador: ingresso aceito; o vídeo e o som começam em seguida.
+    WatchAccepted,
+
+    /// Transmissor -> espectador: parei de transmitir (a conexão vai ser encerrada).
     StreamStopped,
+
+    // ───────────── Nas duas conexões ─────────────
 
     /// "Você está aí?" O outro lado responde com um Pong do mesmo id.
     Ping { id: u64 },
@@ -216,12 +296,12 @@ pub enum Message {
     /// Aviso de saída limpa.
     Bye,
 
-    /// Host -> Clients: um pacote de vídeo da tela.
+    /// Transmissor -> espectador: um pacote de vídeo da tela.
     /// Não vai em JSON: tem formato binário próprio (ver write_message).
     #[serde(skip)]
     Video(VideoFrame),
 
-    /// Host -> Clients: um pacote de áudio do som do PC.
+    /// Transmissor -> espectador: um pacote de áudio do som do PC.
     /// Não vai em JSON: tem formato binário próprio (ver write_message).
     #[serde(skip)]
     Audio(AudioFrame),
@@ -230,6 +310,30 @@ pub enum Message {
     /// Não vai em JSON: tem formato binário próprio (ver write_message).
     #[serde(skip)]
     Sfx(SfxFrame),
+}
+
+/// Um ingresso novo: 32 caracteres hexadecimais aleatórios (128 bits).
+/// A aleatoriedade vem do RandomState do Rust, semeado pelo sistema operacional.
+pub fn new_watch_ticket() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    // Cada RandomState novo tem chaves diferentes; o contador e o relógio só garantem entradas distintas
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+
+    let high = RandomState::new().hash_one((count, nanos));
+    let low = RandomState::new().hash_one((nanos, count));
+    format!("{high:016x}{low:016x}")
+}
+
+/// O ingresso que chegou da rede tem um formato aceitável? (Não confere se ele existe.)
+pub fn ticket_looks_valid(ticket: &str) -> bool {
+    !ticket.is_empty()
+        && ticket.len() <= MAX_TICKET_LEN
+        && ticket.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 pub async fn write_message<W>(writer: &mut W, message: &Message) -> io::Result<()>
@@ -546,6 +650,7 @@ mod tests {
             id: 2,
             name: "Beto".to_string(),
         };
+        let ticket = new_watch_ticket();
 
         let mensagens = [
             Message::Hello {
@@ -579,6 +684,40 @@ mod tests {
                 id: HOST_USER_ID,
                 png_base64: String::new(),
             },
+            Message::StreamAnnounce { port: 51234 },
+            Message::StreamEnded,
+            Message::UserStreaming {
+                user_id: 2,
+                ip: Some("26.10.0.5".to_string()),
+                port: 51234,
+            },
+            Message::UserStreaming {
+                user_id: HOST_USER_ID,
+                ip: None,
+                port: 51000,
+            },
+            Message::UserStreamStopped { user_id: 2 },
+            Message::WatchRequest { user_id: 2 },
+            Message::WatchGranted {
+                user_id: 2,
+                ip: Some("26.10.0.5".to_string()),
+                port: 51234,
+                ticket: ticket.clone(),
+            },
+            Message::WatchDenied {
+                user_id: 2,
+                code: WATCH_NOT_STREAMING.to_string(),
+            },
+            Message::ViewerAllowed {
+                viewer_id: 1,
+                ticket: ticket.clone(),
+            },
+            Message::ViewerRevoked { viewer_id: 1 },
+            Message::WatchHello {
+                protocol_version: PROTOCOL_VERSION,
+                ticket,
+            },
+            Message::WatchAccepted,
             Message::StreamStopped,
             Message::Ping { id: 7 },
             Message::Pong { id: 7 },
@@ -626,6 +765,22 @@ mod tests {
             }
             outra => panic!("mensagem inesperada: {outra:?}"),
         }
+    }
+
+    // Ingressos: formato certo, nunca repetidos, e a conferência recusa lixo.
+    #[test]
+    fn ingressos_sao_unicos_e_validos() {
+        let mut vistos = std::collections::HashSet::new();
+        for _ in 0..1000 {
+            let ticket = new_watch_ticket();
+            assert_eq!(ticket.len(), 32);
+            assert!(ticket_looks_valid(&ticket));
+            assert!(vistos.insert(ticket), "ingresso repetido");
+        }
+
+        assert!(!ticket_looks_valid(""));
+        assert!(!ticket_looks_valid("nao-e-hex!"));
+        assert!(!ticket_looks_valid(&"a".repeat(MAX_TICKET_LEN + 1)));
     }
 
     // Um efeito sonoro cortado no meio, com bytes sobrando ou sem pacotes é recusado (nunca trava nem estoura).
@@ -679,7 +834,3 @@ mod tests {
         assert_eq!(contador.load(Ordering::Relaxed), 0);
     }
 }
-
-
-
-

@@ -123,7 +123,7 @@
 # V2.0.0 — Multi-Streaming
 
 - [x] Split capture/encode and decode/playback into shared crates (lanshare-stream / lanshare-viewer)
-- [ ] Protocol v12: stream announcements and watch tickets
+- [x] Protocol v12: stream announcements and watch tickets
 - [ ] Every user can share their screen (Host and Clients)
 - [ ] Streams go directly from the streamer to the viewers (no relay through the Host)
 - [ ] Viewers only receive the streams they chose to watch
