@@ -5,6 +5,7 @@ members = [
     "crates/lanshare-core",
     "crates/lanshare-net",
     "crates/lanshare-stream",
+    "crates/lanshare-viewer",
     "crates/lanshare-host",
     "crates/lanshare-client",
     "crates/lanshare-app",
@@ -21,6 +22,7 @@ license = "MIT"
 lanshare-core = { path = "crates/lanshare-core" }
 lanshare-net = { path = "crates/lanshare-net" }
 lanshare-stream = { path = "crates/lanshare-stream" }
+lanshare-viewer = { path = "crates/lanshare-viewer" }
 lanshare-host = { path = "crates/lanshare-host" }
 lanshare-client = { path = "crates/lanshare-client" }
 

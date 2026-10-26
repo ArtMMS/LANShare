@@ -307,13 +307,12 @@ dependencies = [
  "if-addrs",
  "lanshare-core",
  "lanshare-net",
+ "lanshare-viewer",
  "minifb",
- "opus",
  "rayon",
  "rpassword",
  "serde_json",
  "tokio",
- "windows",
 ]
 
 [[package]]
@@ -369,6 +368,17 @@ dependencies = [
  "windows",
  "windows-capture",
  "windows-core",
+]
+
+[[package]]
+name = "lanshare-viewer"
+version = "0.1.0"
+dependencies = [
+ "lanshare-core",
+ "opus",
+ "rayon",
+ "serde_json",
+ "windows",
 ]
 
 [[package]]

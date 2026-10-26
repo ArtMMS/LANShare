@@ -1,17 +1,18 @@
 //! Biblioteca do Client: acha uma sala, conecta no Host, acompanha quem está na sala e mostra a tela.
 //! O executável único (`lanshare-app`) chama `run()` para iniciar o Client em modo console.
-//! A interface gráfica usa o `ClientEngine` (engine.rs) e a lista de saídas de áudio (audio_devices.rs).
+//! A interface gráfica usa o `ClientEngine` (engine.rs) e a lista de saídas de áudio (audio_devices).
+//! Decodificar e tocar a transmissão fica no crate lanshare-viewer.
 
-pub mod audio_devices;
-mod audio_player;
-mod decoder;
 mod discovery;
 mod engine;
-mod sync_clock;
-mod video;
 mod viewer;
 
+// Atalhos com os caminhos antigos (crate::video, crate::decoder...): o engine.rs e o viewer.rs
+// continuam iguais. Saem quando o motor for refeito (Etapa 5 da v2.0).
+use lanshare_viewer::{audio_player, decoder, sync_clock, video};
+
 pub use engine::ClientEngine;
+pub use lanshare_viewer::audio_devices;
 
 use lanshare_core::protocol::{
     read_message, write_message, Message, UserInfo, VideoFrame, DEFAULT_PORT, PROTOCOL_VERSION,
@@ -399,5 +400,3 @@ fn normalize_address(entrada: &str) -> String {
         format!("{entrada}:{DEFAULT_PORT}")
     }
 }
-
-
