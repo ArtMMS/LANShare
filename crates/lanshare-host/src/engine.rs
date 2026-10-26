@@ -1,24 +1,28 @@
-//! Motor do Host: abre a sala, aceita Clients e controla a transmissão da tela.
+//! Motor do Host: abre a sala, aceita Clients, transmite a tela do Host e coordena
+//! as transmissões de todos (quem transmite e os ingressos para assistir).
 //!
 //! Este módulo NÃO imprime nada e NÃO lê o teclado. Quem usa (o terminal ou a janela)
 //! manda comandos pelos métodos de `HostEngine` e recebe o que acontece pelos eventos.
+//!
+//! v2.0: o vídeo não passa pela conexão da sala. Quem transmite (o Host ou um Client) tem o
+//! próprio StreamServer; o Host só diz onde assistir e entrega os ingressos.
 
-use crate::capture::CaptureTarget;
 use crate::discovery::{self, RoomSettings};
 use crate::events::{EventSender, HostEvent, LocalAddress, UserEntry};
 use crate::kick::Kicker;
-use crate::preview::PreviewSlot;
 use crate::registry::{ClientInfo, Registry};
-use crate::stream::{StreamHandle, StreamSettings};
+use crate::streams::{StreamDirectory, StreamSpot};
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
-    read_message, write_message, Message, SfxFrame, UserInfo, DEFAULT_PORT, HOST_USER_ID,
-    MAX_AVATAR_LEN, PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH,
-    REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
+    new_watch_ticket, read_message, write_message, Message, SfxFrame, UserInfo, DEFAULT_PORT,
+    HOST_USER_ID, MAX_AVATAR_LEN, PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT,
+    REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD, WATCH_BUSY_STREAMING,
+    WATCH_NOT_STREAMING, WATCH_SELF,
 };
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
+use lanshare_stream::{CaptureTarget, PreviewSlot, StreamHandle, StreamServer, StreamSettings};
 use serde::Deserialize;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -46,7 +50,7 @@ const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 /// Tamanho máximo do nome da sala (em caracteres).
 const MAX_ROOM_NAME_LEN: usize = 32;
 
-/// De quanto em quanto tempo o vigia confere se a transmissão caiu sozinha.
+/// De quanto em quanto tempo o vigia confere se a transmissão do Host caiu sozinha.
 const STREAM_WATCH_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Opções da sala, escolhidas pelo Host antes de abrir.
@@ -59,6 +63,20 @@ pub struct HostConfig {
     pub max_clients: Option<usize>,
     /// Nome da sala na lista de salas dos Clients. None = nome do computador.
     pub room_name: Option<String>,
+}
+
+/// A transmissão do próprio Host: a captura/compressão e a porta onde os espectadores assistem.
+struct HostStream {
+    handle: StreamHandle,
+    server: StreamServer,
+}
+
+impl HostStream {
+    /// Fecha a porta (avisa quem assiste) e para a captura.
+    fn stop(self) {
+        self.server.stop();
+        self.handle.stop();
+    }
 }
 
 /// Dados compartilhados por todas as conexões.
@@ -74,6 +92,99 @@ struct Shared {
     host_avatar: Arc<Mutex<Option<String>>>,
     /// Efeitos sonoros que os Clients tocaram, esperando a interface do Host buscar.
     sfx_inbox: SfxInbox,
+    /// Quem está transmitindo na sala e onde assistir.
+    streams: StreamDirectory,
+    /// A transmissão do Host (None = não está transmitindo).
+    host_stream: Arc<Mutex<Option<HostStream>>>,
+}
+
+impl Shared {
+    fn lock_host_stream(&self) -> MutexGuard<'_, Option<HostStream>> {
+        self.host_stream.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Alguém começou a transmitir: anota no catálogo e avisa a sala (aparece o ícone de tela).
+    fn announce_stream(&self, id: u64, spot: StreamSpot) {
+        self.registry.broadcast(&spot.message(id), Some(id));
+        self.streams.set(id, spot);
+        self.events.emit(HostEvent::UserStreaming { id });
+    }
+
+    /// Alguém parou de transmitir (ou saiu da sala): tira do catálogo e avisa a sala.
+    fn end_stream(&self, id: u64) {
+        if !self.streams.remove(id) {
+            return;
+        }
+        self.registry
+            .broadcast(&Message::UserStreamStopped { user_id: id }, None);
+        self.events.emit(HostEvent::UserStreamStopped { id });
+    }
+
+    /// `viewer` quer assistir `target`: emite o ingresso, avisa quem transmite e responde.
+    fn watch_request(&self, viewer: u64, target: u64) {
+        let deny = |code: &str| {
+            self.registry.send_to(
+                viewer,
+                Message::WatchDenied {
+                    user_id: target,
+                    code: code.to_string(),
+                },
+            );
+        };
+
+        if viewer == target {
+            return deny(WATCH_SELF);
+        }
+        // Na v2.0 quem transmite não assiste outra pessoa ao mesmo tempo
+        if self.streams.contains(viewer) {
+            return deny(WATCH_BUSY_STREAMING);
+        }
+        let Some(spot) = self.streams.get(target) else {
+            return deny(WATCH_NOT_STREAMING);
+        };
+
+        let ticket = new_watch_ticket();
+        let allowed = if target == HOST_USER_ID {
+            self.lock_host_stream()
+                .as_ref()
+                .is_some_and(|stream| stream.server.allow_viewer(viewer, ticket.clone()))
+        } else {
+            self.registry.send_to(
+                target,
+                Message::ViewerAllowed {
+                    viewer_id: viewer,
+                    ticket: ticket.clone(),
+                },
+            )
+        };
+        if !allowed {
+            return deny(WATCH_NOT_STREAMING);
+        }
+
+        self.registry.send_to(
+            viewer,
+            Message::WatchGranted {
+                user_id: target,
+                ip: spot.ip,
+                port: spot.port,
+                ticket,
+            },
+        );
+    }
+
+    /// `viewer` não pode mais assistir ninguém (saiu, foi expulso ou começou a transmitir).
+    fn revoke_viewer_everywhere(&self, viewer: u64) {
+        if let Some(stream) = self.lock_host_stream().as_ref() {
+            stream.server.revoke_viewer(viewer);
+        }
+
+        for (streamer, _) in self.streams.all() {
+            if streamer != HOST_USER_ID && streamer != viewer {
+                self.registry
+                    .send_to(streamer, Message::ViewerRevoked { viewer_id: viewer });
+            }
+        }
+    }
 }
 
 /// A sala aberta. Tem o seu próprio runtime do tokio, então pode ser usada de qualquer thread.
@@ -84,9 +195,8 @@ pub struct HostEngine {
     events: EventSender,
     event_rx: Mutex<Receiver<HostEvent>>,
     shutdown_tx: watch::Sender<bool>,
-    /// A transmissão da tela (None = não está transmitindo).
-    streaming: Arc<Mutex<Option<StreamHandle>>>,
-    /// Miniatura do que está sendo transmitido (preview do Host).
+    shared: Shared,
+    /// Miniatura do que o Host está transmitindo (preview do Host).
     preview: PreviewSlot,
     /// Avatar do Host, enviado a quem entra na sala.
     host_avatar: Arc<Mutex<Option<String>>>,
@@ -120,7 +230,6 @@ impl HostEngine {
         let registry = Registry::new(config.max_clients);
         let kicker = Kicker::new();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let streaming: Arc<Mutex<Option<StreamHandle>>> = Arc::new(Mutex::new(None));
         let host_avatar: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let sfx_inbox = SfxInbox::default();
 
@@ -132,6 +241,8 @@ impl HostEngine {
             host_name: Arc::new(host_display_name()),
             host_avatar: host_avatar.clone(),
             sfx_inbox: sfx_inbox.clone(),
+            streams: StreamDirectory::default(),
+            host_stream: Arc::new(Mutex::new(None)),
         };
 
         events.emit(HostEvent::Started {
@@ -152,15 +263,11 @@ impl HostEngine {
             },
         ));
 
-        // Avisa os Clients se a transmissão cair sozinha (por exemplo, por erro de captura)
-        runtime.spawn(watch_stream(
-            streaming.clone(),
-            registry.clone(),
-            shutdown_rx.clone(),
-        ));
+        // Avisa a sala se a transmissão do Host cair sozinha (por exemplo, por erro de captura)
+        runtime.spawn(watch_stream(shared.clone(), shutdown_rx.clone()));
 
         // Aceita os Clients que chegarem
-        runtime.spawn(accept_loop(listener, shutdown_rx, shared));
+        runtime.spawn(accept_loop(listener, shutdown_rx, shared.clone()));
 
         Ok(Self {
             runtime,
@@ -169,7 +276,7 @@ impl HostEngine {
             events,
             event_rx: Mutex::new(event_rx),
             shutdown_tx,
-            streaming,
+            shared,
             preview: PreviewSlot::default(),
             host_avatar,
             sfx_inbox,
@@ -286,13 +393,13 @@ impl HostEngine {
         Ok(target.name)
     }
 
-    /// Começa a transmitir o monitor principal para os Clients.
+    /// Começa a transmitir o monitor principal.
     pub fn start_stream(&self, settings: StreamSettings) -> Result<(), String> {
         self.start_stream_on(settings, CaptureTarget::PrimaryMonitor)
     }
 
-    /// Começa a transmitir um monitor ou uma janela para os Clients
-    /// (com ou sem som, conforme o último `set_stream_audio`).
+    /// Começa a transmitir um monitor ou uma janela (com ou sem som, conforme o último
+    /// `set_stream_audio`) e avisa a sala. Só quem pedir ingresso recebe a imagem.
     pub fn start_stream_on(
         &self,
         settings: StreamSettings,
@@ -307,8 +414,8 @@ impl HostEngine {
             .to_string());
         }
 
-        let mut streaming = self.lock_streaming();
-        if streaming.as_ref().is_some_and(|s| s.is_running()) {
+        let mut slot = self.shared.lock_host_stream();
+        if slot.as_ref().is_some_and(|s| s.handle.is_running()) {
             return Err(tr(
                 "A tela já está sendo compartilhada.",
                 "The screen is already being shared.",
@@ -317,14 +424,37 @@ impl HostEngine {
             .to_string());
         }
 
-        *streaming = Some(StreamHandle::start_on(
-            self.registry.clone(),
+        // Uma transmissão anterior que caiu sozinha (o vigia ainda não limpou): fecha a porta dela
+        if let Some(old) = slot.take() {
+            old.stop();
+        }
+
+        let server = StreamServer::start(self.runtime.handle(), self.events.clone().into())
+            .map_err(|erro| {
+                format!(
+                    "{}: {erro}",
+                    tr(
+                        "Não foi possível abrir a porta da transmissão",
+                        "Could not open the stream port",
+                        "No se pudo abrir el puerto de la transmisión"
+                    )
+                )
+            })?;
+        let port = server.port();
+
+        let handle = StreamHandle::start_on(
+            server.clone(),
             settings,
             self.events.clone(),
             self.preview.clone(),
             target,
             self.stream_audio.load(Ordering::Relaxed),
-        ));
+        );
+        *slot = Some(HostStream { handle, server });
+        drop(slot);
+
+        self.shared
+            .announce_stream(HOST_USER_ID, StreamSpot { ip: None, port });
         Ok(())
     }
 
@@ -333,9 +463,9 @@ impl HostEngine {
     pub fn set_stream_audio(&self, enabled: bool) {
         self.stream_audio.store(enabled, Ordering::Relaxed);
 
-        let streaming = self.lock_streaming();
-        if let Some(handle) = streaming.as_ref().filter(|h| h.is_running()) {
-            handle.set_audio_enabled(enabled);
+        let slot = self.shared.lock_host_stream();
+        if let Some(stream) = slot.as_ref().filter(|s| s.handle.is_running()) {
+            stream.handle.set_audio_enabled(enabled);
         }
     }
 
@@ -346,9 +476,9 @@ impl HostEngine {
 
     /// Troca o monitor ou a janela transmitida sem parar a transmissão.
     pub fn switch_source(&self, target: CaptureTarget) -> Result<(), String> {
-        let streaming = self.lock_streaming();
-        match streaming.as_ref() {
-            Some(handle) if handle.is_running() => handle.switch_source(target),
+        let slot = self.shared.lock_host_stream();
+        match slot.as_ref() {
+            Some(stream) if stream.handle.is_running() => stream.handle.switch_source(target),
             _ => Err(tr(
                 "Não há transmissão em andamento.",
                 "There is no stream in progress.",
@@ -358,16 +488,15 @@ impl HostEngine {
         }
     }
 
-    /// Para a transmissão da tela e avisa os Clients. Devolve false se não havia transmissão.
+    /// Para a transmissão do Host e avisa a sala. Devolve false se não havia transmissão.
     pub fn stop_stream(&self) -> bool {
         // Tira da caixa antes de esperar a thread terminar (para não segurar o lock)
-        let handle = self.lock_streaming().take();
+        let stream = self.shared.lock_host_stream().take();
 
-        match handle {
+        match stream {
             Some(running) => {
                 running.stop();
-                // Os Clients mostram "transmissão parada" em vez de ficarem com a última imagem
-                self.registry.broadcast(&Message::StreamStopped, None);
+                self.shared.end_stream(HOST_USER_ID);
                 true
             }
             None => false,
@@ -380,11 +509,12 @@ impl HostEngine {
         self.preview.read_into(out)
     }
 
-    /// A tela está sendo transmitida? (false também se a transmissão caiu por erro)
+    /// O Host está transmitindo? (false também se a transmissão caiu por erro)
     pub fn is_streaming(&self) -> bool {
-        self.lock_streaming()
+        self.shared
+            .lock_host_stream()
             .as_ref()
-            .is_some_and(|s| s.is_running())
+            .is_some_and(|s| s.handle.is_running())
     }
 
     /// Acesso ao runtime do tokio da sala (por exemplo, para o terminal ouvir o Ctrl+C).
@@ -411,19 +541,11 @@ impl HostEngine {
         self.runtime.shutdown_timeout(Duration::from_secs(2));
         remaining
     }
-
-    fn lock_streaming(&self) -> MutexGuard<'_, Option<StreamHandle>> {
-        self.streaming.lock().unwrap_or_else(|e| e.into_inner())
-    }
 }
 
-/// Se a transmissão cair sozinha (por exemplo, erro de captura), avisa os Clients
-/// do mesmo jeito que numa parada normal.
-async fn watch_stream(
-    streaming: Arc<Mutex<Option<StreamHandle>>>,
-    registry: Registry,
-    mut shutdown: watch::Receiver<bool>,
-) {
+/// Se a transmissão do Host cair sozinha (por exemplo, erro de captura),
+/// fecha a porta dela e avisa a sala, do mesmo jeito que numa parada normal.
+async fn watch_stream(shared: Shared, mut shutdown: watch::Receiver<bool>) {
     let mut ticker = tokio::time::interval(STREAM_WATCH_INTERVAL);
     let mut dead_polls = 0u32;
 
@@ -434,8 +556,8 @@ async fn watch_stream(
         }
 
         let ended = {
-            let mut slot = streaming.lock().unwrap_or_else(|e| e.into_inner());
-            let dead = slot.as_ref().is_some_and(|s| !s.is_running());
+            let mut slot = shared.lock_host_stream();
+            let dead = slot.as_ref().is_some_and(|s| !s.handle.is_running());
             dead_polls = if dead { dead_polls + 1 } else { 0 };
 
             // Duas checagens seguidas, para não confundir o início da transmissão com uma queda
@@ -446,10 +568,10 @@ async fn watch_stream(
             }
         };
 
-        if let Some(handle) = ended {
+        if let Some(stream) = ended {
             dead_polls = 0;
-            handle.stop();
-            registry.broadcast(&Message::StreamStopped, None);
+            stream.stop();
+            shared.end_stream(HOST_USER_ID);
         }
     }
 }
@@ -462,7 +584,7 @@ async fn accept_loop(listener: TcpListener, shutdown: watch::Receiver<bool>, sha
         tokio::select! {
             accepted = listener.accept() => match accepted {
                 Ok((stream, client_addr)) => {
-                    // Sem isso o TCP junta pacotes pequenos e atrasa o vídeo
+                    // Sem isso o TCP junta pacotes pequenos e atrasa as mensagens
                     let _ = stream.set_nodelay(true);
                     tokio::spawn(handle_client(
                         stream,
@@ -492,7 +614,7 @@ async fn handle_client(
     // Caixa de saída desta conexão: quem quiser falar com este Client põe aqui
     let (out_tx, out_rx) = mpsc::unbounded_channel::<Message>();
     let kick_out_tx = out_tx.clone();
-    let avatar_out_tx = out_tx.clone();
+    let intro_tx = out_tx.clone();
 
     let client = match handshake(&mut stream, addr, &shared, out_tx).await {
         Ok(Some(client)) => client,
@@ -537,34 +659,41 @@ async fn handle_client(
     };
     shared.registry.broadcast(&joined, Some(id));
 
-    // Quem entra recebe os avatares de quem já está na sala (o Host e os outros Clients)
+    // Quem entra recebe os avatares de quem já está na sala (o Host e os outros Clients)...
     let host_avatar = shared
         .host_avatar
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
     if let Some(avatar) = host_avatar {
-        let _ = avatar_out_tx.send(Message::UserAvatar {
+        let _ = intro_tx.send(Message::UserAvatar {
             id: HOST_USER_ID,
             png_base64: avatar,
         });
     }
     for (other, avatar) in shared.registry.avatars(Some(id)) {
-        let _ = avatar_out_tx.send(Message::UserAvatar {
+        let _ = intro_tx.send(Message::UserAvatar {
             id: other,
             png_base64: avatar,
         });
     }
-    drop(avatar_out_tx);
+
+    // ...e quem está transmitindo agora (aparece o ícone de tela ao lado do nome)
+    for (streamer, spot) in shared.streams.all() {
+        let _ = intro_tx.send(spot.message(streamer));
+    }
+    drop(intro_tx);
 
     // Guardamos uma cópia para saber, no fim, se o Host inteiro está encerrando
     let shutdown_check = shutdown.clone();
 
     // O ping de cada Client vira um evento; o avatar dele é guardado e repassado aos outros;
-    // o efeito sonoro dele é repassado aos outros e guardado para a interface do Host tocar
+    // o efeito sonoro dele é repassado aos outros e guardado para a interface do Host tocar;
+    // as mensagens de transmissão passam pela coordenação (Shared)
     let conn_events = shared.events.clone();
     let conn_registry = shared.registry.clone();
     let conn_inbox = shared.sfx_inbox.clone();
+    let conn_shared = shared.clone();
     // Anti-spam deste Client: quem garante é o Host (um Client modificado não consegue burlar)
     let mut sfx_cooldown = SfxCooldown::default();
     let reason = run_connection(stream, conn_shutdown_rx, out_rx, move |event| match event {
@@ -609,11 +738,34 @@ async fn handle_client(
                 sfx_id,
             });
         }
+        ConnectionEvent::Message(Message::StreamAnnounce { port }) => {
+            if port == 0 {
+                return;
+            }
+            // Na v2.0 quem transmite não assiste: sai das transmissões que estava vendo
+            conn_shared.revoke_viewer_everywhere(id);
+            conn_shared.announce_stream(
+                id,
+                StreamSpot {
+                    ip: Some(addr.ip().to_string()),
+                    port,
+                },
+            );
+        }
+        ConnectionEvent::Message(Message::StreamEnded) => conn_shared.end_stream(id),
+        ConnectionEvent::Message(Message::WatchRequest { user_id }) => {
+            conn_shared.watch_request(id, user_id)
+        }
         ConnectionEvent::Message(_) => {}
     })
     .await;
 
     shared.registry.remove(id);
+
+    // Se ele transmitia, a transmissão acaba; se assistia alguém, perde o acesso
+    shared.end_stream(id);
+    shared.revoke_viewer_everywhere(id);
+
     let was_kicked = shared.kicker.finish(id);
 
     // No encerramento do Host todo mundo sai junto; e quem foi expulso já foi anunciado

@@ -1,8 +1,10 @@
-//! Biblioteca do Host: abre a sala, aceita vários Clients ao mesmo tempo e transmite a tela (e o som).
+//! Biblioteca do Host: abre a sala, aceita vários Clients ao mesmo tempo, transmite a tela do Host
+//! e coordena as transmissões de todos (quem transmite, ingressos para assistir).
 //!
 //! - `HostEngine` (engine.rs) é o motor: recebe comandos e emite eventos (events.rs).
 //! - `run_cli()` (cli.rs) é o terminal que usa o motor (`lanshare host`).
-//! - A captura, a compressão e o envio moram no crate lanshare-stream (stream_bridge.rs faz a ligação).
+//! - streams.rs guarda quem está transmitindo na sala e onde assistir.
+//! - A captura, a compressão e o envio moram no crate lanshare-stream.
 //! - A interface gráfica usa o mesmo motor pela FFI.
 
 mod cli;
@@ -12,10 +14,7 @@ mod events;
 mod kick;
 mod registry;
 mod stream_bridge;
-
-// Atalhos com os caminhos antigos (crate::stream, crate::capture...): o engine.rs e o cli.rs
-// continuam iguais. Saem quando o motor for refeito (Etapa 3 da v2.0).
-use lanshare_stream::{audio_capture, capture, encoder, hw_encoder, preview, stream};
+mod streams;
 
 pub use engine::{HostConfig, HostEngine};
 pub use events::{HostEvent, LocalAddress, LogLevel, UserEntry};

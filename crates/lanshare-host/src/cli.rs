@@ -4,7 +4,8 @@
 
 use crate::engine::{HostConfig, HostEngine};
 use crate::events::{HostEvent, LogLevel};
-use crate::stream::StreamSettings;
+use lanshare_core::protocol::HOST_USER_ID;
+use lanshare_stream::StreamSettings;
 use std::io;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -196,6 +197,20 @@ impl EventPrinter {
                 println!("[host] #{user_id} tocou o efeito sonoro '{name}'");
             }
 
+            HostEvent::UserStreaming { id } => {
+                if *id == HOST_USER_ID {
+                    println!("[host] Sua transmissao esta disponivel para a sala.");
+                } else {
+                    println!("[host] #{id} comecou a transmitir.");
+                }
+            }
+
+            HostEvent::UserStreamStopped { id } => {
+                if *id != HOST_USER_ID {
+                    println!("[host] #{id} parou de transmitir.");
+                }
+            }
+
             HostEvent::StreamStarted {
                 source_width,
                 source_height,
@@ -217,7 +232,7 @@ impl EventPrinter {
             } => {
                 if self.last_stats.elapsed() >= STATS_PRINT_INTERVAL {
                     println!(
-                        "[host] Transmitindo: {packets_per_sec:.1} pacotes/s, {mbps:.2} Mbps (por client), {clients} client(s), {skipped_frames} frame(s) pulado(s)"
+                        "[host] Transmitindo: {packets_per_sec:.1} pacotes/s, {mbps:.2} Mbps (por espectador), {clients} espectador(es), {skipped_frames} frame(s) pulado(s)"
                     );
                     self.last_stats = Instant::now();
                 }
@@ -362,11 +377,11 @@ fn begin_share(engine: &HostEngine, prompt: &mut Prompt) {
     *prompt = Prompt::Resolution;
 }
 
-/// Começa a transmitir a tela para os Clients, com as opções escolhidas.
+/// Começa a transmitir a tela, com as opções escolhidas.
 fn start_sharing(engine: &HostEngine, settings: StreamSettings) {
     match engine.start_stream(settings) {
         Ok(()) => println!(
-            "[host] Compartilhando a tela em {}p a {} FPS (a GPU so e usada quando ha clients conectados)...",
+            "[host] Compartilhando a tela em {}p a {} FPS (a GPU so e usada quando alguem esta assistindo)...",
             settings.height, settings.fps
         ),
         Err(motivo) => println!("[host] {motivo} Use 'stop' para parar."),
@@ -388,7 +403,7 @@ fn start_capture_test(seconds: u64) {
     println!("[host] Capturando a tela por {seconds}s...");
 
     std::thread::spawn(move || {
-        if let Err(erro) = crate::capture::test_capture(seconds) {
+        if let Err(erro) = lanshare_stream::capture::test_capture(seconds) {
             println!("[host] Falha na captura: {erro}");
         }
     });
@@ -399,7 +414,7 @@ fn start_encode_test(seconds: u64) {
     println!("[host] Capturando e comprimindo (CPU) a tela por {seconds}s...");
 
     std::thread::spawn(move || {
-        if let Err(erro) = crate::encoder::test_encode(seconds) {
+        if let Err(erro) = lanshare_stream::encoder::test_encode(seconds) {
             println!("[host] Falha na compressao: {erro}");
         }
     });
@@ -410,7 +425,7 @@ fn start_hw_encode_test(seconds: u64) {
     println!("[host] Capturando e comprimindo (GPU) a tela por {seconds}s...");
 
     std::thread::spawn(move || {
-        if let Err(erro) = crate::hw_encoder::test_hw_encode(seconds) {
+        if let Err(erro) = lanshare_stream::hw_encoder::test_hw_encode(seconds) {
             println!("[host] Falha na compressao por GPU: {erro}");
         }
     });
@@ -421,7 +436,7 @@ fn start_audio_test(seconds: u64) {
     println!("[host] Capturando o som do PC por {seconds}s...");
 
     std::thread::spawn(move || {
-        if let Err(erro) = crate::audio_capture::test_audio_capture(seconds) {
+        if let Err(erro) = lanshare_stream::audio_capture::test_audio_capture(seconds) {
             println!("[host] Falha na captura de som: {erro}");
         }
     });
@@ -439,5 +454,3 @@ fn print_help() {
     println!("[host]   audiotest [segs]  teste de captura do som do PC (grava lanshare-audiotest.wav)");
     println!("[host]   help              mostra esta ajuda");
 }
-
-

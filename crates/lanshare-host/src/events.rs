@@ -86,7 +86,13 @@ pub enum HostEvent {
     /// O som do próprio Host não gera evento: a interface já tocou ele.
     SfxPlayed { user_id: u64, name: String, sfx_id: u64 },
 
-    /// A transmissão da tela começou.
+    /// Alguém começou a transmitir (id 0 = o próprio Host).
+    UserStreaming { id: u64 },
+
+    /// Alguém parou de transmitir (id 0 = o próprio Host).
+    UserStreamStopped { id: u64 },
+
+    /// A transmissão da tela do Host começou.
     StreamStarted {
         source_width: u32,
         source_height: u32,
@@ -95,16 +101,17 @@ pub enum HostEvent {
         fps: u32,
     },
 
-    /// Resumo da transmissão (a cada ~1 segundo, enquanto há Clients).
+    /// Resumo da transmissão do Host (a cada ~1 segundo, enquanto alguém assiste).
     StreamStats {
         packets_per_sec: f64,
-        /// Megabits por segundo enviados a CADA client.
+        /// Megabits por segundo enviados a CADA espectador.
         mbps: f64,
+        /// Quantos estão assistindo (o nome ficou "clients" para a interface não mudar).
         clients: usize,
         skipped_frames: u32,
     },
 
-    /// A transmissão terminou. `error` = None quando foi o Host que parou.
+    /// A transmissão do Host terminou. `error` = None quando foi o Host que parou.
     StreamStopped { error: Option<String> },
 
     /// Mensagem de texto (avisos e diagnóstico).
@@ -146,4 +153,3 @@ impl EventSender {
         self.log(LogLevel::Warn, message);
     }
 }
-
