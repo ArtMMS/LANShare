@@ -7,6 +7,8 @@ publish = false
 
 [dependencies]
 lanshare-core = { workspace = true }
+lanshare-net = { workspace = true }
+tokio = { workspace = true }
 serde = { workspace = true }
 windows-capture = "2.0.1"
 # O macro #[implement] (objetos COM feitos em Rust) gera código que chama o windows-core direto

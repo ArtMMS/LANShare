@@ -361,10 +361,12 @@ name = "lanshare-stream"
 version = "0.1.0"
 dependencies = [
  "lanshare-core",
+ "lanshare-net",
  "openh264",
  "opus",
  "rayon",
  "serde",
+ "tokio",
  "windows",
  "windows-capture",
  "windows-core",
