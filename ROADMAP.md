@@ -137,12 +137,12 @@
     - Show each frame at its capture time plus a small fixed delay (~100 ms)
     - Use a local clock when the stream has no audio
     - When frames arrive late in a burst, skip to the newest one instead of fast-forwarding
-- [ ] (FIX) Stream freezes on a bad connection: adaptive bitrate on the streamer
+- [x] (FIX) Stream freezes on a bad connection: adaptive bitrate on the streamer
     - Measure every viewer's queue each second on the StreamServer
     - Lower the encoder bitrate when queues grow (with a minimum), raise it back slowly when stable
     - Follow the slowest viewer (one encoder for everyone)
     - Show "Unstable connection" in the info bar
-- [ ] (FIX) Monitor turns off while watching: Windows power request (like browsers do)
+- [x] (FIX) Monitor turns off while watching: Windows power request (like browsers do)
     - Keep the display on and the PC awake while watching a stream
     - Keep the display on and the PC awake while streaming
     - Release the request when watching/streaming stops or when leaving the room
@@ -150,7 +150,6 @@
 # V2.1.0 — Multi-View & Webcam
 
 - [ ] Watch other streams while streaming
-- [ ] Screen that shows all active streams
    - [ ] Adaptative/Customizable layout (change position and size)
 - [ ] Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
    - Only cameras and avatars screen (like discord or skype); clickable on the user feed

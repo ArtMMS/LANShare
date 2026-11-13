@@ -164,6 +164,7 @@ public partial class MainWindow : Window
         InitNotifications();
         InitVolume(); // antes do InitFullscreen: o Esc fecha o painel de volume antes de sair da tela cheia
         InitSoundboard(); // idem: o Esc fecha o painel de efeitos sonoros antes de sair da tela cheia
+        InitPowerRequest(); // tela ligada enquanto assiste ou transmite
 
         // Tela de nome (primeira abertura)
         _nameConfirmButton.Click += (_, _) => ConfirmName();
