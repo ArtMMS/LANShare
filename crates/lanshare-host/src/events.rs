@@ -109,6 +109,10 @@ pub enum HostEvent {
         /// Quantos estão assistindo (o nome ficou "clients" para a interface não mudar).
         clients: usize,
         skipped_frames: u32,
+        /// Bitrate que o encoder está usando agora (Mbps). Cai quando a conexão de alguém piora.
+        bitrate_mbps: f64,
+        /// true = a qualidade está reduzida porque alguém não está dando conta (conexão instável).
+        unstable: bool,
     },
 
     /// A transmissão do Host terminou. `error` = None quando foi o Host que parou.

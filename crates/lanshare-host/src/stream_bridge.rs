@@ -1,5 +1,5 @@
 //! Liga os eventos do lanshare-stream aos eventos do Host
-//! (o mesmo JSON de antes para a interface).
+//! (o mesmo JSON de antes para a interface, mais o bitrate adaptativo).
 
 use crate::events::{EventSender, HostEvent};
 use lanshare_stream::{StreamEvent, StreamEvents};
@@ -25,12 +25,15 @@ impl From<EventSender> for StreamEvents {
                 mbps,
                 viewers,
                 skipped_frames,
-                ..
+                bitrate_mbps,
+                unstable,
             } => events.emit(HostEvent::StreamStats {
                 packets_per_sec,
                 mbps,
                 clients: viewers,
                 skipped_frames,
+                bitrate_mbps,
+                unstable,
             }),
             StreamEvent::Stopped { error } => events.emit(HostEvent::StreamStopped { error }),
             StreamEvent::Debug(message) => events.debug(message),

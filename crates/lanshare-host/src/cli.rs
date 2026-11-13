@@ -229,10 +229,13 @@ impl EventPrinter {
                 mbps,
                 clients,
                 skipped_frames,
+                bitrate_mbps,
+                unstable,
             } => {
                 if self.last_stats.elapsed() >= STATS_PRINT_INTERVAL {
+                    let warning = if *unstable { " - CONEXAO INSTAVEL (qualidade reduzida)" } else { "" };
                     println!(
-                        "[host] Transmitindo: {packets_per_sec:.1} pacotes/s, {mbps:.2} Mbps (por espectador), {clients} espectador(es), {skipped_frames} frame(s) pulado(s)"
+                        "[host] Transmitindo: {packets_per_sec:.1} pacotes/s, {mbps:.2} Mbps (por espectador), encoder em {bitrate_mbps:.1} Mbps, {clients} espectador(es), {skipped_frames} frame(s) pulado(s){warning}"
                     );
                     self.last_stats = Instant::now();
                 }
