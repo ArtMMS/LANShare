@@ -433,6 +433,7 @@ public partial class MainWindow : Window
         else if (_streaming) UpdateOwnStreamTile();
 
         UpdateOwnCameraTile(); // a minha câmera no meu quadrado (só com a grade na tela)
+        UpdateCameraTiles(); // as câmeras dos outros nos quadrados deles
     }
 
     // ───────────────────────── Transmitir (Host e Client) ─────────────────────────

@@ -41,7 +41,7 @@ public partial class MainWindow
     /// quando sou um Client: o Host não manda esse aviso de volta para quem transmite.
     private readonly HashSet<ulong> _streamers = new();
 
-    /// Quem está com a CÂMERA ligada na sala (a imagem nos quadrados entra na próxima etapa).
+    /// Quem está com a CÂMERA ligada na sala (a imagem dela aparece no quadrado da pessoa).
     private readonly HashSet<ulong> _cameraUsers = new();
 
     /// Nomes da lista do Host (para os avisos e a barra de baixo).
@@ -49,6 +49,9 @@ public partial class MainWindow
 
     /// Quem estou assistindo (ou tentando assistir). Null = ninguém.
     private ulong? _watchUser;
+
+    /// O que estou assistindo dessa pessoa: false = a tela, true = a câmera (grande).
+    private bool _watchCamera;
 
     /// Número da tentativa atual (vem no watch_connecting). 0 = ainda não chegou:
     /// avisos com outro número são de uma tentativa antiga e são ignorados.
@@ -67,6 +70,7 @@ public partial class MainWindow
     {
         _streamers.Clear();
         _cameraUsers.Clear();
+        _cameraTileViews.Clear();
         _hostUserNames.Clear();
         _ownPreviewBig = false;
         ResetOwnCamera();
@@ -77,6 +81,7 @@ public partial class MainWindow
     private void ClearWatchState()
     {
         _watchUser = null;
+        _watchCamera = false;
         _watchId = 0;
         _watchState = WatchState.None;
         _watchUnstableUntil = DateTime.MinValue;
@@ -85,17 +90,18 @@ public partial class MainWindow
         _syncMs = null;
     }
 
-    /// Clique no ícone de tela: assiste essa pessoa (ou para, se já era ela).
-    private void ToggleWatch(ulong userId)
+    /// Clique no ícone de tela (ou no quadrado da câmera, com `camera` = true): assiste essa
+    /// transmissão grande (ou para, se já era ela).
+    private void ToggleWatch(ulong userId, bool camera = false)
     {
-        if (_watchUser == userId)
+        if (_watchUser == userId && _watchCamera == camera)
         {
             NativeMethods.WatchStop();
             EndWatch(null);
             return;
         }
 
-        var (ok, error) = NativeMethods.Watch(userId);
+        var (ok, error) = NativeMethods.WatchKind(userId, camera);
         if (!ok)
         {
             _infoText.Text = Loc.F("Watch_Error", error ?? "?");
@@ -105,6 +111,7 @@ public partial class MainWindow
         ClearWatchState();
         _ownPreviewBig = false; // a transmissão assistida toma o lugar da minha prévia grande
         _watchUser = userId;
+        _watchCamera = camera;
         _watchState = WatchState.Connecting;
 
         // Se estava com a imagem de outra transmissão, ela some; a nova aparece quando chegar
@@ -166,16 +173,24 @@ public partial class MainWindow
 
         switch (type)
         {
-            // Câmeras dos outros: por enquanto só anota quem está com ela ligada
+            // Câmeras dos outros: o motor já pede a versão de 720p sozinho; o quadrado mostra
+            // a câmera assim que a primeira imagem chegar
             case "user_streaming" when IsCameraEvent(e):
-                _cameraUsers.Add(e.GetProperty("id").GetUInt64());
+            {
+                var id = e.GetProperty("id").GetUInt64();
+                if (id != MySfxUserId) _cameraUsers.Add(id);
                 RefreshSfxUserLists();
                 return true;
+            }
 
             case "user_stream_stopped" when IsCameraEvent(e):
-                _cameraUsers.Remove(e.GetProperty("id").GetUInt64());
+            {
+                var id = e.GetProperty("id").GetUInt64();
+                _cameraUsers.Remove(id);
+                _cameraTileViews.Remove(id);
                 RefreshSfxUserLists();
                 return true;
+            }
 
             case "user_streaming":
             {
@@ -404,7 +419,7 @@ public partial class MainWindow
     private Control ScreenIcon(ulong userId)
     {
         var mine = userId == MySfxUserId;
-        var watched = IsWatchingUser(userId);
+        var watched = IsWatchingUser(userId) && !_watchCamera;
 
         var icon = new Border
         {

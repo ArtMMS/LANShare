@@ -21,7 +21,7 @@ use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
 use lanshare_stream::{CameraSettings, CaptureTarget, PreviewSlot, StreamSettings};
 use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
-use lanshare_viewer::{EventTx, Watcher};
+use lanshare_viewer::{EventTx, TileRequester, TileWatcher, Watcher};
 use serde_json::{json, Value};
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -71,8 +71,10 @@ pub struct ClientEngine {
     sfx_inbox: SfxInbox,
     /// Anti-spam dos meus sons (o Host também confere: isto só evita mandar à toa).
     sfx_cooldown: Mutex<SfxCooldown>,
-    /// Quem estou assistindo (no máximo uma transmissão por vez).
+    /// Quem estou assistindo grande (no máximo uma transmissão por vez).
     watcher: Watcher,
+    /// As câmeras da sala nos quadrados (a versão de 720p de todas).
+    tiles: TileWatcher,
     /// A minha transmissão.
     own_stream: OwnStream,
     /// Miniatura da minha transmissão (a prévia).
@@ -103,11 +105,16 @@ impl ClientEngine {
             audio_volume.clone(),
         );
 
+        // Os pedidos de câmera (720p) saem pela conexão da sala que estiver ativa
+        let session: Arc<Mutex<Option<Session>>> = Arc::new(Mutex::new(None));
+        let tiles = TileWatcher::new(runtime.handle().clone());
+        tiles.set_requester(tile_requester(session.clone()));
+
         Ok(Self {
             runtime,
             events,
             event_rx: Mutex::new(event_rx),
-            session: Arc::new(Mutex::new(None)),
+            session,
             scanning: Arc::new(AtomicBool::new(false)),
             avatar: Mutex::new(None),
             audio_output,
@@ -115,6 +122,7 @@ impl ClientEngine {
             sfx_inbox: SfxInbox::default(),
             sfx_cooldown: Mutex::new(SfxCooldown::default()),
             watcher,
+            tiles,
             own_stream: OwnStream::default(),
             preview: PreviewSlot::default(),
             own_camera: OwnCamera::default(),
@@ -287,6 +295,7 @@ impl ClientEngine {
         let events = self.events.clone();
         let sfx_inbox = self.sfx_inbox.clone();
         let watcher = self.watcher.clone();
+        let tiles = self.tiles.clone();
         let own_stream = self.own_stream.clone();
         let own_camera = self.own_camera.clone();
 
@@ -300,6 +309,7 @@ impl ClientEngine {
                 events.clone(),
                 sfx_inbox,
                 watcher.clone(),
+                tiles.clone(),
                 own_stream.clone(),
                 own_camera.clone(),
             )
@@ -307,6 +317,9 @@ impl ClientEngine {
 
             // Fora da sala: para de assistir, de transmitir e a câmera (parar espera as threads)
             watcher.stop();
+            for user_id in tiles.users() {
+                tiles.remove(user_id);
+            }
             let _ = tokio::task::spawn_blocking(move || {
                 own_stream.stop();
                 own_camera.stop();
@@ -356,21 +369,26 @@ impl ClientEngine {
 
     // ───────────────────────────── Assistir ─────────────────────────────
 
-    /// Pede ao Host para assistir alguém (o id da lista da sala; 0 = o Host).
-    /// O andamento chega por eventos: watch_connecting, watch_started, watch_denied,
-    /// watch_failed e watch_ended.
+    /// Pede ao Host para assistir a tela de alguém (o id da lista da sala; 0 = o Host).
     pub fn watch(&self, user_id: u64) -> Result<(), String> {
+        self.watch_kind(user_id, StreamKind::Screen)
+    }
+
+    /// Pede ao Host para assistir grande a transmissão `kind` (tela ou câmera, versão cheia)
+    /// de alguém. O andamento chega por eventos: watch_connecting, watch_started, watch_denied,
+    /// watch_failed e watch_ended.
+    pub fn watch_kind(&self, user_id: u64, kind: StreamKind) -> Result<(), String> {
         let session = self.lock_session();
         let Some(session) = session.as_ref() else {
             return Err(not_in_room());
         };
 
-        self.watcher.request(user_id, StreamKind::Screen);
+        self.watcher.request(user_id, kind);
         session
             .outgoing_tx
             .send(Message::WatchRequest {
                 user_id,
-                kind: StreamKind::Screen,
+                kind,
                 quality: StreamQuality::Full,
             })
             .map_err(|_| not_in_room())
@@ -478,12 +496,18 @@ impl ClientEngine {
         self.camera_preview.read_into(out)
     }
 
+    /// Copia a imagem mais recente (720p) da câmera de alguém da sala para `out`, só se for nova.
+    pub fn camera_frame_into(&self, user_id: u64, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.tiles.frame_into(user_id, out)
+    }
+
     /// Desconecta e encerra o motor.
     pub fn stop(self) {
         if self.disconnect() {
             std::thread::sleep(STOP_GRACE);
         }
         self.watcher.stop();
+        self.tiles.clear();
         self.own_stream.stop();
         self.own_camera.stop();
         self.runtime.shutdown_timeout(Duration::from_secs(2));
@@ -492,6 +516,21 @@ impl ClientEngine {
     fn lock_session(&self) -> MutexGuard<'_, Option<Session>> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// Pede ao Host a versão pequena (720p) da câmera de alguém, pela conexão da sala ativa.
+/// O ingresso chega depois no WatchGranted (por isso devolve None).
+fn tile_requester(session: Arc<Mutex<Option<Session>>>) -> TileRequester {
+    Arc::new(move |user_id| {
+        if let Some(session) = session.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            let _ = session.outgoing_tx.send(Message::WatchRequest {
+                user_id,
+                kind: StreamKind::Camera,
+                quality: StreamQuality::Tile,
+            });
+        }
+        None
+    })
 }
 
 fn not_in_room() -> String {
@@ -600,6 +639,7 @@ async fn run_session(
     events: EventTx,
     sfx_inbox: SfxInbox,
     watcher: Watcher,
+    tiles: TileWatcher,
     own_stream: OwnStream,
     own_camera: OwnCamera,
 ) -> SessionEnd {
@@ -684,6 +724,7 @@ async fn run_session(
 
     let cb_events = events.clone();
     let cb_watcher = watcher.clone();
+    let cb_tiles = tiles.clone();
     let cb_stream = own_stream.clone();
     let cb_camera = own_camera.clone();
 
@@ -729,18 +770,46 @@ async fn run_session(
             }
 
             // ── Transmissões ──
-            Message::UserStreaming { user_id, kind, .. } => send(
-                &cb_events,
-                json!({ "type": "user_streaming", "id": user_id, "kind": kind }),
-            ),
+            Message::UserStreaming { user_id, kind, .. } => {
+                // Câmera ligada: todo mundo recebe a versão pequena (quadrados) sozinho
+                if kind == StreamKind::Camera {
+                    cb_tiles.add(user_id);
+                }
+                send(
+                    &cb_events,
+                    json!({ "type": "user_streaming", "id": user_id, "kind": kind }),
+                );
+            }
             Message::UserStreamStopped { user_id, kind } => {
                 cb_watcher.stream_ended(user_id, kind);
+                if kind == StreamKind::Camera {
+                    cb_tiles.remove(user_id);
+                }
                 send(
                     &cb_events,
                     json!({ "type": "user_stream_stopped", "id": user_id, "kind": kind }),
                 );
             }
-            // A versão pequena da câmera (quadrados) ainda não é usada: só a cheia
+            // A versão pequena da câmera: vai para o quadrado da pessoa
+            Message::WatchGranted {
+                user_id,
+                kind: StreamKind::Camera,
+                quality: StreamQuality::Tile,
+                ip,
+                port,
+                ticket,
+            } => {
+                let ip = match ip {
+                    Some(text) => text.parse::<IpAddr>().ok(),
+                    None => host_ip,
+                };
+                match ip {
+                    Some(ip) => {
+                        cb_tiles.granted(user_id, SocketAddr::new(ip, port), ticket);
+                    }
+                    None => cb_tiles.denied(user_id),
+                }
+            }
             Message::WatchGranted { quality, .. } if quality != StreamQuality::Full => {}
             Message::WatchGranted {
                 user_id,
@@ -779,7 +848,9 @@ async fn run_session(
                 quality,
                 code,
             } => {
-                if quality == StreamQuality::Full && cb_watcher.denied(user_id, kind) {
+                if quality == StreamQuality::Tile {
+                    cb_tiles.denied(user_id);
+                } else if cb_watcher.denied(user_id, kind) {
                     send(
                         &cb_events,
                         json!({ "type": "watch_denied", "user_id": user_id, "kind": kind, "code": code }),

@@ -3,6 +3,7 @@
 //!
 //! - watcher.rs: qual transmissão estou assistindo (uma por vez) e a conexão com quem transmite;
 //! - session.rs: UMA conexão de transmissão (ingresso, vídeo e som);
+//! - tiles.rs: as câmeras da sala nos quadrados (a versão de 720p de todas, ao mesmo tempo);
 //! - video.rs: decodifica o vídeo numa thread própria e guarda a imagem mais recente;
 //! - audio_player.rs: toca o som na saída escolhida e é o relógio da sincronia (sync_clock.rs);
 //! - audio_devices.rs: lista as saídas de áudio (para as Configurações).
@@ -15,9 +16,11 @@ pub mod audio_player;
 pub mod decoder;
 mod session;
 pub mod sync_clock;
+mod tiles;
 pub mod video;
 mod watcher;
 
+pub use tiles::{TileRequester, TileWatcher};
 pub use watcher::Watcher;
 
 /// Canal por onde avisamos a interface (cada evento é um JSON com "type").

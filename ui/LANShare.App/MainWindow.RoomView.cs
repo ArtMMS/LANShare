@@ -16,8 +16,9 @@ namespace LANShare.App;
 /// Tela da sala (v2.0), no Host e no Client: todos da sala em grade, como no Discord / Google Meet.
 /// - a grade se ajusta ao número de pessoas (1, 2, 3–4, 5–6, 7–9...): colunas = ⌈√n⌉, a última
 ///   fileira fica centralizada;
-/// - cada quadrado mostra o avatar (a câmera entra aqui depois), o nome e o ícone de tela de quem
-///   transmite (clicar assiste, como na lista);
+/// - cada quadrado mostra a câmera (quando ligada; a versão de 720p, que chega sozinha) ou o
+///   avatar, o nome e o ícone de tela de quem transmite (clicar assiste, como na lista);
+///   clicar no quadrado de uma câmera abre ela grande (versão cheia);
 /// - o quadrado de quem toca um efeito sonoro acende (borda azul + 🎉), como na lista;
 /// - transmitindo, a prévia da minha transmissão ganha um quadrado próprio, logo depois do meu
 ///   (o meu quadrado continua com o avatar; depois, com a câmera); clicar nele (ou no meu ícone
@@ -72,8 +73,20 @@ public partial class MainWindow
     private readonly Image _ownCameraImage = new() { Stretch = Stretch.UniformToFill };
     private WriteableBitmap? _ownCameraBitmap;
 
-    /// Buffer da prévia da câmera (até 720p de altura; folga para câmeras bem largas).
+    /// Buffer da prévia da câmera e das câmeras dos outros (até 720p de altura; folga para
+    /// câmeras bem largas).
     private readonly byte[] _cameraPreviewBuffer = new byte[2560 * 720 * 4];
+
+    /// A imagem da câmera de cada pessoa no quadrado dela (sempre a mesma por pessoa, como a
+    /// minha). `HasFrame` = já chegou imagem (antes disso o quadrado mostra o avatar).
+    private sealed class CameraTileView
+    {
+        public Image Image { get; } = new() { Stretch = Stretch.UniformToFill };
+        public WriteableBitmap? Bitmap { get; set; }
+        public bool HasFrame { get; set; }
+    }
+
+    private readonly Dictionary<ulong, CameraTileView> _cameraTileViews = new();
 
     /// Chamado uma vez no construtor (antes de qualquer UpdateStage).
     private void InitRoomView()
@@ -155,6 +168,10 @@ public partial class MainWindow
         // de entrar nos novos
         if (_ownStreamImage.Parent is Panel oldParent) oldParent.Children.Remove(_ownStreamImage);
         if (_ownCameraImage.Parent is Panel oldCameraParent) oldCameraParent.Children.Remove(_ownCameraImage);
+        foreach (var view in _cameraTileViews.Values)
+        {
+            if (view.Image.Parent is Panel oldViewParent) oldViewParent.Children.Remove(view.Image);
+        }
         _roomRows.Children.Clear();
 
         // Os quadrados na ordem da lista; transmitindo, o da minha transmissão vem logo depois do meu
@@ -201,10 +218,18 @@ public partial class MainWindow
         var lit = _sfxHighlights.TryGetValue(member.Id, out var until) && until > DateTime.UtcNow;
         var content = new Grid();
 
-        // Câmera (a minha, ligada) ou avatar. As câmeras dos outros entram na próxima etapa.
+        // Câmera (a minha, ligada; ou a de outra pessoa, depois da primeira imagem) ou avatar
+        var otherCamera = member.Id != MySfxUserId
+                          && _cameraTileViews.TryGetValue(member.Id, out var cameraView)
+                          && cameraView.HasFrame
+                          && _cameraUsers.Contains(member.Id);
         if (member.Id == MySfxUserId && _cameraOn)
         {
             content.Children.Add(_ownCameraImage);
+        }
+        else if (otherCamera)
+        {
+            content.Children.Add(_cameraTileViews[member.Id].Image);
         }
         else
         {
@@ -260,7 +285,7 @@ public partial class MainWindow
             });
         }
 
-        return new Border
+        var tile = new Border
         {
             Width = width,
             Height = height,
@@ -271,6 +296,23 @@ public partial class MainWindow
             ClipToBounds = true,
             Child = content,
         };
+
+        // Câmera de outra pessoa: clicar abre ela grande (na qualidade cheia)
+        if (_cameraUsers.Contains(member.Id) && member.Id != MySfxUserId)
+        {
+            tile.Cursor = new Cursor(StandardCursorType.Hand);
+            ToolTip.SetTip(tile, Loc.T("Room_WatchCameraTooltip"));
+            tile.PointerEntered += (_, _) => { if (!lit) tile.BorderBrush = WatchedBorder; };
+            tile.PointerExited += (_, _) => { if (!lit) tile.BorderBrush = RoomTileBorderIdle; };
+            tile.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(tile).Properties.IsLeftButtonPressed) return;
+                e.Handled = true;
+                ToggleWatch(member.Id, camera: true);
+            };
+        }
+
+        return tile;
     }
 
     // ───────────────────────── Quadrado da minha transmissão ─────────────────────────
@@ -625,5 +667,48 @@ public partial class MainWindow
         }
 
         _ownCameraImage.InvalidateVisual();
+    }
+
+    // ───────────────────────── Câmeras dos outros ─────────────────────────
+
+    /// Pede a imagem mais recente (720p) da câmera de cada pessoa e desenha no quadrado dela
+    /// (só com a grade na tela). A primeira imagem troca o avatar pela câmera.
+    private void UpdateCameraTiles()
+    {
+        if (!_roomView.IsVisible || _cameraUsers.Count == 0) return;
+
+        var firstFrame = false;
+        foreach (var id in _cameraUsers)
+        {
+            if (!NativeMethods.CameraFrame(id, _cameraPreviewBuffer, out var width, out var height)) continue;
+
+            if (!_cameraTileViews.TryGetValue(id, out var view))
+            {
+                view = new CameraTileView();
+                _cameraTileViews[id] = view;
+            }
+
+            if (view.Bitmap is null || view.Bitmap.PixelSize.Width != width || view.Bitmap.PixelSize.Height != height)
+            {
+                view.Bitmap = new WriteableBitmap(
+                    new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+                view.Image.Source = view.Bitmap;
+            }
+
+            using (var frame = view.Bitmap.Lock())
+            {
+                for (var y = 0; y < height; y++)
+                    Marshal.Copy(_cameraPreviewBuffer, y * width * 4, frame.Address + y * frame.RowBytes, width * 4);
+            }
+            view.Image.InvalidateVisual();
+
+            if (!view.HasFrame)
+            {
+                view.HasFrame = true;
+                firstFrame = true;
+            }
+        }
+
+        if (firstFrame) LayoutRoomTiles();
     }
 }

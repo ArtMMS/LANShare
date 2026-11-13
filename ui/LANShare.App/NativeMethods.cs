@@ -135,6 +135,12 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_camera_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
 
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_camera_frame(ulong userId, byte[] buffer, UIntPtr capacity, out uint width, out uint height);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_watch_kind(ulong userId, int kind);
+
     // ── Assistir (modo ativo: Host ou Client) ──
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -428,6 +434,10 @@ internal static class NativeMethods
     public static bool CameraPreview(byte[] buffer, out int width, out int height) =>
         ReadFrame((b, c) => (lanshare_camera_preview(b, c, out var w, out var h), w, h), buffer, out width, out height);
 
+    /// Copia a imagem mais recente (720p) da câmera de alguém da sala. False se não há imagem nova.
+    public static bool CameraFrame(ulong userId, byte[] buffer, out int width, out int height) =>
+        ReadFrame((b, c) => (lanshare_camera_frame(userId, b, c, out var w, out var h), w, h), buffer, out width, out height);
+
     /// As câmeras do PC (JSON {"ok":true,"cameras":[{"id","name"}]}). Chame fora da thread da interface.
     public static JsonDocument CameraDevices() => JsonDocument.Parse(TakeString(lanshare_camera_devices()) ?? "{}");
 
@@ -436,6 +446,10 @@ internal static class NativeMethods
     /// Assiste a transmissão de alguém (o id da lista da sala; 0 = o Host).
     /// O andamento chega pelos eventos watch_connecting, watch_started, watch_denied, watch_failed e watch_ended.
     public static (bool Ok, string? Error) Watch(ulong userId) => ParseReply(lanshare_watch(userId));
+
+    /// Assiste grande a tela (`camera` = false) ou a câmera (versão cheia) de alguém. Mesmos eventos de Watch.
+    public static (bool Ok, string? Error) WatchKind(ulong userId, bool camera) =>
+        ParseReply(lanshare_watch_kind(userId, camera ? 1 : 0));
 
     /// Para de assistir.
     public static void WatchStop() => lanshare_watch_stop();

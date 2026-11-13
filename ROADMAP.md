@@ -169,7 +169,7 @@
 
 - [x] Capture the webcam (Media Foundation)
 - [x] Protocol: each stream has a kind (screen or camera); a user can have both at the same time
-- [ ] Camera goes to everyone in the room automatically, in two qualities
+- [x] Camera goes to everyone in the room automatically, in two qualities
     - 720p for the tiles (room view and camera overlay)
     - Full quality (up to 4K / 60 FPS) only for whoever clicks to watch that camera in big
 - [ ] Camera icon next to the user's name in the user list (next to the screen icon)

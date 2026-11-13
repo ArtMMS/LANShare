@@ -15,7 +15,7 @@ use lanshare_core::sfx;
 use lanshare_host::monitors::{self, Thumbnail};
 use lanshare_host::{
     app_windows, audio_sessions, camera, CameraSettings, CaptureTarget, HostConfig, HostEngine,
-    StreamSettings,
+    StreamKind, StreamSettings,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -711,6 +711,42 @@ pub extern "C" fn lanshare_watch(user_id: u64) -> *mut c_char {
         Active::Host(host) => host.watch(user_id),
         Active::Client(client) => client.watch(user_id),
     }))
+}
+
+/// Assiste grande uma transmissão de alguém: `kind` 0 = a tela, 1 = a câmera (versão cheia).
+/// Mesmo andamento e mesmos eventos de `lanshare_watch`.
+#[no_mangle]
+pub extern "C" fn lanshare_watch_kind(user_id: u64, kind: i32) -> *mut c_char {
+    let kind = if kind == 1 { StreamKind::Camera } else { StreamKind::Screen };
+    reply_result(with_engine(|engine| match engine {
+        Active::Host(host) => host.watch_kind(user_id, kind),
+        Active::Client(client) => client.watch_kind(user_id, kind),
+    }))
+}
+
+/// Copia a imagem mais recente (720p) da câmera de alguém da sala para `buffer` (BGRA), para o
+/// quadrado da pessoa. Retorna 1 só se há uma imagem NOVA desde a última chamada; 0 se não.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_camera_frame(
+    user_id: u64,
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    let size = with_engine(|engine| match engine {
+        Active::Host(host) => host.camera_frame_into(user_id, out),
+        Active::Client(client) => client.camera_frame_into(user_id, out),
+    })
+    .flatten();
+    write_size(size, width, height)
 }
 
 /// Para de assistir.

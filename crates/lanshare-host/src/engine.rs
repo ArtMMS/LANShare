@@ -29,7 +29,7 @@ use lanshare_stream::{
     StreamSettings,
 };
 use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
-use lanshare_viewer::Watcher;
+use lanshare_viewer::{TileWatcher, Watcher};
 use serde::Deserialize;
 use serde_json::Value;
 use std::io;
@@ -106,8 +106,10 @@ struct Shared {
     host_stream: Arc<Mutex<Option<HostStream>>>,
     /// A câmera do Host (None = desligada).
     host_camera: Arc<Mutex<Option<CameraBroadcast>>>,
-    /// A transmissão que o Host está assistindo.
+    /// A transmissão que o Host está assistindo grande.
     watcher: Watcher,
+    /// As câmeras dos Clients nos quadrados do Host (a versão de 720p de todas).
+    tiles: TileWatcher,
 }
 
 impl Shared {
@@ -125,12 +127,40 @@ impl Shared {
         self.registry.broadcast(&spot.message(id, kind), Some(id));
         self.streams.set(id, kind, spot);
         self.events.emit(HostEvent::UserStreaming { id, kind });
+
+        // A câmera de um Client: o Host também recebe a versão pequena (o quadrado dele)
+        if kind == StreamKind::Camera && id != HOST_USER_ID {
+            self.tiles.add(id);
+        }
+    }
+
+    /// O Host quer a versão pequena da câmera de `user_id`: cria o ingresso, avisa quem
+    /// transmite e devolve onde conectar (o TileWatcher conecta na hora).
+    fn host_tile_ticket(&self, user_id: u64) -> Option<(SocketAddr, String)> {
+        let spot = self.streams.get(user_id, StreamKind::Camera)?;
+        let ip = spot.ip.as_deref()?.parse::<IpAddr>().ok()?;
+        let port = spot.tile_port?;
+
+        let ticket = new_watch_ticket();
+        let allowed = Message::ViewerAllowed {
+            viewer_id: HOST_USER_ID,
+            kind: StreamKind::Camera,
+            quality: StreamQuality::Tile,
+            ticket: ticket.clone(),
+        };
+        if !self.registry.send_to(user_id, allowed) {
+            return None;
+        }
+        Some((SocketAddr::new(ip, port), ticket))
     }
 
     /// Alguém parou de transmitir `kind`: tira do catálogo e avisa a sala.
     fn end_stream(&self, id: u64, kind: StreamKind) {
-        // Se o Host assistia essa transmissão, a conexão fecha já
+        // Se o Host assistia essa transmissão (grande ou no quadrado), a conexão fecha já
         self.watcher.stream_ended(id, kind);
+        if kind == StreamKind::Camera {
+            self.tiles.remove(id);
+        }
 
         if !self.streams.remove(id, kind) {
             return;
@@ -311,7 +341,14 @@ impl HostEngine {
             host_stream: Arc::new(Mutex::new(None)),
             host_camera: Arc::new(Mutex::new(None)),
             watcher,
+            tiles: TileWatcher::new(runtime.handle().clone()),
         };
+
+        // Os ingressos das câmeras (720p) o próprio Host cria
+        let tile_shared = shared.clone();
+        shared
+            .tiles
+            .set_requester(Arc::new(move |user_id| tile_shared.host_tile_ticket(user_id)));
 
         events.emit(HostEvent::Started {
             address,
@@ -751,6 +788,11 @@ impl HostEngine {
         self.camera_preview.read_into(out)
     }
 
+    /// Copia a imagem mais recente (720p) da câmera de um Client para `out`, só se for nova.
+    pub fn camera_frame_into(&self, user_id: u64, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.shared.tiles.frame_into(user_id, out)
+    }
+
     /// Acesso ao runtime do tokio da sala (por exemplo, para o terminal ouvir o Ctrl+C).
     pub fn runtime_handle(&self) -> Handle {
         self.runtime.handle().clone()
@@ -760,6 +802,7 @@ impl HostEngine {
     /// Devolve os eventos que ainda não tinham sido lidos (inclui o `Stopped`).
     pub fn stop(self) -> Vec<HostEvent> {
         self.shared.watcher.stop();
+        self.shared.tiles.clear(); // também desfaz o laço tiles -> requester -> Shared
         self.stop_stream();
         self.stop_camera();
         let _ = self.shutdown_tx.send(true);

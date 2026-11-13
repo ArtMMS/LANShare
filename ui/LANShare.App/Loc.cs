@@ -120,6 +120,7 @@ internal static class Loc
         ["Room_UsersHeader"] = new[] { "USUÁRIOS NA SALA", "USERS IN THE ROOM", "USUARIOS EN LA SALA" },
         ["Room_OpenTooltip"] = new[] { "Abrir a tela da sala", "Open the room screen", "Abrir la pantalla de la sala" },
         ["Room_YourStream"] = new[] { "Sua transmissão", "Your stream", "Tu transmisión" },
+        ["Room_WatchCameraTooltip"] = new[] { "Ver a câmera grande", "View the camera in large", "Ver la cámara en grande" },
         ["Room_CameraTurnOn"] = new[] { "Ligar a câmera", "Turn on the camera", "Encender la cámara" },
         ["Room_CameraTurnOff"] = new[] { "Desligar a câmera", "Turn off the camera", "Apagar la cámara" },
         ["Camera_StartError"] = new[] { "Não foi possível ligar a câmera.", "Could not turn on the camera.", "No se pudo encender la cámara." },
