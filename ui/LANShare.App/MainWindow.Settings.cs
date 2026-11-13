@@ -81,6 +81,7 @@ public partial class MainWindow
 
         _settingsOpen = true;
         _settingsView.Load(_preferences);
+        _settingsView.StartCameraSection(_cameraOn); // lista as câmeras e liga a prévia
         _settingsOverlay.IsVisible = true;
 
         // Fundo travado e desfocado enquanto o painel está aberto
@@ -93,6 +94,7 @@ public partial class MainWindow
         if (!_settingsOpen) return;
 
         _settingsView.CancelCapture();
+        _settingsView.StopCameraSection(); // desliga a câmera da prévia
         _settingsOpen = false;
         _settingsOverlay.IsVisible = false;
         _mainLayout.IsEnabled = true;

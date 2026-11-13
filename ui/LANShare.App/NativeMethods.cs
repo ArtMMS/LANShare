@@ -136,6 +136,18 @@ internal static class NativeMethods
     private static extern int lanshare_camera_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_camera_modes(IntPtr deviceId);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_camera_test_start(IntPtr deviceId, uint height, uint fps);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_camera_test_frame(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void lanshare_camera_test_stop();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_camera_frame(ulong userId, byte[] buffer, UIntPtr capacity, out uint width, out uint height);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -438,8 +450,68 @@ internal static class NativeMethods
     public static bool CameraFrame(ulong userId, byte[] buffer, out int width, out int height) =>
         ReadFrame((b, c) => (lanshare_camera_frame(userId, b, c, out var w, out var h), w, h), buffer, out width, out height);
 
-    /// As câmeras do PC (JSON {"ok":true,"cameras":[{"id","name"}]}). Chame fora da thread da interface.
-    public static JsonDocument CameraDevices() => JsonDocument.Parse(TakeString(lanshare_camera_devices()) ?? "{}");
+    /// As câmeras do PC. Chame fora da thread da interface.
+    public static (List<CameraDeviceInfo> Cameras, string? Error) CameraDevices()
+    {
+        using var doc = JsonDocument.Parse(TakeString(lanshare_camera_devices()) ?? "{}");
+        var root = doc.RootElement;
+        var cameras = new List<CameraDeviceInfo>();
+
+        if (!(root.TryGetProperty("ok", out var ok) && ok.GetBoolean()))
+            return (cameras, root.TryGetProperty("error", out var e) ? e.GetString() ?? "?" : "?");
+
+        if (root.TryGetProperty("cameras", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var c in list.EnumerateArray())
+            {
+                var id = c.GetProperty("id").GetString();
+                if (string.IsNullOrEmpty(id)) continue;
+                cameras.Add(new CameraDeviceInfo(id, c.GetProperty("name").GetString() ?? id));
+            }
+        }
+        return (cameras, null);
+    }
+
+    /// Os formatos que a câmera entrega (`deviceId` null = a primeira). Abre a câmera por um
+    /// instante: chame fora da thread da interface.
+    public static (List<CameraModeInfo> Modes, string? Error) CameraModes(string? deviceId)
+    {
+        var ptr = Marshal.StringToCoTaskMemUTF8(deviceId ?? "");
+        string json;
+        try { json = TakeString(lanshare_camera_modes(ptr)) ?? "{}"; }
+        finally { Marshal.FreeCoTaskMem(ptr); }
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var modes = new List<CameraModeInfo>();
+
+        if (!(root.TryGetProperty("ok", out var ok) && ok.GetBoolean()))
+            return (modes, root.TryGetProperty("error", out var e) ? e.GetString() ?? "?" : "?");
+
+        if (root.TryGetProperty("modes", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var m in list.EnumerateArray())
+            {
+                modes.Add(new CameraModeInfo(
+                    m.GetProperty("width").GetInt32(),
+                    m.GetProperty("height").GetInt32(),
+                    m.GetProperty("fps").GetInt32(),
+                    m.GetProperty("format").GetString() ?? ""));
+            }
+        }
+        return (modes, null);
+    }
+
+    /// Liga a câmera só para a prévia das Configurações (troca a que estiver ligada). Leva até ~1 s.
+    public static (bool Ok, string? Error) CameraTestStart(string? deviceId, uint height, uint fps) =>
+        CallWithString(deviceId ?? "", ptr => lanshare_camera_test_start(ptr, height, fps));
+
+    /// Copia a imagem mais recente da prévia das Configurações (até 360p). False se não há nova.
+    public static bool CameraTestFrame(byte[] buffer, out int width, out int height) =>
+        ReadFrame((b, c) => (lanshare_camera_test_frame(b, c, out var w, out var h), w, h), buffer, out width, out height);
+
+    /// Desliga a câmera da prévia das Configurações (espera a câmera fechar: fora da thread da interface).
+    public static void CameraTestStop() => lanshare_camera_test_stop();
 
     // ───────────── Assistir (modo ativo: Host ou Client) ─────────────
 
@@ -591,3 +663,9 @@ internal sealed record AudioApp(string Exe, string Name, bool Active);
 
 /// Uma saída de áudio do PC (alto-falantes, fones...). `Id` é o que fica salvo nas preferências.
 internal sealed record AudioOutputDevice(string Id, string Name, bool IsDefault);
+
+/// Uma câmera do PC (o Id é o que fica salvo nas preferências).
+internal sealed record CameraDeviceInfo(string Id, string Name);
+
+/// Um formato que a câmera entrega (FPS já arredondado).
+internal sealed record CameraModeInfo(int Width, int Height, int Fps, string Format);

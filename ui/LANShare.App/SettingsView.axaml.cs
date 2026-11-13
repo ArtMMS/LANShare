@@ -136,6 +136,8 @@ public partial class SettingsView : UserControl
             else ShowAudioApps();
         };
         _browseExeButton.Click += async (_, _) => await BrowseExeAsync();
+
+        InitCamera();
     }
 
     /// Idioma escolhido nas preferências (sem escolha = o que está em uso).

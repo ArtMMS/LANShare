@@ -97,6 +97,9 @@ public partial class MainWindow
         // O tamanho dos quadrados depende do espaço: refaz ao redimensionar (e ao aparecer)
         _roomView.SizeChanged += (_, _) => LayoutRoomTiles();
 
+        // As câmeras flutuando por cima da transmissão assistida
+        InitCameraOverlay();
+
         // "USUÁRIOS NA SALA" (Host e Client) abre a tela da sala
         foreach (var header in new[] { Find<TextBlock>("HostUsersHeader"), Find<TextBlock>("ClientUsersHeader") })
         {
@@ -161,16 +164,29 @@ public partial class MainWindow
         return (columns, rows);
     }
 
-    /// Monta a grade de novo, com o maior quadrado 16:9 que cabe no espaço.
+    /// Monta a grade de novo e, assistindo uma transmissão, as câmeras flutuantes por cima dela
+    /// (as imagens das câmeras são as mesmas: ficam num lugar ou no outro).
     private void LayoutRoomTiles()
+    {
+        LayoutRoomGrid();
+        RefreshCameraOverlay();
+    }
+
+    /// Monta a grade de novo, com o maior quadrado 16:9 que cabe no espaço.
+    private void LayoutRoomGrid()
     {
         // As imagens da minha transmissão e da minha câmera saem dos quadrados antigos antes
         // de entrar nos novos
         if (_ownStreamImage.Parent is Panel oldParent) oldParent.Children.Remove(_ownStreamImage);
-        if (_ownCameraImage.Parent is Panel oldCameraParent) oldCameraParent.Children.Remove(_ownCameraImage);
-        foreach (var view in _cameraTileViews.Values)
+
+        // Assistindo, as câmeras estão nas janelinhas flutuantes: ficam lá (a grade nem usa)
+        if (!CameraOverlayActive)
         {
-            if (view.Image.Parent is Panel oldViewParent) oldViewParent.Children.Remove(view.Image);
+            if (_ownCameraImage.Parent is Panel oldCameraParent) oldCameraParent.Children.Remove(_ownCameraImage);
+            foreach (var view in _cameraTileViews.Values)
+            {
+                if (view.Image.Parent is Panel oldViewParent) oldViewParent.Children.Remove(view.Image);
+            }
         }
         _roomRows.Children.Clear();
 
@@ -219,11 +235,14 @@ public partial class MainWindow
         var content = new Grid();
 
         // Câmera (a minha, ligada; ou a de outra pessoa, depois da primeira imagem) ou avatar
-        var otherCamera = member.Id != MySfxUserId
+        // (Assistindo uma transmissão, as imagens das câmeras estão nas câmeras flutuantes)
+        var camerasHere = !CameraOverlayActive;
+        var otherCamera = camerasHere
+                          && member.Id != MySfxUserId
                           && _cameraTileViews.TryGetValue(member.Id, out var cameraView)
                           && cameraView.HasFrame
                           && _cameraUsers.Contains(member.Id);
-        if (member.Id == MySfxUserId && _cameraOn)
+        if (camerasHere && member.Id == MySfxUserId && _cameraOn)
         {
             content.Children.Add(_ownCameraImage);
         }
@@ -405,6 +424,7 @@ public partial class MainWindow
 
         _ownPreviewBig = true;
         HidePreview(Loc.T("Host_Streaming")); // até chegar a próxima imagem da prévia
+        RefreshSfxUserLists(); // as câmeras saem da grade e flutuam por cima da prévia
     }
 
     /// Fecha a prévia grande e volta para a grade.
@@ -413,6 +433,7 @@ public partial class MainWindow
         if (!_ownPreviewBig) return;
         _ownPreviewBig = false;
         HidePreview(IdleStageText());
+        RefreshSfxUserLists(); // as câmeras voltam para a grade
     }
 
     /// Pede a prévia mais recente da minha transmissão e desenha grande, na área do vídeo.
@@ -466,8 +487,7 @@ public partial class MainWindow
         _sfxButton.Margin = new Thickness(0);
         _sfxButton.IsVisible = true; // ele nascia escondido; agora quem aparece/some é a barra inteira
 
-        // Câmera: liga/desliga a minha câmera (a primeira do PC, 1080p a 30 FPS por enquanto;
-        // a escolha fica em Configurações -> Câmera, numa próxima etapa)
+        // Câmera: liga/desliga a minha câmera (a escolhida em Configurações -> Câmera)
         _cameraIcon = BarGlyph(CameraGlyph, RoomBarIconOff);
         _cameraButton = RoomBarButton(_cameraIcon);
         _cameraButton.PointerEntered += (_, _) => SetRoomBarButtonHot(_cameraButton, true);
@@ -572,7 +592,8 @@ public partial class MainWindow
 
     // ───────────────────────── A minha câmera ─────────────────────────
 
-    /// Botão de câmera da barra: liga ou desliga. Ligar leva até ~1 s (a câmera abrindo).
+    /// Botão de câmera da barra: liga ou desliga, com a câmera, a resolução e o FPS escolhidos
+    /// em Configurações -> Câmera. Ligar leva até ~1 s (a câmera abrindo).
     private void ToggleCamera()
     {
         if (!InRoom) return;
@@ -584,7 +605,8 @@ public partial class MainWindow
             return;
         }
 
-        var (ok, error) = NativeMethods.CameraStart(null, 1080, 30);
+        var (ok, error) = NativeMethods.CameraStart(
+            _preferences.CameraDeviceId, (uint)_preferences.CameraHeight, (uint)_preferences.CameraFps);
         if (!ok)
         {
             Notify(error ?? Loc.T("Camera_StartError"), CameraGlyph);
@@ -648,7 +670,7 @@ public partial class MainWindow
     /// Pede a prévia mais recente da minha câmera e desenha no meu quadrado (só com a grade na tela).
     private void UpdateOwnCameraTile()
     {
-        if (!_cameraOn || !_roomView.IsVisible) return;
+        if (!_cameraOn || !(_roomView.IsVisible || CameraOverlayActive)) return;
         if (!NativeMethods.CameraPreview(_cameraPreviewBuffer, out var width, out var height)) return;
 
         if (_ownCameraBitmap is null
@@ -675,7 +697,7 @@ public partial class MainWindow
     /// (só com a grade na tela). A primeira imagem troca o avatar pela câmera.
     private void UpdateCameraTiles()
     {
-        if (!_roomView.IsVisible || _cameraUsers.Count == 0) return;
+        if (!(_roomView.IsVisible || CameraOverlayActive) || _cameraUsers.Count == 0) return;
 
         var firstFrame = false;
         foreach (var id in _cameraUsers)

@@ -157,6 +157,40 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
+
+                        <!-- Câmera: dispositivo, prévia ao vivo, resolução e FPS (só o que a câmera tem) -->
+                        <Border Classes="settingsCard">
+                            <StackPanel>
+                                <TextBlock Classes="cardHeader" Text="{l:Tr Settings_Camera}" />
+                                <Border Classes="divider" />
+                                <StackPanel Margin="16,12" Spacing="8">
+                                    <TextBlock Text="{l:Tr Settings_CameraDevice}" />
+                                    <ComboBox x:Name="CameraDeviceBox" HorizontalAlignment="Stretch" />
+
+                                    <Border Background="#0F1216" CornerRadius="8" ClipToBounds="True" Height="180">
+                                        <Panel>
+                                            <TextBlock x:Name="CameraPreviewText" Classes="hint"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       TextAlignment="Center" Margin="12" />
+                                            <Image x:Name="CameraPreviewImage" Stretch="Uniform" IsVisible="False" />
+                                        </Panel>
+                                    </Border>
+
+                                    <Grid ColumnDefinitions="*,8,*">
+                                        <StackPanel Grid.Column="0" Spacing="4">
+                                            <TextBlock Text="{l:Tr Settings_CameraResolution}" />
+                                            <ComboBox x:Name="CameraResolutionBox" HorizontalAlignment="Stretch" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Spacing="4">
+                                            <TextBlock Text="{l:Tr Settings_CameraFps}" />
+                                            <ComboBox x:Name="CameraFpsBox" HorizontalAlignment="Stretch" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <TextBlock x:Name="CameraHint" Classes="hint" Text="{l:Tr Settings_CameraHint}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <!-- Coluna da direita -->
@@ -304,5 +338,3 @@
         </DockPanel>
     </Border>
 </UserControl>
-
-

@@ -4,12 +4,14 @@
 //! - `camera_modes`: os formatos que uma câmera entrega (resolução, FPS e formato: YUY2, NV12, MJPG...);
 //! - `CameraCapture`: abre a câmera numa thread própria, escolhe o formato mais perto do pedido e
 //!   entrega os frames já em RGBA (`CapturedFrame`, o mesmo da captura de tela), prontos para
-//!   o encoder e para a prévia.
+//!   o encoder e para a prévia;
+//! - `CameraTestPreview`: a câmera ligada só para a prévia das Configurações.
 //!
 //! O Source Reader faz a conversão (e a descompressão do MJPG) para RGB32 sozinho
 //! (MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING).
 
 use crate::capture::CapturedFrame;
+use crate::preview::PreviewSlot;
 use lanshare_core::i18n::tr;
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -528,6 +530,73 @@ unsafe fn bgrx_to_rgba(top: *const u8, pitch: isize, width: usize, height: usize
             d[1] = s[1];
             d[2] = s[0];
             d[3] = 255;
+        }
+    }
+}
+
+// ───────────────────────── Prévia das Configurações ─────────────────────────
+
+/// Altura da prévia da câmera nas Configurações.
+const TEST_PREVIEW_HEIGHT: u32 = 360;
+
+/// A câmera ligada só para a prévia das Configurações (sem transmitir para ninguém).
+/// A imagem sai por `frame_into` (BGRA, até 360p). Desliga ao ser descartada.
+pub struct CameraTestPreview {
+    slot: PreviewSlot,
+    /// O formato que a câmera está usando de verdade.
+    pub mode: CameraMode,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl CameraTestPreview {
+    /// Liga a câmera (`None` = a primeira) com o formato mais perto de `request`.
+    /// Volta depois de a câmera abrir (ou com o erro).
+    pub fn start(device_id: Option<String>, request: CameraRequest) -> Result<Self, BoxError> {
+        let capture = CameraCapture::start(device_id, request)?;
+        let mode = capture.mode.clone();
+        let slot = PreviewSlot::default();
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let (thread_slot, thread_stop) = (slot.clone(), stop.clone());
+        let thread = std::thread::Builder::new()
+            .name("lanshare-camera-test".into())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::Relaxed) {
+                    match capture.frames.recv_timeout(Duration::from_millis(100)) {
+                        Ok(frame) => thread_slot.store(frame, TEST_PREVIEW_HEIGHT),
+                        Err(mpsc::RecvTimeoutError::Timeout) if capture.is_running() => {}
+                        Err(_) => break, // a câmera parou (desconectada?)
+                    }
+                }
+                capture.stop();
+                thread_slot.clear();
+            })?;
+
+        Ok(Self {
+            slot,
+            mode,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    /// Copia a imagem mais recente (BGRA) para `out`, só se for nova. Devolve (largura, altura).
+    pub fn frame_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.slot.read_into(out)
+    }
+
+    /// A câmera ainda está entregando imagens?
+    pub fn is_running(&self) -> bool {
+        self.thread.as_ref().is_some_and(|t| !t.is_finished())
+    }
+}
+
+impl Drop for CameraTestPreview {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }

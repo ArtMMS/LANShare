@@ -23,7 +23,7 @@ mod server;
 mod sink;
 pub mod stream;
 
-pub use camera::{CameraCapture, CameraDevice, CameraMode, CameraRequest};
+pub use camera::{CameraCapture, CameraDevice, CameraMode, CameraRequest, CameraTestPreview};
 pub use camera_stream::{CameraBroadcast, CameraSettings, CAMERA_TILE_FPS, CAMERA_TILE_HEIGHT};
 pub use capture::CaptureTarget;
 pub use events::{StreamEvent, StreamEvents};

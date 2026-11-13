@@ -57,6 +57,13 @@ internal sealed class AppPreferences
     /// Procurar versão nova no GitHub ao abrir o app.
     public bool AutoCheckUpdates { get; set; } = true;
 
+    /// Câmera escolhida em Configurações -> Câmera (o id do Windows). Null = a primeira do PC.
+    public string? CameraDeviceId { get; set; }
+
+    /// Resolução (altura, até 2160) e FPS (até 60) da câmera. A câmera usa o mais perto que tiver.
+    public int CameraHeight { get; set; } = 1080;
+    public int CameraFps { get; set; } = 30;
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private static string Folder =>

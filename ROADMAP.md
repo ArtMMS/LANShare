@@ -172,27 +172,27 @@
 - [x] Camera goes to everyone in the room automatically, in two qualities
     - 720p for the tiles (room view and camera overlay)
     - Full quality (up to 4K / 60 FPS) only for whoever clicks to watch that camera in big
-- [ ] Camera icon next to the user's name in the user list (next to the screen icon)
-- [ ] Settings → Camera
+- [x] Camera icon next to the user's name in the user list (next to the screen icon)
+- [x] Settings → Camera
     - Device selector, with a live preview
     - Resolution (up to 4K) and FPS (up to 60), listing only what the device supports
 
 ## Camera overlay (while watching a stream)
 
-- [ ] Floating 720p widgets with the cameras that are on, over the stream (no avatars)
-- [ ] Each widget can be moved anywhere on the screen and resized
+- [x] Floating 720p widgets with the cameras that are on, over the stream (no avatars), even in fullscreen (F11)
+- [x] Each widget can be moved anywhere on the screen and resized
 - [ ] Right click on a widget hides that camera
+   - [ ] Click on the camera icon on the user feed also hides that camera. Click again shows it up again (make the icon goes red with a risk in the middle)
 - [ ] Shortcut (default C, configurable in Settings → Shortcuts)
     - Press once: hides all cameras
     - Press again: shows all cameras back, including the ones hidden one by one
 - [ ] Remember the position and size of each camera between streams
 
+- [ ] Unlock 60 FPS Screen Transmission
+   - Se der problema na entrega para o client, a taxa de FPS (APENAS DESTE CLIENT) irá diminuir automaticamente para 30 ou 15 FPS. Para evitar lag
 ---
 
 ## Future Updates
- Optimize
- Support 1440p (Quad HD) and 4K
- Reach 60 FPS
 
  Chat
    - Allow upload files, images and videos and allow download

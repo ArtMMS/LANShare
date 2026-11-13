@@ -341,6 +341,61 @@ public partial class MainWindow
 
     // ───────────────────────── Lista de usuários ─────────────────────────
 
+    /// A pessoa está com a câmera ligada? (No meu nome vale o meu estado.)
+    private bool HasCameraOn(ulong userId) =>
+        userId == MySfxUserId ? _cameraOn : _cameraUsers.Contains(userId);
+
+    /// Ícone de câmera de quem está com ela ligada: cinza; verde quando eu assisto ela grande.
+    /// Clicar abre a câmera grande (ou para). No meu nome, só mostra.
+    private Control CameraIcon(ulong userId)
+    {
+        var mine = userId == MySfxUserId;
+        var watched = IsWatchingUser(userId) && _watchCamera;
+
+        var icon = new Border
+        {
+            Width = 26,
+            Height = 22,
+            CornerRadius = new CornerRadius(5),
+            Background = watched ? WatchedFill : Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = CameraGlyph,
+                FontFamily = IconFont,
+                FontSize = 14,
+                Foreground = watched ? WatchedBorder : ScreenIconIdle,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+
+        if (mine)
+        {
+            ToolTip.SetTip(icon, Loc.T("Camera_OwnTooltip"));
+            return icon;
+        }
+
+        icon.Cursor = new Cursor(StandardCursorType.Hand);
+        ToolTip.SetTip(icon, Loc.T(watched ? "Watch_StopTooltip" : "Room_WatchCameraTooltip"));
+        icon.PointerEntered += (_, _) =>
+        {
+            if (!watched) icon.Background = ScreenIconHover;
+        };
+        icon.PointerExited += (_, _) =>
+        {
+            if (!watched) icon.Background = Brushes.Transparent;
+        };
+        icon.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(icon).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            ToggleWatch(userId, camera: true);
+        };
+
+        return icon;
+    }
+
     /// A pessoa está transmitindo? (No meu nome vale o meu estado, não o aviso da sala.)
     private bool IsStreamingUser(ulong userId) =>
         userId == MySfxUserId ? _streaming : _streamers.Contains(userId);
@@ -380,7 +435,9 @@ public partial class MainWindow
         DockPanel.SetDock(circle, Dock.Left);
         row.Children.Add(circle);
 
-        // Nome + ícone de tela logo depois dele
+        // Nome + ícone de câmera + ícone de tela logo depois dele
+        var hasCamera = HasCameraOn(userId);
+        var streaming = IsStreamingUser(userId);
         var line = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -390,11 +447,13 @@ public partial class MainWindow
         line.Children.Add(new TextBlock
         {
             Text = name,
-            MaxWidth = UserNameMaxWidth,
+            // Com os dois ícones, o nome encolhe um pouco para caber
+            MaxWidth = hasCamera && streaming ? UserNameMaxWidth - 30 : UserNameMaxWidth,
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        if (IsStreamingUser(userId)) line.Children.Add(ScreenIcon(userId));
+        if (hasCamera) line.Children.Add(CameraIcon(userId));
+        if (streaming) line.Children.Add(ScreenIcon(userId));
         row.Children.Add(line);
 
         var wrapped = WithSfxHighlight(row, userId);

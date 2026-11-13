@@ -27,6 +27,9 @@ static HOST: Mutex<Option<HostEngine>> = Mutex::new(None);
 /// O Client em execução (um por processo).
 static CLIENT: Mutex<Option<ClientEngine>> = Mutex::new(None);
 
+/// A câmera ligada só para a prévia das Configurações (None = desligada).
+static CAMERA_TEST: Mutex<Option<camera::CameraTestPreview>> = Mutex::new(None);
+
 /// Tamanho máximo do nome de usuário (em caracteres).
 const MAX_USERNAME_LEN: usize = 24;
 
@@ -614,6 +617,94 @@ pub extern "C" fn lanshare_camera_devices() -> *mut c_char {
         }
         Err(error) => reply_err(&error.to_string()),
     }
+}
+
+/// Formatos que uma câmera entrega, como JSON:
+/// {"ok":true,"modes":[{"width":1920,"height":1080,"fps":30,"format":"MJPG"}]} (do maior para o menor)
+/// ou {"ok":false,"error":".."}. `device_id` NULL ou vazio = a primeira câmera. Não precisa de modo
+/// ativo. Abre a câmera por um instante: chame fora da thread da interface.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_modes(device_id: *const c_char) -> *mut c_char {
+    let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
+    match camera::camera_modes(device_id.as_deref()) {
+        Ok(modes) => {
+            let list: Vec<_> = modes
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "width": m.width,
+                        "height": m.height,
+                        "fps": m.fps_rounded(),
+                        "format": m.format,
+                    })
+                })
+                .collect();
+            to_c(serde_json::json!({ "ok": true, "modes": list }).to_string())
+        }
+        Err(error) => reply_err(&error.to_string()),
+    }
+}
+
+/// Liga a câmera só para a prévia das Configurações (troca a que estiver ligada).
+/// Não precisa de modo ativo. Leva até ~1 s: chame fora da thread da interface.
+/// Retorna {"ok":true,"width":..,"height":..,"fps":..} ou {"ok":false,"error":".."}.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_test_start(device_id: *const c_char, height: u32, fps: u32) -> *mut c_char {
+    let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
+
+    // Desliga a anterior antes (a mesma câmera não abre duas vezes)
+    let old = CAMERA_TEST.lock().unwrap_or_else(|e| e.into_inner()).take();
+    drop(old);
+
+    let request = camera::CameraRequest {
+        height: height.clamp(144, 2160),
+        fps: fps.clamp(5, 60),
+    };
+    // A câmera abre fora do lock: quem pede a imagem enquanto isso não fica esperando
+    match camera::CameraTestPreview::start(device_id, request) {
+        Ok(preview) => {
+            let reply = serde_json::json!({
+                "ok": true,
+                "width": preview.mode.width,
+                "height": preview.mode.height,
+                "fps": preview.mode.fps_rounded(),
+            });
+            *CAMERA_TEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(preview);
+            to_c(reply.to_string())
+        }
+        Err(error) => reply_err(&error.to_string()),
+    }
+}
+
+/// Copia a imagem mais recente da prévia das Configurações (BGRA, até 360p).
+/// Retorna 1 se havia imagem nova, 0 se não.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_camera_test_frame(
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    let size = CAMERA_TEST
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|preview| preview.frame_into(out));
+    write_size(size, width, height)
+}
+
+/// Desliga a câmera da prévia das Configurações.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_test_stop() {
+    let preview = CAMERA_TEST.lock().unwrap_or_else(|e| e.into_inner()).take();
+    drop(preview); // espera a thread dela terminar fora do lock
 }
 
 /// Liga a minha câmera (Host ou Client) e avisa a sala: todos recebem a versão de 720p e quem

@@ -167,6 +167,29 @@ internal static class Loc
         // ── Assistir ──
         ["Watch_Tooltip"] = new[] { "Assistir a transmissão", "Watch the stream", "Ver la transmisión" },
         ["Watch_StopTooltip"] = new[] { "Parar de assistir", "Stop watching", "Dejar de ver" },
+        ["Overlay_You"] = new[] { "Você", "You", "Tú" },
+        ["Camera_OwnTooltip"] = new[] { "A sua câmera está ligada", "Your camera is on", "Tu cámara está encendida" },
+        ["Settings_Camera"] = new[] { "Câmera", "Camera", "Cámara" },
+        ["Settings_CameraDevice"] = new[] { "Dispositivo", "Device", "Dispositivo" },
+        ["Settings_CameraResolution"] = new[] { "Resolução", "Resolution", "Resolución" },
+        ["Settings_CameraFps"] = new[] { "FPS", "FPS", "FPS" },
+        ["Settings_CameraHint"] = new[]
+        {
+            "A lista mostra só o que a câmera suporta. Quem abrir a sua câmera grande recebe nesta qualidade; os quadrados da sala recebem até 720p.",
+            "The list only shows what the camera supports. Whoever opens your camera in large gets this quality; the room tiles get up to 720p.",
+            "La lista solo muestra lo que admite la cámara. Quien abra tu cámara en grande la recibe con esta calidad; los cuadros de la sala reciben hasta 720p.",
+        },
+        ["Settings_CameraSearching"] = new[] { "Procurando câmeras...", "Looking for cameras...", "Buscando cámaras..." },
+        ["Settings_CameraNone"] = new[] { "Nenhuma câmera encontrada.", "No camera found.", "No se encontró ninguna cámara." },
+        ["Settings_CameraStarting"] = new[] { "Ligando a câmera...", "Turning on the camera...", "Encendiendo la cámara..." },
+        ["Settings_CameraInUse"] = new[]
+        {
+            "A sua câmera está ligada na sala (o seu quadrado mostra a imagem). As mudanças valem na próxima vez que você ligar.",
+            "Your camera is on in the room (your tile shows the image). Changes apply the next time you turn it on.",
+            "Tu cámara está encendida en la sala (tu cuadro muestra la imagen). Los cambios se aplican la próxima vez que la enciendas.",
+        },
+        ["Settings_CameraError"] = new[] { "Não foi possível ligar a câmera: {0}", "Could not turn on the camera: {0}", "No se pudo encender la cámara: {0}" },
+        ["Settings_CameraModesError"] = new[] { "Não foi possível ler os formatos da câmera: {0}", "Could not read the camera formats: {0}", "No se pudieron leer los formatos de la cámara: {0}" },
         ["Watch_OwnTooltip"] = new[] { "Você está transmitindo (clique para ver grande)", "You are streaming (click to view in large)", "Estás transmitiendo (haz clic para verla en grande)" },
         ["Watch_PickHint"] = new[]
         {
