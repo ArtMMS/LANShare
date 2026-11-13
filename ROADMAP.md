@@ -167,13 +167,12 @@
 
 ## Camera
 
-- [ ] Capture the webcam (Media Foundation)
+- [x] Capture the webcam (Media Foundation)
 - [ ] Protocol: each stream has a kind (screen or camera); a user can have both at the same time
 - [ ] Camera goes to everyone in the room automatically, in two qualities
     - 720p for the tiles (room view and camera overlay)
     - Full quality (up to 4K / 60 FPS) only for whoever clicks to watch that camera in big
 - [ ] Camera icon next to the user's name in the user list (next to the screen icon)
-- [ ] "X turned on the camera" / "X turned off the camera" notifications
 - [ ] Settings → Camera
     - Device selector, with a live preview
     - Resolution (up to 4K) and FPS (up to 60), listing only what the device supports

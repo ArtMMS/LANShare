@@ -361,6 +361,8 @@ fn handle_command(line: &str, prompt: &mut Prompt, engine: &HostEngine) {
 
         Some("audiotest") => start_audio_test(parse_seconds(parts.next())),
 
+        Some("camtest") => start_camera_test(parse_seconds(parts.next())),
+
         Some("help") => print_help(),
 
         Some(outro) => println!("[host] Comando desconhecido: '{outro}'. Digite 'help'."),
@@ -445,6 +447,17 @@ fn start_audio_test(seconds: u64) {
     });
 }
 
+/// Teste temporário da webcam (lista câmeras e formatos, grava um .bmp na pasta atual).
+fn start_camera_test(seconds: u64) {
+    println!("[host] Ligando a camera por {seconds}s...");
+
+    std::thread::spawn(move || {
+        if let Err(erro) = lanshare_stream::camera::test_camera(seconds) {
+            println!("[host] Falha na captura da camera: {erro}");
+        }
+    });
+}
+
 fn print_help() {
     println!("[host] Comandos:");
     println!("[host]   list              mostra quem esta conectado");
@@ -455,5 +468,6 @@ fn print_help() {
     println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");
     println!("[host]   hwencode [segs]   teste de captura + compressao H.264 na GPU");
     println!("[host]   audiotest [segs]  teste de captura do som do PC (grava lanshare-audiotest.wav)");
+    println!("[host]   camtest [segs]    teste da webcam (lista formatos, grava lanshare-camtest.bmp)");
     println!("[host]   help              mostra esta ajuda");
 }

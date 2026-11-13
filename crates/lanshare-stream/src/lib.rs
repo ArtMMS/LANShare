@@ -1,4 +1,5 @@
 //! lanshare-stream: transmissão da tela e do som (captura -> compressão -> envio).
+//! A webcam também é capturada aqui (camera.rs).
 //! Usado por quem transmite: o Host ou qualquer Client.
 //!
 //! A transmissão entrega os pacotes a um `StreamSink` (sink.rs) e avisa o que acontece
@@ -10,6 +11,7 @@ pub mod audio_capture;
 mod audio_mixer;
 pub mod audio_sessions;
 mod audio_stream;
+pub mod camera;
 pub mod capture;
 pub mod encoder;
 mod events;
@@ -20,6 +22,7 @@ mod server;
 mod sink;
 pub mod stream;
 
+pub use camera::{CameraCapture, CameraDevice, CameraMode, CameraRequest};
 pub use capture::CaptureTarget;
 pub use events::{StreamEvent, StreamEvents};
 pub use preview::{PreviewSlot, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH};
