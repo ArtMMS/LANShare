@@ -120,7 +120,7 @@
 
 ---
 
-# V2.0.0 — Multi-Streaming
+# V2.0.0 — Multi-Streaming & Webcam
 
 - [x] Split capture/encode and decode/playback into shared crates (lanshare-stream / lanshare-viewer)
 - [x] Protocol v12: stream announcements and watch tickets

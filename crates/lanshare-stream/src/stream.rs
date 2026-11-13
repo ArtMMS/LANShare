@@ -3,6 +3,10 @@
 //! - monitor inteiro: o som do PC, menos o LANShare e os apps bloqueados nas Configurações;
 //! - janela: só o som do app daquela janela;
 //! - som desligado (botão 🔊 do seletor): nenhum som.
+//!
+//! Bitrate adaptativo (AdaptiveBitrate): a cada segundo olha as filas dos espectadores.
+//! Se alguém está ficando para trás, baixa o bitrate (a imagem fica menos nítida, mas não trava);
+//! quando todos estão em dia, sobe de novo aos poucos. Segue o espectador mais lento.
 //! (As mensagens de debug "diag" são temporárias, para investigar o travamento ao reiniciar o `share`.)
 
 use crate::app_windows;
@@ -12,7 +16,7 @@ use crate::capture::{CaptureTarget, CapturedFrame, ScreenCapture};
 use crate::events::{StreamEvent, StreamEvents};
 use crate::hw_encoder::{bitrate_for, HwEncoder};
 use crate::preview::PreviewSlot;
-use crate::sink::StreamSink;
+use crate::sink::{Congestion, StreamSink};
 use lanshare_core::i18n::tr;
 use rayon::prelude::*;
 use std::collections::VecDeque;
@@ -25,7 +29,7 @@ use std::time::{Duration, Instant};
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
-/// De quanto em quanto tempo a transmissão emite o resumo.
+/// De quanto em quanto tempo a transmissão emite o resumo (e o bitrate adaptativo decide).
 const REPORT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Quantos horários de captura podem esperar o encoder devolver o pacote correspondente.
@@ -35,6 +39,29 @@ const MAX_PENDING_TIMESTAMPS: usize = 8;
 
 /// Tempo máximo esperando a transmissão trocar de monitor/janela.
 const SWITCH_TIMEOUT: Duration = Duration::from_secs(5);
+
+// ── Bitrate adaptativo ──
+
+/// Uma fila de espectador com este tanto de imagens (ou mais) = ele não está dando conta.
+const QUEUE_HIGH: usize = 3;
+
+/// Uma fila de até este tanto de imagens = ele está em dia.
+const QUEUE_LOW: usize = 1;
+
+/// Quanto o bitrate cai de uma vez quando alguém não dá conta.
+const DOWN_FACTOR: f64 = 0.7;
+
+/// Quanto o bitrate sobe de uma vez quando todos estão em dia.
+const UP_FACTOR: f64 = 1.15;
+
+/// Segundos seguidos com todos em dia antes de subir o bitrate (sobe devagar, desce rápido).
+const CALM_SECS_TO_RAISE: u32 = 3;
+
+/// O bitrate nunca cai abaixo desta fração do normal...
+const MIN_BITRATE_FRACTION: u32 = 4;
+
+/// ...nem abaixo disto.
+const MIN_BITRATE_BPS: u32 = 1_000_000;
 
 /// Opções escolhidas antes de transmitir.
 #[derive(Debug, Clone, Copy)]
@@ -265,6 +292,79 @@ fn canvas_size(height: u32) -> (u32, u32) {
     ((height * 16 / 9) & !1, height)
 }
 
+// ───────────────────────────── Bitrate adaptativo ─────────────────────────────
+
+/// Decide o bitrate a cada segundo, pelas filas dos espectadores.
+/// Desce rápido quando alguém não dá conta; sobe devagar quando todos estão em dia.
+#[derive(Debug)]
+struct AdaptiveBitrate {
+    /// O bitrate normal (o da resolução e FPS escolhidos).
+    target: u32,
+    /// O piso: nunca desce disso.
+    min: u32,
+    /// O bitrate que o encoder está usando agora.
+    current: u32,
+    /// Segundos seguidos com todos em dia.
+    calm_secs: u32,
+}
+
+impl AdaptiveBitrate {
+    fn new(target: u32) -> Self {
+        Self {
+            target,
+            min: (target / MIN_BITRATE_FRACTION).max(MIN_BITRATE_BPS).min(target),
+            current: target,
+            calm_secs: 0,
+        }
+    }
+
+    /// Chamado a cada segundo. Devolve o bitrate novo, se ele mudou.
+    fn update(&mut self, congestion: Congestion) -> Option<u32> {
+        // Alguém não está dando conta: desce já
+        if congestion.overflowed || congestion.max_queued >= QUEUE_HIGH {
+            self.calm_secs = 0;
+            let lower = ((self.current as f64 * DOWN_FACTOR) as u32).max(self.min);
+            return self.change_to(lower);
+        }
+
+        // Todos em dia: conta os segundos; no meio do caminho, só espera
+        if congestion.max_queued <= QUEUE_LOW {
+            self.calm_secs += 1;
+        } else {
+            self.calm_secs = 0;
+        }
+
+        if self.calm_secs >= CALM_SECS_TO_RAISE && self.current < self.target {
+            self.calm_secs = 0;
+            let higher = ((self.current as f64 * UP_FACTOR) as u32).min(self.target);
+            return self.change_to(higher);
+        }
+
+        None
+    }
+
+    fn change_to(&mut self, bitrate: u32) -> Option<u32> {
+        if bitrate == self.current {
+            return None;
+        }
+        self.current = bitrate;
+        Some(bitrate)
+    }
+
+    fn current(&self) -> u32 {
+        self.current
+    }
+
+    /// A qualidade está reduzida (alguém está com a conexão instável)?
+    fn is_reduced(&self) -> bool {
+        self.current < self.target
+    }
+}
+
+fn mbps(bps: u32) -> f64 {
+    bps as f64 / 1_000_000.0
+}
+
 fn run(
     sink: Arc<dyn StreamSink>,
     stop: Arc<AtomicBool>,
@@ -280,6 +380,7 @@ fn run(
     let mut current = target;
     events.debug("run: captura iniciada");
     let mut encoder: Option<HwEncoder> = None;
+    let mut adaptive = AdaptiveBitrate::new(bitrate_for(settings.height, settings.fps));
 
     let (canvas_w, canvas_h) = canvas_size(settings.height);
 
@@ -398,7 +499,7 @@ fn run(
             next_frame_at + frame_interval
         };
 
-        // O encoder nasce no primeiro frame enviado
+        // O encoder nasce no primeiro frame enviado (já no bitrate que o adaptativo decidiu)
         if encoder.is_none() {
             events.debug("run: criando o encoder");
             let created = HwEncoder::new(
@@ -406,7 +507,7 @@ fn run(
                 frame.height,
                 settings.height,
                 settings.fps,
-                bitrate_for(settings.height, settings.fps),
+                adaptive.current(),
             )?;
             events.debug("run: encoder criado");
             let (out_w, out_h) = created.frame_size();
@@ -460,12 +561,26 @@ fn run(
         }
 
         if report_start.elapsed() >= REPORT_INTERVAL {
+            // Bitrate adaptativo: alguém está ficando para trás?
+            let congestion = sink.take_congestion();
+            if let Some(bitrate) = adaptive.update(congestion) {
+                encoder.set_bitrate(bitrate);
+                events.debug(format!(
+                    "bitrate: {:.1} Mbps (maior fila: {} imagem(ns), perdeu imagens: {})",
+                    mbps(bitrate),
+                    congestion.max_queued,
+                    congestion.overflowed
+                ));
+            }
+
             let secs = report_start.elapsed().as_secs_f64();
             events.emit(StreamEvent::Stats {
                 packets_per_sec: packets as f64 / secs,
                 mbps: bytes as f64 * 8.0 / secs / 1_000_000.0,
                 viewers: sink.viewer_count(),
                 skipped_frames: skipped,
+                bitrate_mbps: mbps(adaptive.current()),
+                unstable: adaptive.is_reduced(),
             });
             report_start = Instant::now();
             packets = 0;
@@ -566,4 +681,82 @@ fn is_keyframe(data: &[u8]) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn calm() -> Congestion {
+        Congestion { max_queued: 0, overflowed: false }
+    }
+
+    fn jammed() -> Congestion {
+        Congestion { max_queued: QUEUE_HIGH, overflowed: false }
+    }
+
+    #[test]
+    fn desce_rapido_ate_o_piso_quando_alguem_nao_da_conta() {
+        let mut adaptive = AdaptiveBitrate::new(6_000_000);
+
+        assert_eq!(adaptive.update(jammed()), Some(4_200_000));
+        assert!(adaptive.is_reduced());
+
+        // Encher a fila (perder imagens) também faz descer
+        let overflow = Congestion { max_queued: 0, overflowed: true };
+        assert_eq!(adaptive.update(overflow), Some(2_940_000));
+
+        // Continua descendo até o piso (1/4 do normal) e para nele
+        for _ in 0..10 {
+            adaptive.update(jammed());
+        }
+        assert_eq!(adaptive.current(), 1_500_000);
+        assert_eq!(adaptive.update(jammed()), None);
+    }
+
+    #[test]
+    fn sobe_devagar_quando_todos_estao_em_dia() {
+        let mut adaptive = AdaptiveBitrate::new(6_000_000);
+        adaptive.update(jammed()); // 4,2 Mbps
+
+        // Precisa de CALM_SECS_TO_RAISE segundos seguidos em dia para subir 15%
+        assert_eq!(adaptive.update(calm()), None);
+        assert_eq!(adaptive.update(calm()), None);
+        assert_eq!(adaptive.update(calm()), Some(4_830_000));
+
+        // E nunca passa do normal
+        for _ in 0..30 {
+            adaptive.update(calm());
+        }
+        assert_eq!(adaptive.current(), 6_000_000);
+        assert!(!adaptive.is_reduced());
+    }
+
+    #[test]
+    fn fila_no_meio_do_caminho_mantem_e_zera_a_contagem() {
+        let mut adaptive = AdaptiveBitrate::new(6_000_000);
+        adaptive.update(jammed()); // 4,2 Mbps
+
+        adaptive.update(calm());
+        adaptive.update(calm());
+        // Fila de 2 imagens: nem desce, nem conta como "em dia"
+        let middle = Congestion { max_queued: 2, overflowed: false };
+        assert_eq!(adaptive.update(middle), None);
+        assert_eq!(adaptive.current(), 4_200_000);
+
+        // A contagem recomeçou: precisa de mais 3 segundos em dia
+        assert_eq!(adaptive.update(calm()), None);
+        assert_eq!(adaptive.update(calm()), None);
+        assert_eq!(adaptive.update(calm()), Some(4_830_000));
+    }
+
+    #[test]
+    fn piso_nunca_fica_abaixo_de_1_mbps() {
+        // 720p a 15 FPS = 2 Mbps: 1/4 seria 0,5 Mbps, mas o piso é 1 Mbps
+        let mut adaptive = AdaptiveBitrate::new(2_000_000);
+        for _ in 0..10 {
+            adaptive.update(jammed());
+        }
+        assert_eq!(adaptive.current(), 1_000_000);
+    }
 }

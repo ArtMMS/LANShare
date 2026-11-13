@@ -1,5 +1,6 @@
 //! Eventos da transmissão: começou, resumo, parou e avisos.
-//! Quem usa decide o que fazer com eles (o Host transforma em HostEvent, no stream_bridge.rs).
+//! Quem usa decide o que fazer com eles (o Host transforma em HostEvent, no stream_bridge.rs;
+//! o Client transforma em JSON, no streaming.rs).
 
 use std::sync::Arc;
 
@@ -17,10 +18,14 @@ pub enum StreamEvent {
     /// Resumo (a cada ~1 segundo, enquanto alguém assiste).
     Stats {
         packets_per_sec: f64,
-        /// Megabits por segundo enviados a CADA espectador.
+        /// Megabits por segundo enviados a CADA espectador (o que realmente saiu).
         mbps: f64,
         viewers: usize,
         skipped_frames: u32,
+        /// Bitrate que o encoder está usando agora (Mbps). Cai quando a conexão de alguém piora.
+        bitrate_mbps: f64,
+        /// true = a qualidade está reduzida porque alguém não está dando conta (conexão instável).
+        unstable: bool,
     },
 
     /// A transmissão terminou. `error` = None quando foi parada normalmente.

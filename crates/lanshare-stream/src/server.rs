@@ -5,12 +5,13 @@
 //! 3. Aceito: WatchAccepted, e depois Video/Audio pela mesma conexão (com Ping/Pong e Bye).
 //!
 //! É o StreamSink da transmissão: cada espectador tem a própria fila (quem atrasa perde vídeo,
-//! nunca som) e só começa a receber num keyframe.
+//! nunca som) e só começa a receber num keyframe. O tamanho das filas também diz ao bitrate
+//! adaptativo (stream.rs) se alguém não está dando conta.
 //!
 //! Um servidor por transmissão. Sempre chame `stop()` ao terminar: é ele que fecha a porta.
 
 use crate::events::StreamEvents;
-use crate::sink::StreamSink;
+use crate::sink::{Congestion, StreamSink};
 use lanshare_core::protocol::{
     read_message, ticket_looks_valid, write_message, AudioFrame, Message, VideoFrame,
     PROTOCOL_VERSION, REJECT_INVALID_TICKET, REJECT_PROTOCOL_MISMATCH, WATCH_TICKET_TTL,
@@ -47,6 +48,10 @@ struct Viewer {
     queued: Arc<AtomicUsize>,
     /// true = não manda nada até o próximo keyframe (acabou de entrar ou ficou para trás).
     waiting_keyframe: bool,
+    /// Maior fila desde a última pergunta do bitrate adaptativo.
+    peak_queued: usize,
+    /// Encheu a fila (e perdeu imagens) desde a última pergunta.
+    overflowed: bool,
 }
 
 struct Inner {
@@ -91,6 +96,8 @@ impl Inner {
                 stop,
                 queued: Arc::new(AtomicUsize::new(0)),
                 waiting_keyframe: true,
+                peak_queued: 0,
+                overflowed: false,
             },
         );
         if let Some(old) = old {
@@ -216,6 +223,22 @@ impl StreamSink for StreamServer {
         self.inner.keyframe_requested.swap(false, Ordering::Relaxed)
     }
 
+    fn take_congestion(&self) -> Congestion {
+        let mut congestion = Congestion::default();
+
+        for viewer in self.inner.lock_viewers().values_mut() {
+            let now = viewer.queued.load(Ordering::Relaxed);
+            congestion.max_queued = congestion.max_queued.max(viewer.peak_queued.max(now));
+            congestion.overflowed |= viewer.overflowed;
+
+            // Começa a contar de novo até a próxima pergunta
+            viewer.peak_queued = now;
+            viewer.overflowed = false;
+        }
+
+        congestion
+    }
+
     fn send_video(&self, keyframe: bool, timestamp_us: u64, data: Arc<Vec<u8>>) {
         let mut viewers = self.inner.lock_viewers();
 
@@ -230,11 +253,14 @@ impl StreamSink for StreamServer {
             // Fila cheia: ele está atrasado. Pula este frame e pede um keyframe para ele voltar
             if viewer.queued.load(Ordering::Relaxed) >= MAX_QUEUED_VIDEO_FRAMES {
                 viewer.waiting_keyframe = true;
+                viewer.overflowed = true;
                 self.inner.keyframe_requested.store(true, Ordering::Relaxed);
                 continue;
             }
 
-            viewer.queued.fetch_add(1, Ordering::Relaxed);
+            let queued = viewer.queued.fetch_add(1, Ordering::Relaxed) + 1;
+            viewer.peak_queued = viewer.peak_queued.max(queued);
+
             let frame = VideoFrame::new(keyframe, timestamp_us, data.clone())
                 .with_queue_counter(viewer.queued.clone());
 
@@ -389,6 +415,10 @@ mod tests {
                 Some(Message::Audio(frame)) => assert_eq!(frame.timestamp_us, 3),
                 outra => panic!("esperava o audio, veio {outra:?}"),
             }
+
+            // A fila chegou a ter pelo menos 1 imagem; a segunda pergunta já vem zerada
+            assert!(server.take_congestion().max_queued >= 1);
+            assert!(!server.take_congestion().overflowed);
 
             // O mesmo ingresso não vale duas vezes
             let (_other, reply) = connect(server.port(), &ticket).await;

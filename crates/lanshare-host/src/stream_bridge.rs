@@ -25,6 +25,7 @@ impl From<EventSender> for StreamEvents {
                 mbps,
                 viewers,
                 skipped_frames,
+                ..
             } => events.emit(HostEvent::StreamStats {
                 packets_per_sec,
                 mbps,

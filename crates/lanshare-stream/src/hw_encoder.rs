@@ -35,11 +35,11 @@ use lanshare_core::i18n::tr;
 
 type BoxError = Box<dyn Error + Send + Sync>;
 
-/// Valores do teste `hwencode` (1080p a 30 FPS); na transmissão valem as opções do `share`.
+/// Valores do teste `hwencode` (1080p a 30 FPS); na transmissão valem as opções escolhidas.
 pub const TARGET_FPS: u32 = 30;
 pub const TARGET_BITRATE_BPS: u32 = 6_000_000; // 6 Mbps (média alvo)
 
-/// Média alvo de bitrate para cada combinação de resolução e FPS escolhida no `share`.
+/// Média alvo de bitrate para cada combinação de resolução e FPS escolhida.
 pub fn bitrate_for(height: u32, fps: u32) -> u32 {
     match (height, fps) {
         (720, 15) => 2_000_000,
@@ -113,7 +113,10 @@ pub struct HwEncoder {
     width: u32,
     height: u32,
     fps: u32,
+    /// Média alvo de bitrate agora (o bitrate adaptativo muda durante a transmissão).
     bitrate: u32,
+    /// true = o encoder aceitou o VBR com teto (em CBR não há teto para ajustar).
+    vbr: bool,
     needs_input: bool,
     provides_samples: bool,
     output_size: u32,
@@ -173,6 +176,7 @@ impl HwEncoder {
             height,
             fps,
             bitrate,
+            vbr: false,
             needs_input: false,
             provides_samples: false,
             output_size: 0,
@@ -204,6 +208,11 @@ impl HwEncoder {
     /// Tamanho (largura, altura) da imagem que sai do encoder.
     pub fn frame_size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Média alvo de bitrate agora.
+    pub fn bitrate(&self) -> u32 {
+        self.bitrate
     }
 
     /// Comprime um frame RGBA. Devolve 0 ou mais pacotes H.264
@@ -249,22 +258,44 @@ impl HwEncoder {
         self.set_codec(&CODECAPI_AVEncVideoForceKeyFrame, variant_u32(1));
     }
 
+    /// Muda a média alvo de bitrate com a transmissão rodando (bitrate adaptativo).
+    /// Se o driver não aceitar a mudança, a transmissão segue no bitrate anterior.
+    pub fn set_bitrate(&mut self, bitrate: u32) {
+        if bitrate == self.bitrate || bitrate == 0 {
+            return;
+        }
+
+        let lowering = bitrate < self.bitrate;
+        self.bitrate = bitrate;
+
+        // A média nunca pode passar do teto: descendo, baixa a média primeiro; subindo, o teto
+        if lowering || !self.vbr {
+            self.set_codec(&CODECAPI_AVEncCommonMeanBitRate, variant_u32(bitrate));
+            if self.vbr {
+                self.set_codec(&CODECAPI_AVEncCommonMaxBitRate, variant_u32(self.max_bitrate()));
+            }
+        } else {
+            self.set_codec(&CODECAPI_AVEncCommonMaxBitRate, variant_u32(self.max_bitrate()));
+            self.set_codec(&CODECAPI_AVEncCommonMeanBitRate, variant_u32(bitrate));
+        }
+    }
+
     /// Teto do bitrate no modo VBR: 1,5x a média alvo.
     fn max_bitrate(&self) -> u32 {
         self.bitrate / 2 * 3
     }
 
-    fn configure_codec(&self) {
+    fn configure_codec(&mut self) {
         // Baixa latência: sem B-frames nem fila interna
         self.set_codec(&CODECAPI_AVLowLatencyMode, variant_bool(true));
 
         // VBR com teto: gasta menos em cena simples e tem fôlego em movimento.
         // Se o driver recusar, volta para CBR (taxa constante).
-        let vbr_ok = self.set_codec(
+        self.vbr = self.set_codec(
             &CODECAPI_AVEncCommonRateControlMode,
             variant_u32(eAVEncCommonRateControlMode_PeakConstrainedVBR.0 as u32),
         );
-        if vbr_ok {
+        if self.vbr {
             self.set_codec(&CODECAPI_AVEncCommonMaxBitRate, variant_u32(self.max_bitrate()));
             println!(
                 "[hw] Controle de taxa: VBR (media {:.1} Mbps, teto {:.1} Mbps)",

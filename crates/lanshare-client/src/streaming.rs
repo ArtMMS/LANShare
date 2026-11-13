@@ -179,12 +179,16 @@ impl OwnStream {
                     mbps,
                     viewers,
                     skipped_frames,
+                    bitrate_mbps,
+                    unstable,
                 } => json!({
                     "type": "own_stream_stats",
                     "packets_per_sec": packets_per_sec,
                     "mbps": mbps,
                     "viewers": viewers,
                     "skipped_frames": skipped_frames,
+                    "bitrate_mbps": bitrate_mbps,
+                    "unstable": unstable,
                 }),
                 StreamEvent::Stopped { error } => {
                     if error.is_some() {
