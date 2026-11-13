@@ -491,6 +491,22 @@ public partial class MainWindow : Window
         else _infoText.Text = text ?? "";
     }
 
+    /// "Transmitindo — 4.2 Mbps, 2 usuário(s)" e, quando o bitrate adaptativo reduziu a
+    /// qualidade, "— Conexão instável: qualidade reduzida para 2.9 Mbps".
+    /// `viewersField`: "clients" no Host, "viewers" no Client.
+    private static string OwnStreamStatsText(JsonElement e, string viewersField)
+    {
+        var text = Loc.F("Stream_Stats", e.GetProperty("mbps").GetDouble(), e.GetProperty(viewersField).GetInt32());
+
+        var unstable = e.TryGetProperty("unstable", out var u) && u.ValueKind == JsonValueKind.True;
+        if (!unstable) return text;
+
+        var bitrate = e.TryGetProperty("bitrate_mbps", out var b) && b.ValueKind == JsonValueKind.Number
+            ? b.GetDouble()
+            : 0;
+        return $"{text} — {Loc.F("Stream_UnstableReduced", bitrate)}";
+    }
+
     /// A minha transmissão terminou (parei, ou ela caiu com `error`).
     private void OnOwnStreamStopped(string? error)
     {
@@ -610,10 +626,7 @@ public partial class MainWindow : Window
                             e.GetProperty("fps").GetInt32()));
                         break;
                     case "stream_stats":
-                        SetOwnStreamInfo(Loc.F(
-                            "Stream_Stats",
-                            e.GetProperty("mbps").GetDouble(),
-                            e.GetProperty("clients").GetInt32()));
+                        SetOwnStreamInfo(OwnStreamStatsText(e, "clients"));
                         break;
                     case "stream_stopped":
                         OnOwnStreamStopped(e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
@@ -913,10 +926,7 @@ public partial class MainWindow : Window
                         break;
 
                     case "own_stream_stats":
-                        SetOwnStreamInfo(Loc.F(
-                            "Stream_Stats",
-                            e.GetProperty("mbps").GetDouble(),
-                            e.GetProperty("viewers").GetInt32()));
+                        SetOwnStreamInfo(OwnStreamStatsText(e, "viewers"));
                         break;
 
                     case "own_stream_stopped":

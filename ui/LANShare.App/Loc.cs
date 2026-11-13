@@ -145,6 +145,13 @@ internal static class Loc
         },
         ["Stream_Started"] = new[] { "Transmitindo {0}x{1} @ {2} FPS", "Streaming {0}x{1} @ {2} FPS", "Transmitiendo {0}x{1} @ {2} FPS" },
         ["Stream_Stats"] = new[] { "Transmitindo — {0:F1} Mbps, {1} usuário(s)", "Streaming — {0:F1} Mbps, {1} user(s)", "Transmitiendo — {0:F1} Mbps, {1} usuario(s)" },
+        ["Stream_Unstable"] = new[] { "Conexão instável", "Unstable connection", "Conexión inestable" },
+        ["Stream_UnstableReduced"] = new[]
+        {
+            "Conexão instável: qualidade reduzida para {0:F1} Mbps",
+            "Unstable connection: quality lowered to {0:F1} Mbps",
+            "Conexión inestable: calidad reducida a {0:F1} Mbps",
+        },
         ["Stream_Interrupted"] = new[] { "Transmissão interrompida: {0}", "Stream interrupted: {0}", "Transmisión interrumpida: {0}" },
         ["Stream_Stopped"] = new[] { "Transmissão parada.", "Stream stopped.", "Transmisión detenida." },
 

@@ -14,13 +14,18 @@ namespace LANShare.App;
 ///   clicar assiste (clicar de novo para);
 /// - quem você assiste fica com a borda verde na lista de usuários;
 /// - a transmissão escolhida aparece na área grande, com volume e tela cheia;
-/// - "Fulano iniciou/encerrou a transmissão" avisa (com som) quando alguém começa ou para.
+/// - "Fulano iniciou/encerrou a transmissão" avisa (com som) quando alguém começa ou para;
+/// - "Conexão instável" aparece na barra de baixo quando as imagens chegam atrasadas.
 public partial class MainWindow
 {
     private enum WatchState { None, Connecting, Watching }
 
     /// Logo depois de entrar na sala chega a lista de quem já transmite: sem aviso nesse tempo.
     private static readonly TimeSpan StreamNoticeGrace = TimeSpan.FromSeconds(3);
+
+    /// O aviso "Conexão instável" fica na barra por este tempo depois do último problema
+    /// (para não ficar piscando a cada resumo).
+    private static readonly TimeSpan UnstableNoticeHold = TimeSpan.FromSeconds(6);
 
     /// Largura máxima do nome na lista (o ícone de tela fica logo depois dele).
     private const double UserNameMaxWidth = 150;
@@ -48,6 +53,9 @@ public partial class MainWindow
 
     private WatchState _watchState = WatchState.None;
 
+    /// Até quando mostrar "Conexão instável" na barra de baixo.
+    private DateTime _watchUnstableUntil = DateTime.MinValue;
+
     /// Quando entrei na sala (Host: quando abri; Client: quando conectei).
     private DateTime _roomJoinedAt;
 
@@ -65,6 +73,7 @@ public partial class MainWindow
         _watchUser = null;
         _watchId = 0;
         _watchState = WatchState.None;
+        _watchUnstableUntil = DateTime.MinValue;
         _videoFps = _videoMbps = 0;
         _videoSize = null;
         _syncMs = null;
@@ -228,6 +237,9 @@ public partial class MainWindow
                 _syncMs = e.TryGetProperty("offset_ms", out var off) && off.ValueKind == JsonValueKind.Number
                     ? off.GetDouble()
                     : null;
+                // As imagens chegaram atrasadas ou acumuladas: mostra o aviso por um tempo
+                if (e.TryGetProperty("unstable", out var unstable) && unstable.ValueKind == JsonValueKind.True)
+                    _watchUnstableUntil = DateTime.UtcNow + UnstableNoticeHold;
                 RefreshWatchInfo();
                 return true;
 
@@ -273,7 +285,8 @@ public partial class MainWindow
         _infoText.Text = WatchInfoText() ?? "";
     }
 
-    /// "Assistindo Fulano — 1920x1080 @ 30 FPS, 4.2 Mbps — A/V +3 ms". Null = não está assistindo.
+    /// "Assistindo Fulano — 1920x1080 @ 30 FPS, 4.2 Mbps — A/V +3 ms — Conexão instável".
+    /// Null = não está assistindo.
     private string? WatchInfoText()
     {
         if (_watchUser is not { } id || _watchState == WatchState.None) return null;
@@ -281,6 +294,7 @@ public partial class MainWindow
         var parts = new List<string> { Loc.F("Watch_Watching", UserName(id)) };
         if (_videoSize is not null) parts.Add($"{_videoSize} @ {_videoFps:F0} FPS, {_videoMbps:F1} Mbps");
         if (_videoSize is not null && _syncMs is { } sync) parts.Add($"A/V {sync:+0;-0;0} ms");
+        if (DateTime.UtcNow < _watchUnstableUntil) parts.Add(Loc.T("Stream_Unstable"));
         return string.Join(" — ", parts);
     }
 

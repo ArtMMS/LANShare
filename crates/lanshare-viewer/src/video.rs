@@ -6,7 +6,8 @@
 //! - sem som: numa agenda própria, no horário da captura + um atraso fixo pequeno
 //!   (absorve as variações da rede sem acelerar nem travar).
 //! Se a rede entregar imagens atrasadas ou acumuladas, a agenda pula para a mais nova
-//! em vez de mostrar todas aceleradas.
+//! em vez de mostrar todas aceleradas. Cada pulo conta como sinal de conexão instável
+//! (vai no evento "sync_stats" como "unstable").
 
 use crate::decoder::{Decoder, Picture};
 use crate::sync_clock::SyncClock;
@@ -32,6 +33,7 @@ const PLAYOUT_DELAY: Duration = Duration::from_millis(100);
 
 /// Sem som: uma imagem que chega mais atrasada que isso (em relação à agenda) faz a agenda
 /// pular para ela. As mais velhas aparecem e somem na hora (pulo em vez de fast-forward).
+/// Com som: uma imagem que chega mais atrasada que isso em relação ao som conta como instabilidade.
 const LATE_LIMIT: Duration = Duration::from_millis(150);
 
 /// Sem som: se a imagem mais nova estiver agendada para mais longe que isso, há imagens
@@ -51,7 +53,7 @@ const RELEASE_POLL: Duration = Duration::from_millis(4);
 /// Sem nada esperando, a thread só acorda quando chega pacote (ou para conferir o fim).
 const IDLE_WAIT: Duration = Duration::from_millis(100);
 
-/// De quanto em quanto tempo o motor avisa a diferença entre imagem e som.
+/// De quanto em quanto tempo o motor avisa a diferença entre imagem e som (e a instabilidade).
 const SYNC_REPORT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
@@ -251,18 +253,20 @@ struct Playout {
 
 impl Playout {
     /// Chegou uma imagem capturada em `timestamp_us`. Sem som, ajusta a agenda se preciso.
-    fn on_frame(&mut self, timestamp_us: u64, now: Instant) {
+    /// Devolve true se a agenda teve que pular (imagem atrasada ou acumulada demais).
+    fn on_frame(&mut self, timestamp_us: u64, now: Instant) -> bool {
         if self.following_audio {
-            return;
+            return false;
         }
 
-        let restart = match self.schedule {
-            None => true,
+        let (restart, jumped) = match self.schedule {
+            None => (true, false),
             Some(schedule) => {
                 let due = schedule.due_at(timestamp_us);
                 // Chegou atrasada demais (a rede segurou) ou adiantada demais (a rede soltou
                 // tudo de uma vez): esta imagem passa a ser o "agora", com a folga normal
-                now > due + LATE_LIMIT || due > now + MAX_AHEAD
+                let jump = now > due + LATE_LIMIT || due > now + MAX_AHEAD;
+                (jump, jump)
             }
         };
 
@@ -272,6 +276,7 @@ impl Playout {
                 at: now + PLAYOUT_DELAY,
             });
         }
+        jumped
     }
 
     /// Antes de soltar as imagens: há som tocando? Se sim, a agenda acompanha o som,
@@ -301,11 +306,21 @@ impl Playout {
 struct SyncQueue {
     held: VecDeque<Held>,
     playout: Playout,
+    /// Quantas vezes a imagem chegou atrasada ou acumulada desde a última pergunta.
+    jumps: u32,
 }
 
 impl SyncQueue {
-    fn push(&mut self, held: Held) {
-        self.playout.on_frame(held.timestamp_us, Instant::now());
+    fn push(&mut self, held: Held, clock: &SyncClock) {
+        if self.playout.on_frame(held.timestamp_us, Instant::now()) {
+            self.jumps += 1;
+        } else if self.playout.following_audio {
+            // Com som: a imagem chegou muito depois do som que já está tocando
+            let late_us = LATE_LIMIT.as_micros() as u64;
+            if clock.now_us().is_some_and(|audio| held.timestamp_us + late_us < audio) {
+                self.jumps += 1;
+            }
+        }
         self.held.push_back(held);
     }
 
@@ -337,17 +352,24 @@ impl SyncQueue {
         chosen
     }
 
+    /// Quantos pulos houve desde a última pergunta (lê e zera).
+    fn take_jumps(&mut self) -> u32 {
+        std::mem::take(&mut self.jumps)
+    }
+
     fn is_empty(&self) -> bool {
         self.held.is_empty()
     }
 }
 
 /// Média da diferença entre imagem e som, para o evento "sync_stats"
-/// (null quando nenhuma imagem do período teve som para acompanhar).
+/// (null quando nenhuma imagem do período teve som para acompanhar),
+/// e se a conexão esteve instável no período (houve algum pulo).
 struct SyncStats {
     since: Instant,
     total_us: i64,
     count: i64,
+    jumps: u32,
 }
 
 impl SyncStats {
@@ -356,19 +378,25 @@ impl SyncStats {
             since: Instant::now(),
             total_us: 0,
             count: 0,
+            jumps: 0,
         }
     }
 
-    fn record(&mut self, offset_us: Option<i64>, events: &EventTx) {
+    fn record(&mut self, offset_us: Option<i64>, jumps: u32, events: &EventTx) {
         if let Some(offset) = offset_us {
             self.total_us += offset;
             self.count += 1;
         }
+        self.jumps += jumps;
 
         if self.since.elapsed() >= SYNC_REPORT_INTERVAL {
             let offset_ms =
                 (self.count > 0).then(|| self.total_us as f64 / self.count as f64 / 1000.0);
-            let _ = events.send(json!({ "type": "sync_stats", "offset_ms": offset_ms }));
+            let _ = events.send(json!({
+                "type": "sync_stats",
+                "offset_ms": offset_ms,
+                "unstable": self.jumps > 0,
+            }));
             *self = Self::new();
         }
     }
@@ -418,12 +446,12 @@ fn run(
         match rx.recv_timeout(wait) {
             Ok(frame) => {
                 if let Some(held) = pipeline.process(frame) {
-                    queue.push(held);
+                    queue.push(held, &clock);
                 }
                 // Decodifica tudo o que já chegou
                 while let Ok(frame) = rx.try_recv() {
                     if let Some(held) = pipeline.process(frame) {
-                        queue.push(held);
+                        queue.push(held, &clock);
                     }
                 }
             }
@@ -435,7 +463,7 @@ fn run(
         let Some((picture, offset)) = queue.release(&clock) else {
             continue;
         };
-        stats.record(offset, &events);
+        stats.record(offset, queue.take_jumps(), &events);
 
         picture.to_rgb(&mut rgb);
 
@@ -468,13 +496,13 @@ mod tests {
         let start = Instant::now();
         let mut playout = Playout::default();
 
-        // A primeira imagem chega e é agendada para daqui a PLAYOUT_DELAY
-        playout.on_frame(0, start);
+        // A primeira imagem chega e é agendada para daqui a PLAYOUT_DELAY (não é um pulo)
+        assert!(!playout.on_frame(0, start));
         assert!(!playout.is_due(0, None, start + ms(50)));
         assert!(playout.is_due(0, None, start + PLAYOUT_DELAY));
 
         // A segunda chega 33 ms depois e aparece 33 ms depois da primeira
-        playout.on_frame(FRAME_US, start + ms(33));
+        assert!(!playout.on_frame(FRAME_US, start + ms(33)));
         assert!(!playout.is_due(FRAME_US, None, start + PLAYOUT_DELAY + ms(20)));
         assert!(playout.is_due(FRAME_US, None, start + PLAYOUT_DELAY + ms(34)));
     }
@@ -486,9 +514,9 @@ mod tests {
         playout.on_frame(0, start);
 
         // A imagem 10 (capturada em ~333 ms) tinha hora marcada para ~433 ms,
-        // mas a rede segurou e ela só chegou em 1100 ms (~667 ms atrasada)
+        // mas a rede segurou e ela só chegou em 1100 ms (~667 ms atrasada): é um pulo
         let late_arrival = start + ms(1_100);
-        playout.on_frame(10 * FRAME_US, late_arrival);
+        assert!(playout.on_frame(10 * FRAME_US, late_arrival));
 
         // A agenda recomeçou nela: as imagens mais velhas já passaram da hora (somem na hora)...
         assert!(playout.is_due(5 * FRAME_US, None, late_arrival));
@@ -505,7 +533,7 @@ mod tests {
 
         // A rede soltou 1 s de imagens de uma vez: a mais nova ficaria a ~1 s no futuro
         let burst = start + ms(10);
-        playout.on_frame(30 * FRAME_US, burst);
+        assert!(playout.on_frame(30 * FRAME_US, burst));
 
         // A agenda pulou para ela: aparece com a folga normal, não daqui a 1 s
         assert!(playout.is_due(30 * FRAME_US, None, burst + PLAYOUT_DELAY));
@@ -522,8 +550,8 @@ mod tests {
         assert!(playout.is_due(1_000_000, Some(1_000_000), start));
         assert!(!playout.is_due(1_100_000, Some(1_000_000), start));
 
-        // Com som, a imagem que chega não mexe na agenda
-        playout.on_frame(1_100_000, start);
+        // Com som, a imagem que chega não mexe na agenda (nem conta como pulo aqui)
+        assert!(!playout.on_frame(1_100_000, start));
 
         // O som parou: a agenda continua de onde o som estava, sem pulo
         playout.follow_audio(None, start + ms(50));
