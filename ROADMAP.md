@@ -133,21 +133,32 @@
 - [x] Screen-sharing indicator next to the user's name in the user list
 - [x] Select a stream by clicking the user (the user you're watching has a green border)
 - [x] "X started streaming" notification for any user
-- [ ] Clear error when a streamer can't be reached (firewall)
-- [ ] Handle streamer leaving, viewer kicked and room closing while watching
-- [ ] If a user is kicked from the room more than 3 times, they will not be able to re-enter that room (based on their IP address). Unless they create another room.
-
-- [ ] (FIX) Ao ficar com a conexão ruim, a transmissão acelera ou trava. Procurar uma solução.
-   - [ ] Talvez abaixar e aumentar a qualidade e o bitrate DA IMAGEM automaticamente conforme a conexão (nunca impactar o som).
-- [ ] (FIX) Monitor apagando sozinho para o client que está assistindo a tela e ficar sem mexer o mouse. (fazer igual o YouTube faz e impedir isso)
+- [x] (FIX) Stream speeds up on a bad connection: steady playback on the viewer
+    - Show each frame at its capture time plus a small fixed delay (~100 ms)
+    - Use a local clock when the stream has no audio
+    - When frames arrive late in a burst, skip to the newest one instead of fast-forwarding
+- [ ] (FIX) Stream freezes on a bad connection: adaptive bitrate on the streamer
+    - Measure every viewer's queue each second on the StreamServer
+    - Lower the encoder bitrate when queues grow (with a minimum), raise it back slowly when stable
+    - Follow the slowest viewer (one encoder for everyone)
+    - Show "Unstable connection" in the info bar
+- [ ] (FIX) Monitor turns off while watching: Windows power request (like browsers do)
+    - Keep the display on and the PC awake while watching a stream
+    - Keep the display on and the PC awake while streaming
+    - Release the request when watching/streaming stops or when leaving the room
 
 # V2.1.0 — Multi-View & Webcam
 
+- [ ] Watch other streams while streaming
 - [ ] Screen that shows all active streams
-- [ ] Customizable layout (change position and size)
+   - [ ] Adaptative/Customizable layout (change position and size)
 - [ ] Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
    - Only cameras and avatars screen (like discord or skype); clickable on the user feed
    - Allow Webcam Options (like OBS Studio)
+- [ ] Ban a user after 2 kicks (by IP, only for the current room)
+    - Count kicks per IP on the Host
+    - Refuse banned IPs before asking for the password ("You are banned from this room")
+    - The ban list is cleared when the Host opens a new room
 
 ---
 

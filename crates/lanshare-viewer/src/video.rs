@@ -1,8 +1,12 @@
 //! Vídeo de quem assiste: decodifica o H.264 numa thread própria
 //! e guarda a imagem mais recente para a interface buscar.
 //!
-//! Sincronia: cada imagem decodificada espera o som chegar no momento em que ela foi
-//! capturada em quem transmite (sync_clock.rs). Sem som tocando, ela aparece assim que fica pronta.
+//! Quando cada imagem aparece (Playout):
+//! - com som tocando: quando o som chega no momento em que ela foi capturada (sync_clock.rs);
+//! - sem som: numa agenda própria, no horário da captura + um atraso fixo pequeno
+//!   (absorve as variações da rede sem acelerar nem travar).
+//! Se a rede entregar imagens atrasadas ou acumuladas, a agenda pula para a mais nova
+//! em vez de mostrar todas aceleradas.
 
 use crate::decoder::{Decoder, Picture};
 use crate::sync_clock::SyncClock;
@@ -19,14 +23,26 @@ use std::time::{Duration, Instant};
 /// Quantos pacotes podem esperar na fila antes de a decodificação "ficar para trás".
 const QUEUE_SIZE: usize = 16;
 
-/// Uma imagem pode aparecer até este tanto antes do som (abaixo de ~20 ms ninguém percebe).
+/// Com som: uma imagem pode aparecer até este tanto antes do som (abaixo de ~20 ms ninguém percebe).
 const SYNC_LEAD_US: u64 = 10_000;
 
-/// Maior espera de uma imagem pelo som. Se o som estiver mais atrasado que isso,
-/// a imagem aparece mesmo assim (melhor fora de sincronia do que travada).
+/// Sem som: cada imagem aparece no horário em que foi capturada + este atraso.
+/// É a folga que absorve as pequenas variações da rede.
+const PLAYOUT_DELAY: Duration = Duration::from_millis(100);
+
+/// Sem som: uma imagem que chega mais atrasada que isso (em relação à agenda) faz a agenda
+/// pular para ela. As mais velhas aparecem e somem na hora (pulo em vez de fast-forward).
+const LATE_LIMIT: Duration = Duration::from_millis(150);
+
+/// Sem som: se a imagem mais nova estiver agendada para mais longe que isso, há imagens
+/// acumuladas (a rede soltou tudo de uma vez): a agenda pula para a mais nova.
+const MAX_AHEAD: Duration = Duration::from_millis(300);
+
+/// Maior espera de uma imagem. Se passar disso, ela aparece mesmo assim
+/// (melhor fora de sincronia do que travada).
 const MAX_HOLD: Duration = Duration::from_millis(350);
 
-/// Limite de imagens esperando o som (cada uma ocupa ~3 MB em 1080p).
+/// Limite de imagens esperando a hora (cada uma ocupa ~3 MB em 1080p).
 const MAX_HELD: usize = 12;
 
 /// De quanto em quanto tempo a thread confere se já é hora de mostrar a próxima imagem.
@@ -203,14 +219,93 @@ struct Held {
     picture: Picture,
 }
 
-/// Imagens decodificadas esperando o som alcançá-las.
+// ───────────────────────────── Agenda de exibição ─────────────────────────────
+
+/// "A imagem capturada em `stream_us` aparece em `at`" (as outras, na mesma proporção).
+#[derive(Debug, Clone, Copy)]
+struct Schedule {
+    stream_us: u64,
+    at: Instant,
+}
+
+impl Schedule {
+    /// Quando a imagem capturada em `timestamp_us` deve aparecer.
+    fn due_at(&self, timestamp_us: u64) -> Instant {
+        if timestamp_us >= self.stream_us {
+            self.at + Duration::from_micros(timestamp_us - self.stream_us)
+        } else {
+            let earlier = Duration::from_micros(self.stream_us - timestamp_us);
+            self.at.checked_sub(earlier).unwrap_or(self.at)
+        }
+    }
+}
+
+/// Decide a hora de cada imagem: seguindo o som (quando há som tocando) ou numa agenda
+/// própria (sem som). Não guarda imagens: só horários, por isso dá para testar sozinha.
+#[derive(Default)]
+struct Playout {
+    schedule: Option<Schedule>,
+    /// true = há som tocando: a imagem segue o som (e a agenda só acompanha).
+    following_audio: bool,
+}
+
+impl Playout {
+    /// Chegou uma imagem capturada em `timestamp_us`. Sem som, ajusta a agenda se preciso.
+    fn on_frame(&mut self, timestamp_us: u64, now: Instant) {
+        if self.following_audio {
+            return;
+        }
+
+        let restart = match self.schedule {
+            None => true,
+            Some(schedule) => {
+                let due = schedule.due_at(timestamp_us);
+                // Chegou atrasada demais (a rede segurou) ou adiantada demais (a rede soltou
+                // tudo de uma vez): esta imagem passa a ser o "agora", com a folga normal
+                now > due + LATE_LIMIT || due > now + MAX_AHEAD
+            }
+        };
+
+        if restart {
+            self.schedule = Some(Schedule {
+                stream_us: timestamp_us,
+                at: now + PLAYOUT_DELAY,
+            });
+        }
+    }
+
+    /// Antes de soltar as imagens: há som tocando? Se sim, a agenda acompanha o som,
+    /// para o vídeo continuar no mesmo ritmo (sem pulo) se o som parar.
+    fn follow_audio(&mut self, audio_us: Option<u64>, now: Instant) {
+        self.following_audio = audio_us.is_some();
+        if let Some(audio) = audio_us {
+            self.schedule = Some(Schedule {
+                stream_us: audio,
+                at: now,
+            });
+        }
+    }
+
+    /// A imagem capturada em `timestamp_us` já pode aparecer?
+    fn is_due(&self, timestamp_us: u64, audio_us: Option<u64>, now: Instant) -> bool {
+        match (audio_us, self.schedule) {
+            (Some(audio), _) => timestamp_us <= audio + SYNC_LEAD_US,
+            (None, Some(schedule)) => schedule.due_at(timestamp_us) <= now,
+            (None, None) => true,
+        }
+    }
+}
+
+/// Imagens decodificadas esperando a hora delas.
 #[derive(Default)]
 struct SyncQueue {
     held: VecDeque<Held>,
+    playout: Playout,
 }
 
 impl SyncQueue {
     fn push(&mut self, held: Held) {
+        self.playout.on_frame(held.timestamp_us, Instant::now());
         self.held.push_back(held);
     }
 
@@ -218,14 +313,15 @@ impl SyncQueue {
     /// As mais velhas que também já estavam na hora são puladas.
     /// Devolve também a diferença entre a imagem e o som, quando há som.
     fn release(&mut self, clock: &SyncClock) -> Option<(Picture, Option<i64>)> {
+        let now = Instant::now();
         let audio_us = clock.now_us();
+        self.playout.follow_audio(audio_us, now);
+
         let mut chosen = None;
 
         while let Some(front) = self.held.front() {
-            let due = match audio_us {
-                None => true, // sem som: aparece já
-                Some(audio) => front.timestamp_us <= audio + SYNC_LEAD_US,
-            } || front.since.elapsed() >= MAX_HOLD
+            let due = self.playout.is_due(front.timestamp_us, audio_us, now)
+                || front.since.elapsed() >= MAX_HOLD
                 || self.held.len() > MAX_HELD;
 
             if !due {
@@ -354,5 +450,84 @@ fn run(
         }
 
         slot.publish(generation, new_size.0, new_size.1, &mut rgb);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FRAME_US: u64 = 33_333; // 30 FPS
+
+    fn ms(value: u64) -> Duration {
+        Duration::from_millis(value)
+    }
+
+    #[test]
+    fn rede_normal_cada_imagem_aparece_no_ritmo_da_captura() {
+        let start = Instant::now();
+        let mut playout = Playout::default();
+
+        // A primeira imagem chega e é agendada para daqui a PLAYOUT_DELAY
+        playout.on_frame(0, start);
+        assert!(!playout.is_due(0, None, start + ms(50)));
+        assert!(playout.is_due(0, None, start + PLAYOUT_DELAY));
+
+        // A segunda chega 33 ms depois e aparece 33 ms depois da primeira
+        playout.on_frame(FRAME_US, start + ms(33));
+        assert!(!playout.is_due(FRAME_US, None, start + PLAYOUT_DELAY + ms(20)));
+        assert!(playout.is_due(FRAME_US, None, start + PLAYOUT_DELAY + ms(34)));
+    }
+
+    #[test]
+    fn imagem_muito_atrasada_faz_a_agenda_pular_para_ela() {
+        let start = Instant::now();
+        let mut playout = Playout::default();
+        playout.on_frame(0, start);
+
+        // A imagem 10 (capturada em ~333 ms) tinha hora marcada para ~433 ms,
+        // mas a rede segurou e ela só chegou em 1100 ms (~667 ms atrasada)
+        let late_arrival = start + ms(1_100);
+        playout.on_frame(10 * FRAME_US, late_arrival);
+
+        // A agenda recomeçou nela: as imagens mais velhas já passaram da hora (somem na hora)...
+        assert!(playout.is_due(5 * FRAME_US, None, late_arrival));
+        // ...e ela aparece com a folga normal (não acelera)
+        assert!(!playout.is_due(10 * FRAME_US, None, late_arrival));
+        assert!(playout.is_due(10 * FRAME_US, None, late_arrival + PLAYOUT_DELAY));
+    }
+
+    #[test]
+    fn imagens_acumuladas_pulam_para_a_mais_nova() {
+        let start = Instant::now();
+        let mut playout = Playout::default();
+        playout.on_frame(0, start);
+
+        // A rede soltou 1 s de imagens de uma vez: a mais nova ficaria a ~1 s no futuro
+        let burst = start + ms(10);
+        playout.on_frame(30 * FRAME_US, burst);
+
+        // A agenda pulou para ela: aparece com a folga normal, não daqui a 1 s
+        assert!(playout.is_due(30 * FRAME_US, None, burst + PLAYOUT_DELAY));
+        assert!(playout.is_due(15 * FRAME_US, None, burst));
+    }
+
+    #[test]
+    fn com_som_segue_o_som_e_sem_som_continua_no_mesmo_ritmo() {
+        let start = Instant::now();
+        let mut playout = Playout::default();
+
+        // Som tocando no momento 1 s da transmissão
+        playout.follow_audio(Some(1_000_000), start);
+        assert!(playout.is_due(1_000_000, Some(1_000_000), start));
+        assert!(!playout.is_due(1_100_000, Some(1_000_000), start));
+
+        // Com som, a imagem que chega não mexe na agenda
+        playout.on_frame(1_100_000, start);
+
+        // O som parou: a agenda continua de onde o som estava, sem pulo
+        playout.follow_audio(None, start + ms(50));
+        assert!(!playout.is_due(1_100_000, None, start + ms(50)));
+        assert!(playout.is_due(1_100_000, None, start + ms(100)));
     }
 }
