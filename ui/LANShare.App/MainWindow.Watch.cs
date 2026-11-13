@@ -70,6 +70,7 @@ public partial class MainWindow
     {
         _streamers.Clear();
         _cameraUsers.Clear();
+        ResetCameraVisibility();
         _cameraTileViews.Clear();
         _hostUserNames.Clear();
         _ownPreviewBig = false;
@@ -345,12 +346,36 @@ public partial class MainWindow
     private bool HasCameraOn(ulong userId) =>
         userId == MySfxUserId ? _cameraOn : _cameraUsers.Contains(userId);
 
-    /// Ícone de câmera de quem está com ela ligada: cinza; verde quando eu assisto ela grande.
-    /// Clicar abre a câmera grande (ou para). No meu nome, só mostra.
+    /// Ícone de câmera de quem está com ela ligada (também no meu nome): cinza; verde quando eu
+    /// assisto ela grande; vermelho com um risco quando ela está escondida.
+    /// Clicar esconde a câmera (na grade e nas câmeras flutuantes); clicar de novo mostra.
     private Control CameraIcon(ulong userId)
     {
-        var mine = userId == MySfxUserId;
-        var watched = IsWatchingUser(userId) && _watchCamera;
+        var hidden = IsCameraHidden(userId);
+        var watched = !hidden && IsWatchingUser(userId) && _watchCamera;
+
+        var glyph = new Panel { Width = 18, Height = 18 };
+        glyph.Children.Add(new TextBlock
+        {
+            Text = CameraGlyph,
+            FontFamily = IconFont,
+            FontSize = 14,
+            Foreground = hidden ? CameraHiddenBrush : watched ? WatchedBorder : ScreenIconIdle,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        if (hidden)
+        {
+            // O risco no meio (como o 🔊 desligado do seletor)
+            glyph.Children.Add(new Line
+            {
+                StartPoint = new Point(2, 2),
+                EndPoint = new Point(16, 16),
+                Stroke = CameraHiddenBrush,
+                StrokeThickness = 2,
+                StrokeLineCap = PenLineCap.Round,
+            });
+        }
 
         var icon = new Border
         {
@@ -359,25 +384,11 @@ public partial class MainWindow
             CornerRadius = new CornerRadius(5),
             Background = watched ? WatchedFill : Brushes.Transparent,
             VerticalAlignment = VerticalAlignment.Center,
-            Child = new TextBlock
-            {
-                Text = CameraGlyph,
-                FontFamily = IconFont,
-                FontSize = 14,
-                Foreground = watched ? WatchedBorder : ScreenIconIdle,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-            },
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = glyph,
         };
+        ToolTip.SetTip(icon, Loc.T(hidden ? "Camera_ShowTooltip" : "Camera_HideTooltip"));
 
-        if (mine)
-        {
-            ToolTip.SetTip(icon, Loc.T("Camera_OwnTooltip"));
-            return icon;
-        }
-
-        icon.Cursor = new Cursor(StandardCursorType.Hand);
-        ToolTip.SetTip(icon, Loc.T(watched ? "Watch_StopTooltip" : "Room_WatchCameraTooltip"));
         icon.PointerEntered += (_, _) =>
         {
             if (!watched) icon.Background = ScreenIconHover;
@@ -390,7 +401,7 @@ public partial class MainWindow
         {
             if (!e.GetCurrentPoint(icon).Properties.IsLeftButtonPressed) return;
             e.Handled = true;
-            ToggleWatch(userId, camera: true);
+            SetCameraHidden(userId, !hidden);
         };
 
         return icon;

@@ -14,8 +14,14 @@ namespace LANShare.App;
 ///
 /// - arrastar a janelinha move ela para qualquer lugar da área do vídeo;
 /// - o canto de baixo, à direita, redimensiona (sempre em 16:9);
-/// - a posição e o tamanho de cada câmera ficam guardados enquanto o app está aberto
-///   (por pessoa); quem ainda não foi mexido fica empilhado no canto de cima, à direita.
+/// - a posição e o tamanho de cada câmera ficam salvos nas preferências (pelo nome da pessoa, em
+///   frações da área do vídeo): valem entre uma transmissão e outra e com o app fechado;
+///   quem ainda não foi mexido fica empilhado no canto de cima, à direita;
+/// - esconder: botão direito na janelinha -> "Esconder esta câmera", ou o ícone de câmera da lista
+///   de usuários (vermelho com um risco enquanto escondida; clicar de novo mostra). Escondida, a
+///   câmera some também da grade da sala (o quadrado mostra o avatar);
+/// - atalho (padrão C, em Configurações -> Atalhos): uma vez esconde todas; de novo mostra todas,
+///   inclusive as escondidas uma a uma.
 ///
 /// As imagens são as mesmas dos quadrados da sala (`_ownCameraImage` e `_cameraTileViews`):
 /// assistindo, elas saem da grade e entram aqui; parando de assistir, voltam para a grade.
@@ -58,8 +64,11 @@ public partial class MainWindow
     /// As janelinhas na tela, por pessoa.
     private readonly Dictionary<ulong, OverlayWidget> _overlayWidgets = new();
 
-    /// Posição e tamanho que cada pessoa ganhou ao ser mexida (vale enquanto o app está aberto).
-    private readonly Dictionary<ulong, Rect> _overlayRects = new();
+    /// Câmeras escondidas uma a uma (ids da sala) e o atalho "esconder todas".
+    private readonly HashSet<ulong> _hiddenCameras = new();
+    private bool _allCamerasHidden;
+
+    private static readonly IBrush CameraHiddenBrush = new SolidColorBrush(Color.Parse("#FF5C5C"));
 
     private OverlayDrag? _overlayDrag;
 
@@ -86,6 +95,67 @@ public partial class MainWindow
         AddHandler(PointerMovedEvent, OnOverlayPointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerReleasedEvent, OnOverlayPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
         _cameraOverlay.PointerCaptureLost += (_, _) => EndOverlayDrag();
+
+        // Atalho das câmeras (padrão C)
+        AddHandler(KeyDownEvent, OnCamerasKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    // ───────────────────────── Esconder câmeras ─────────────────────────
+
+    /// A câmera dessa pessoa está escondida (uma a uma ou pelo atalho)?
+    private bool IsCameraHidden(ulong userId) => _allCamerasHidden || _hiddenCameras.Contains(userId);
+
+    /// Esconde ou mostra a câmera de uma pessoa (botão direito na janelinha ou ícone da lista).
+    private void SetCameraHidden(ulong userId, bool hidden)
+    {
+        // Estava tudo escondido pelo atalho: as outras continuam escondidas, agora uma a uma
+        if (_allCamerasHidden)
+        {
+            _allCamerasHidden = false;
+            foreach (var id in _cameraUsers) _hiddenCameras.Add(id);
+            if (_cameraOn) _hiddenCameras.Add(MySfxUserId);
+        }
+
+        if (hidden) _hiddenCameras.Add(userId);
+        else _hiddenCameras.Remove(userId);
+
+        RefreshSfxUserLists(); // lista (ícone), grade e câmeras flutuantes
+    }
+
+    /// Atalho: uma vez esconde todas; de novo mostra todas (inclusive as escondidas uma a uma).
+    private void ToggleAllCameras()
+    {
+        if (_allCamerasHidden)
+        {
+            _allCamerasHidden = false;
+            _hiddenCameras.Clear();
+        }
+        else
+        {
+            _allCamerasHidden = true;
+        }
+
+        RefreshSfxUserLists();
+    }
+
+    /// Esquece o que estava escondido (ao abrir/fechar a sala ou conectar/desconectar).
+    private void ResetCameraVisibility()
+    {
+        _hiddenCameras.Clear();
+        _allCamerasHidden = false;
+    }
+
+    private void OnCamerasKeyDown(object? sender, KeyEventArgs e)
+    {
+        // Com as configurações abertas, a tecla pode estar sendo gravada como atalho novo
+        if (_settingsOpen || !InRoom) return;
+        if (_preferences.CamerasKeyValue is not { } shortcut || e.Key != shortcut) return;
+
+        // Digitando num campo (nome, senha...), a letra continua sendo letra
+        if (FocusManager?.GetFocusedElement() is TextBox && !IsFunctionKey(shortcut)) return;
+
+        ToggleAllCameras();
+        e.Handled = true;
     }
 
     /// Clique numa janelinha: começa a mover (ou a redimensionar, se foi na alça do canto).
@@ -144,7 +214,7 @@ public partial class MainWindow
 
         if (!_overlayWidgets.TryGetValue(drag.UserId, out var widget)) return;
         widget.Root.ZIndex = 0;
-        _overlayRects[drag.UserId] = WidgetRect(widget.Root);
+        SaveOverlayRect(drag.UserId, WidgetRect(widget.Root));
         SetOverlayWidgetHot(widget, widget.Root.IsPointerOver);
     }
 
@@ -166,11 +236,11 @@ public partial class MainWindow
         var list = new List<(ulong, Image)>();
         if (!CameraOverlayActive) return list;
 
-        if (_cameraOn) list.Add((MySfxUserId, _ownCameraImage));
+        if (_cameraOn && !IsCameraHidden(MySfxUserId)) list.Add((MySfxUserId, _ownCameraImage));
 
         foreach (var id in _cameraUsers.OrderBy(id => id))
         {
-            if (id == MySfxUserId) continue;
+            if (id == MySfxUserId || IsCameraHidden(id)) continue;
             if (_watchCamera && _watchUser == id) continue; // já está grande na tela
             if (_cameraTileViews.TryGetValue(id, out var view) && view.HasFrame) list.Add((id, view.Image));
         }
@@ -281,6 +351,11 @@ public partial class MainWindow
         };
 
         var widget = new OverlayWidget { Root = root, Content = content, Name = name, Grip = grip };
+
+        // Botão direito: esconder esta câmera
+        var hide = new MenuItem { Header = Loc.T("Overlay_Hide") };
+        hide.Click += (_, _) => SetCameraHidden(userId, true);
+        root.ContextMenu = new ContextMenu { ItemsSource = new[] { hide } };
         root.PointerEntered += (_, _) => SetOverlayWidgetHot(widget, true);
         root.PointerExited += (_, _) =>
         {
@@ -308,7 +383,7 @@ public partial class MainWindow
             // Quem está sendo arrastado fica onde o mouse está
             if (_overlayDrag?.UserId == id) continue;
 
-            if (_overlayRects.TryGetValue(id, out var saved))
+            if (SavedOverlayRect(id) is { } saved)
             {
                 ApplyWidgetRect(widget.Root, ClampToOverlay(saved));
                 continue;
@@ -346,6 +421,38 @@ public partial class MainWindow
         var x = Math.Clamp(rect.X, 0, Math.Max(0, area.Width - width));
         var y = Math.Clamp(rect.Y, 0, Math.Max(0, area.Height - height));
         return new Rect(x, y, width, height);
+    }
+
+    // ───────────────────────── Lugar salvo ─────────────────────────
+
+    /// Chave da câmera nas preferências: o nome da pessoa ("" = a minha). O id muda a cada sala;
+    /// o nome não.
+    private string OverlayKey(ulong userId) => userId == MySfxUserId ? "" : UserName(userId);
+
+    /// O lugar salvo dessa câmera, já na área do vídeo de agora. Null = nunca foi mexida.
+    private Rect? SavedOverlayRect(ulong userId)
+    {
+        var area = _cameraOverlay.Bounds.Size;
+        if (area.Width <= 0 || area.Height <= 0) return null;
+        if (!_preferences.CameraOverlayLayout.TryGetValue(OverlayKey(userId), out var layout)) return null;
+
+        var width = layout.Width * area.Width;
+        return new Rect(layout.X * area.Width, layout.Y * area.Height, width, width / OverlayWidgetAspect);
+    }
+
+    /// Salva o lugar da câmera (em frações da área) para as próximas transmissões.
+    private void SaveOverlayRect(ulong userId, Rect rect)
+    {
+        var area = _cameraOverlay.Bounds.Size;
+        if (area.Width <= 0 || area.Height <= 0) return;
+
+        _preferences.CameraOverlayLayout[OverlayKey(userId)] = new OverlayLayout
+        {
+            X = rect.X / area.Width,
+            Y = rect.Y / area.Height,
+            Width = rect.Width / area.Width,
+        };
+        _preferences.Save();
     }
 
     private static Rect WidgetRect(Border widget) =>

@@ -181,12 +181,12 @@
 
 - [x] Floating 720p widgets with the cameras that are on, over the stream (no avatars), even in fullscreen (F11)
 - [x] Each widget can be moved anywhere on the screen and resized
-- [ ] Right click on a widget hides that camera
-   - [ ] Click on the camera icon on the user feed also hides that camera. Click again shows it up again (make the icon goes red with a risk in the middle)
-- [ ] Shortcut (default C, configurable in Settings → Shortcuts)
+- [x] Right click on a widget shows an option to hide that camera
+   - [x] Click on the camera icon on the user feed also hides that camera. Click again shows it up again (make the icon goes red with a risk in the middle)
+- [x] Shortcut (default C, configurable in Settings → Shortcuts)
     - Press once: hides all cameras
     - Press again: shows all cameras back, including the ones hidden one by one
-- [ ] Remember the position and size of each camera between streams
+- [x] Remember the position and size of each camera between streams
 
 - [ ] Unlock 60 FPS Screen Transmission
    - Se der problema na entrega para o client, a taxa de FPS (APENAS DESTE CLIENT) irá diminuir automaticamente para 30 ou 15 FPS. Para evitar lag

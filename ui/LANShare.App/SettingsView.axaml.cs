@@ -19,6 +19,13 @@ public partial class SettingsView : UserControl
         Key.LeftAlt, Key.RightAlt, Key.LWin, Key.RWin,
     };
 
+    /// Qual atalho está esperando a tecla nova.
+    private enum ShortcutTarget { Fullscreen, Cameras }
+
+    private ShortcutTarget _capturing;
+
+    private readonly Button _camerasShortcutButton;
+
     private readonly Button _closeButton, _shortcutButton, _res1080Button, _res720Button, _fps30Button, _fps15Button,
         _checkUpdatesButton, _restartButton;
     private readonly ToggleSwitch _soundJoinLeaveSwitch, _soundStreamSwitch, _autoUpdateSwitch;
@@ -66,6 +73,7 @@ public partial class SettingsView : UserControl
 
         _closeButton = Find<Button>("CloseButton");
         _shortcutButton = Find<Button>("ShortcutButton");
+        _camerasShortcutButton = Find<Button>("CamerasShortcutButton");
         _res1080Button = Find<Button>("Res1080Button");
         _res720Button = Find<Button>("Res720Button");
         _fps30Button = Find<Button>("Fps30Button");
@@ -85,9 +93,12 @@ public partial class SettingsView : UserControl
         _closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
 
         // Atalho: clicar começa a esperar a tecla; sair do botão cancela
-        _shortcutButton.Click += (_, _) => StartCapture();
+        _shortcutButton.Click += (_, _) => StartCapture(ShortcutTarget.Fullscreen);
         _shortcutButton.AddHandler(KeyDownEvent, OnShortcutKeyDown, RoutingStrategies.Tunnel);
         _shortcutButton.LostFocus += (_, _) => CancelCapture();
+        _camerasShortcutButton.Click += (_, _) => StartCapture(ShortcutTarget.Cameras);
+        _camerasShortcutButton.AddHandler(KeyDownEvent, OnShortcutKeyDown, RoutingStrategies.Tunnel);
+        _camerasShortcutButton.LostFocus += (_, _) => CancelCapture();
 
         _res1080Button.Click += (_, _) => Change(p => p.StreamHeight = 1080);
         _res720Button.Click += (_, _) => Change(p => p.StreamHeight = 720);
@@ -157,6 +168,7 @@ public partial class SettingsView : UserControl
         _prefs = prefs;
         IsCapturingKey = false;
         _shortcutButton.Classes.Set("capturing", false);
+        _camerasShortcutButton.Classes.Set("capturing", false);
         SetExcludedAppsOpen(false); // toda vez que as Configurações abrem, o cartão vem recolhido
         Refresh();
         RefreshAudioDevices();
@@ -203,7 +215,11 @@ public partial class SettingsView : UserControl
     {
         _loading = true; // mexer nos interruptores aqui não conta como mudança
 
-        if (!IsCapturingKey) _shortcutButton.Content = KeyLabel(_prefs.FullscreenKeyValue);
+        if (!IsCapturingKey)
+        {
+            _shortcutButton.Content = KeyLabel(_prefs.FullscreenKeyValue);
+            _camerasShortcutButton.Content = KeyLabel(_prefs.CamerasKeyValue);
+        }
 
         _res1080Button.Classes.Set("selected", _prefs.StreamHeight == 1080);
         _res720Button.Classes.Set("selected", _prefs.StreamHeight == 720);
@@ -458,11 +474,16 @@ public partial class SettingsView : UserControl
 
     // ───────────────────────── Captura da tecla ─────────────────────────
 
-    private void StartCapture()
+    /// O botão do atalho que está esperando a tecla.
+    private Button CapturingButton => _capturing == ShortcutTarget.Cameras ? _camerasShortcutButton : _shortcutButton;
+
+    private void StartCapture(ShortcutTarget target)
     {
+        CancelCapture(); // se o outro atalho estava esperando, desiste dele
+        _capturing = target;
         IsCapturingKey = true;
-        _shortcutButton.Content = Loc.T("Settings_PressKey");
-        _shortcutButton.Classes.Set("capturing", true);
+        CapturingButton.Content = Loc.T("Settings_PressKey");
+        CapturingButton.Classes.Set("capturing", true);
     }
 
     /// Para de esperar a tecla, sem mudar o atalho.
@@ -471,7 +492,9 @@ public partial class SettingsView : UserControl
         if (!IsCapturingKey) return;
         IsCapturingKey = false;
         _shortcutButton.Classes.Set("capturing", false);
+        _camerasShortcutButton.Classes.Set("capturing", false);
         _shortcutButton.Content = KeyLabel(_prefs.FullscreenKeyValue);
+        _camerasShortcutButton.Content = KeyLabel(_prefs.CamerasKeyValue);
     }
 
     private void OnShortcutKeyDown(object? sender, KeyEventArgs e)
@@ -492,7 +515,8 @@ public partial class SettingsView : UserControl
     private void FinishCapture(Key? key)
     {
         IsCapturingKey = false;
-        _shortcutButton.Classes.Set("capturing", false);
-        Change(p => p.FullscreenKeyValue = key);
+        CapturingButton.Classes.Set("capturing", false);
+        if (_capturing == ShortcutTarget.Cameras) Change(p => p.CamerasKeyValue = key);
+        else Change(p => p.FullscreenKeyValue = key);
     }
 }

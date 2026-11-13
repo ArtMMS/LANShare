@@ -64,12 +64,27 @@ internal sealed class AppPreferences
     public int CameraHeight { get; set; } = 1080;
     public int CameraFps { get; set; } = 30;
 
+    /// Tecla que esconde/mostra todas as câmeras flutuantes (nome da tecla no Avalonia). Null = sem atalho.
+    public string? CamerasKey { get; set; } = nameof(Key.C);
+
+    /// Posição e tamanho de cada câmera flutuante (pelo nome da pessoa; "" = a minha), em frações
+    /// da área do vídeo: valem em qualquer tamanho de janela e entre uma transmissão e outra.
+    public Dictionary<string, OverlayLayout> CameraOverlayLayout { get; set; } = new();
+
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     private static string Folder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LANShare");
 
     private static string FilePath => Path.Combine(Folder, "preferences.json");
+
+    /// A tecla das câmeras já convertida (null = sem atalho).
+    [JsonIgnore]
+    public Key? CamerasKeyValue
+    {
+        get => Enum.TryParse<Key>(CamerasKey, out var key) && key != Key.None ? key : null;
+        set => CamerasKey = value?.ToString();
+    }
 
     /// A tecla da tela cheia já convertida (null = sem atalho).
     [JsonIgnore]
@@ -212,4 +227,12 @@ internal sealed class ExcludedAudioApp
         Enabled = true,
         BuiltIn = true,
     };
+}
+
+/// Lugar de uma câmera flutuante: X, Y e largura em frações (0 a 1) da área do vídeo.
+internal sealed class OverlayLayout
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
 }

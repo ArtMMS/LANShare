@@ -124,6 +124,16 @@
                                     <Button x:Name="ShortcutButton" Grid.Column="1" Classes="keyCap"
                                             VerticalAlignment="Center" />
                                 </Grid>
+                                <Border Classes="divider" />
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
+                                        <TextBlock Text="{l:Tr Settings_HideCameras}" />
+                                        <TextBlock Classes="hint"
+                                                   Text="{l:Tr Settings_HideCamerasHint}" />
+                                    </StackPanel>
+                                    <Button x:Name="CamerasShortcutButton" Grid.Column="1" Classes="keyCap"
+                                            VerticalAlignment="Center" />
+                                </Grid>
                             </StackPanel>
                         </Border>
 

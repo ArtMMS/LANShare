@@ -238,11 +238,12 @@ public partial class MainWindow
         // (Assistindo uma transmissão, as imagens das câmeras estão nas câmeras flutuantes)
         var camerasHere = !CameraOverlayActive;
         var otherCamera = camerasHere
+                          && !IsCameraHidden(member.Id)
                           && member.Id != MySfxUserId
                           && _cameraTileViews.TryGetValue(member.Id, out var cameraView)
                           && cameraView.HasFrame
                           && _cameraUsers.Contains(member.Id);
-        if (camerasHere && member.Id == MySfxUserId && _cameraOn)
+        if (camerasHere && member.Id == MySfxUserId && _cameraOn && !IsCameraHidden(member.Id))
         {
             content.Children.Add(_ownCameraImage);
         }
@@ -316,8 +317,8 @@ public partial class MainWindow
             Child = content,
         };
 
-        // Câmera de outra pessoa: clicar abre ela grande (na qualidade cheia)
-        if (_cameraUsers.Contains(member.Id) && member.Id != MySfxUserId)
+        // Câmera de outra pessoa (não escondida): clicar abre ela grande (na qualidade cheia)
+        if (_cameraUsers.Contains(member.Id) && member.Id != MySfxUserId && !IsCameraHidden(member.Id))
         {
             tile.Cursor = new Cursor(StandardCursorType.Hand);
             ToolTip.SetTip(tile, Loc.T("Room_WatchCameraTooltip"));

@@ -168,6 +168,16 @@ internal static class Loc
         ["Watch_Tooltip"] = new[] { "Assistir a transmissão", "Watch the stream", "Ver la transmisión" },
         ["Watch_StopTooltip"] = new[] { "Parar de assistir", "Stop watching", "Dejar de ver" },
         ["Overlay_You"] = new[] { "Você", "You", "Tú" },
+        ["Overlay_Hide"] = new[] { "Esconder esta câmera", "Hide this camera", "Ocultar esta cámara" },
+        ["Camera_HideTooltip"] = new[] { "Esconder a câmera", "Hide the camera", "Ocultar la cámara" },
+        ["Camera_ShowTooltip"] = new[] { "Mostrar a câmera", "Show the camera", "Mostrar la cámara" },
+        ["Settings_HideCameras"] = new[] { "Esconder/mostrar câmeras", "Hide/show cameras", "Ocultar/mostrar cámaras" },
+        ["Settings_HideCamerasHint"] = new[]
+        {
+            "Uma vez esconde todas as câmeras; de novo mostra todas. Esc deixa sem atalho.",
+            "Once hides all cameras; again shows them all. Esc leaves it without a shortcut.",
+            "Una vez oculta todas las cámaras; otra vez las muestra todas. Esc lo deja sin atajo.",
+        },
         ["Camera_OwnTooltip"] = new[] { "A sua câmera está ligada", "Your camera is on", "Tu cámara está encendida" },
         ["Settings_Camera"] = new[] { "Câmera", "Camera", "Cámara" },
         ["Settings_CameraDevice"] = new[] { "Dispositivo", "Device", "Dispositivo" },
