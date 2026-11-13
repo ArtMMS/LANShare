@@ -64,6 +64,7 @@ public partial class MainWindow
     {
         _streamers.Clear();
         _hostUserNames.Clear();
+        _ownPreviewBig = false;
         ClearWatchState();
         UpdateWatchControls();
     }
@@ -97,6 +98,7 @@ public partial class MainWindow
         }
 
         ClearWatchState();
+        _ownPreviewBig = false; // a transmissão assistida toma o lugar da minha prévia grande
         _watchUser = userId;
         _watchState = WatchState.Connecting;
 
@@ -400,13 +402,24 @@ public partial class MainWindow
             },
         };
 
+        icon.Cursor = new Cursor(StandardCursorType.Hand);
+
         if (mine)
         {
+            // No meu nome: abre a prévia grande da minha transmissão (ou volta para a grade)
             ToolTip.SetTip(icon, Loc.T("Watch_OwnTooltip"));
+            icon.PointerEntered += (_, _) => icon.Background = ScreenIconHover;
+            icon.PointerExited += (_, _) => icon.Background = Brushes.Transparent;
+            icon.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(icon).Properties.IsLeftButtonPressed) return;
+                e.Handled = true;
+                if (_ownPreviewBig) CloseOwnPreviewBig();
+                else ShowOwnPreviewBig();
+            };
             return icon;
         }
 
-        icon.Cursor = new Cursor(StandardCursorType.Hand);
         ToolTip.SetTip(icon, Loc.T(watched ? "Watch_StopTooltip" : "Watch_Tooltip"));
 
         icon.PointerEntered += (_, _) =>

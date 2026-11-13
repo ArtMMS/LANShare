@@ -17,7 +17,8 @@ namespace LANShare.App;
 ///   transmite (clicar assiste, como na lista);
 /// - o quadrado de quem toca um efeito sonoro acende (borda azul + 🎉), como na lista;
 /// - transmitindo, a prévia da minha transmissão ganha um quadrado próprio, logo depois do meu
-///   (o meu quadrado continua com o avatar; depois, com a câmera);
+///   (o meu quadrado continua com o avatar; depois, com a câmera); clicar nele (ou no meu ícone
+///   de tela na lista) mostra a prévia grande, como quem assiste vê; clicar nela volta à grade;
 /// - é a tela padrão da sala: assistir alguém a substitui e parar de assistir volta para ela;
 ///   clicar em "USUÁRIOS NA SALA" ou num avatar da lista volta para ela (e para de assistir).
 public partial class MainWindow
@@ -46,6 +47,9 @@ public partial class MainWindow
     private readonly Image _ownStreamImage = new() { Stretch = Stretch.Uniform };
     private WriteableBitmap? _ownStreamBitmap;
 
+    /// A prévia da minha transmissão está aberta grande (no lugar da grade)?
+    private bool _ownPreviewBig;
+
     /// Chamado uma vez no construtor (antes de qualquer UpdateStage).
     private void InitRoomView()
     {
@@ -69,12 +73,26 @@ public partial class MainWindow
                 ShowRoomView();
             };
         }
+
+        // Clicar na minha prévia grande volta para a grade (na transmissão assistida não faz nada)
+        _previewImage.PointerPressed += (_, e) =>
+        {
+            if (!_ownPreviewBig || !e.GetCurrentPoint(_previewImage).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            CloseOwnPreviewBig();
+        };
     }
 
-    /// Volta para a tela da sala: se estiver assistindo alguém, para de assistir.
+    /// Volta para a tela da sala: fecha a minha prévia grande ou, se estiver assistindo alguém,
+    /// para de assistir.
     private void ShowRoomView()
     {
         if (!InRoom) return;
+        if (_ownPreviewBig)
+        {
+            CloseOwnPreviewBig();
+            return;
+        }
         if (_watchUser is null && _watchState == WatchState.None) return; // já está nela
 
         NativeMethods.WatchStop();
@@ -85,9 +103,9 @@ public partial class MainWindow
     private bool InRoom =>
         (_mode == Mode.Host && _roomOpen) || (_mode == Mode.Client && _clientState == ClientState.Connected);
 
-    /// A grade aparece sempre que estou na sala e não estou assistindo ninguém
-    /// (a área grande só mostra imagem para a transmissão assistida).
-    private bool RoomViewVisible => InRoom && _watchState == WatchState.None;
+    /// A grade aparece sempre que estou na sala, não estou assistindo ninguém e a minha
+    /// prévia não está aberta grande.
+    private bool RoomViewVisible => InRoom && _watchState == WatchState.None && !_ownPreviewBig;
 
     /// Troca quem aparece na grade (chamado junto com a lista da lateral).
     private void SetRoomMembers(List<RoomMember> members)
@@ -270,7 +288,7 @@ public partial class MainWindow
             Child = label,
         });
 
-        return new Border
+        var tile = new Border
         {
             Width = width,
             Height = height,
@@ -279,8 +297,53 @@ public partial class MainWindow
             BorderThickness = new Thickness(2),
             BorderBrush = RoomTileBorderIdle,
             ClipToBounds = true,
+            Cursor = new Cursor(StandardCursorType.Hand),
             Child = content,
         };
+        ToolTip.SetTip(tile, Loc.T("Room_YourStreamTooltip"));
+
+        // Clicar abre a prévia grande
+        tile.PointerEntered += (_, _) => tile.BorderBrush = WatchedBorder;
+        tile.PointerExited += (_, _) => tile.BorderBrush = RoomTileBorderIdle;
+        tile.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(tile).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            ShowOwnPreviewBig();
+        };
+
+        return tile;
+    }
+
+    /// Abre a prévia da minha transmissão grande, no lugar da grade (como quem assiste vê).
+    /// Se eu estava assistindo alguém, para de assistir.
+    private void ShowOwnPreviewBig()
+    {
+        if (!InRoom || !_streaming || _ownPreviewBig) return;
+
+        if (_watchUser is not null || _watchState != WatchState.None)
+        {
+            NativeMethods.WatchStop();
+            EndWatch(null);
+        }
+
+        _ownPreviewBig = true;
+        HidePreview(Loc.T("Host_Streaming")); // até chegar a próxima imagem da prévia
+    }
+
+    /// Fecha a prévia grande e volta para a grade.
+    private void CloseOwnPreviewBig()
+    {
+        if (!_ownPreviewBig) return;
+        _ownPreviewBig = false;
+        HidePreview(IdleStageText());
+    }
+
+    /// Pede a prévia mais recente da minha transmissão e desenha grande, na área do vídeo.
+    private void UpdateOwnPreviewBig()
+    {
+        if (!NativeMethods.StreamPreview(_previewBuffer, out var width, out var height)) return;
+        PaintFrame(width, height);
     }
 
     /// Pede a prévia mais recente da minha transmissão e desenha no quadrado dela

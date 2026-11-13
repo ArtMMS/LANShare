@@ -120,6 +120,7 @@ internal static class Loc
         ["Room_UsersHeader"] = new[] { "USUÁRIOS NA SALA", "USERS IN THE ROOM", "USUARIOS EN LA SALA" },
         ["Room_OpenTooltip"] = new[] { "Abrir a tela da sala", "Open the room screen", "Abrir la pantalla de la sala" },
         ["Room_YourStream"] = new[] { "Sua transmissão", "Your stream", "Tu transmisión" },
+        ["Room_YourStreamTooltip"] = new[] { "Ver a sua transmissão grande", "View your stream in large", "Ver tu transmisión en grande" },
         ["Users_YouHost"] = new[] { "{0} (você, host)", "{0} (you, host)", "{0} (tú, host)" },
         ["Users_You"] = new[] { "{0} (você)", "{0} (you)", "{0} (tú)" },
         ["Users_Host"] = new[] { "{0} (host)", "{0} (host)", "{0} (host)" },
@@ -160,7 +161,7 @@ internal static class Loc
         // ── Assistir ──
         ["Watch_Tooltip"] = new[] { "Assistir a transmissão", "Watch the stream", "Ver la transmisión" },
         ["Watch_StopTooltip"] = new[] { "Parar de assistir", "Stop watching", "Dejar de ver" },
-        ["Watch_OwnTooltip"] = new[] { "Você está transmitindo", "You are streaming", "Estás transmitiendo" },
+        ["Watch_OwnTooltip"] = new[] { "Você está transmitindo (clique para ver grande)", "You are streaming (click to view in large)", "Estás transmitiendo (haz clic para verla en grande)" },
         ["Watch_PickHint"] = new[]
         {
             "Clique no ícone de tela ao lado de um nome para assistir a transmissão.",

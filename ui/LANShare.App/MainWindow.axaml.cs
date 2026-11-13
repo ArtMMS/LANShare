@@ -432,10 +432,12 @@ public partial class MainWindow : Window
     }
 
     /// Assistindo alguém, a transmissão que assisto ocupa a área grande (mesmo se eu também
-    /// estiver transmitindo); senão, a prévia da minha transmissão vai para o quadrado dela na grade.
+    /// estiver transmitindo); senão, a prévia da minha transmissão vai para o quadrado dela na grade
+    /// (ou para a área grande, se eu cliquei nela).
     private void UpdateStageImage()
     {
         if (_watchState != WatchState.None) UpdateWatchFrame();
+        else if (_streaming && _ownPreviewBig) UpdateOwnPreviewBig();
         else if (_streaming) UpdateOwnStreamTile();
     }
 
@@ -528,6 +530,7 @@ public partial class MainWindow : Window
         _streaming = false;
         SetOwnStreamInfo(null);
         ClearOwnStreamTile(); // o quadrado da minha transmissão sai da grade no UpdateModeUi
+        CloseOwnPreviewBig(); // se a prévia estava grande, volta para a grade
 
         // A grade (ou a transmissão que assisto) continua na tela; se a minha caiu, avisa
         if (error is not null)
