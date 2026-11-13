@@ -115,6 +115,9 @@ public partial class MainWindow
 
         HidePreview(message ?? (_streaming ? Loc.T("Host_Streaming") : IdleStageText()));
 
+        // A grade da sala costuma cobrir a mensagem: o motivo (erro, recusa) também vira aviso
+        if (message is not null) Notify(message, StreamGlyph);
+
         RefreshSfxUserLists();
         RefreshWatchInfo();
         UpdateWatchControls();
@@ -205,8 +208,8 @@ public partial class MainWindow
                 var stopped = e.TryGetProperty("stream_stopped", out var s) && s.ValueKind == JsonValueKind.True;
                 var local = e.TryGetProperty("local", out var l) && l.ValueKind == JsonValueKind.True;
 
-                EndWatch(stopped ? Loc.F("Watch_Ended", name)
-                    : local ? null
+                // Fim normal: o aviso "Fulano encerrou a transmissão" já saiu no user_stream_stopped
+                EndWatch(stopped || local ? null
                     : Loc.F("Watch_Lost", name, e.GetProperty("reason").GetString()));
                 return true;
             }

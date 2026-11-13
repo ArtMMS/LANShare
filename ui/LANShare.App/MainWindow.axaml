@@ -355,6 +355,12 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- Tela da sala: todos em grade (some quando há imagem na área grande).
+                             A margem de baixo deixa espaço para o botão 🎉 dos efeitos sonoros. -->
+                        <Panel x:Name="RoomView" Margin="24,24,24,72" IsVisible="False">
+                            <StackPanel x:Name="RoomRows" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Panel>
+
                         <!-- Prévia da minha transmissão / transmissão que estou assistindo -->
                         <Image x:Name="PreviewImage" Stretch="Uniform" Margin="16" IsVisible="False" />
                         <TextBlock x:Name="PlaceholderText"

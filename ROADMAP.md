@@ -147,11 +147,11 @@
     - Keep the display on and the PC awake while watching a stream
     - Keep the display on and the PC awake while streaming
     - Release the request when watching/streaming stops or when leaving the room
-- [ ] Watch other streams while streaming
+- [x] Watch other streams while streaming
 
 ## Room view (default screen)
 
-- [ ] Room screen with every user in a grid (like Discord / Google Meet)
+- [x] Room screen with every user in a grid (like Discord / Google Meet)
     - Grid adapts to the number of users (1, 2, 3–4, 5–6, 7–9...)
     - Each tile shows the camera (when on) or the avatar, the name and a screen-sharing badge
     - The tile of whoever is playing a sound effect lights up (like the user list)

@@ -158,7 +158,8 @@ public partial class MainWindow : Window
         _passwordPanel = Find<StackPanel>("PasswordPanel");
         _clientUsersPanel = Find<StackPanel>("ClientUsersPanel");
 
-        // Painel de escolha do que transmitir, cartão de perfil (avatar) e avisos
+        // Tela da sala, painel de escolha do que transmitir, cartão de perfil (avatar) e avisos
+        InitRoomView();
         InitSourcePicker();
         InitAvatar();
         InitNotifications();
@@ -389,15 +390,17 @@ public partial class MainWindow : Window
         UpdateVolumeControls(); // também atualiza o botão 🎉 dos efeitos sonoros
     }
 
-    /// Decide o que aparece na área grande: salas, conexão, imagem ou mensagem.
+    /// Decide o que aparece na área grande: salas, conexão, grade da sala, imagem ou mensagem.
     private void UpdateStage()
     {
         var lobby = _mode == Mode.Client && _clientState == ClientState.Idle;
         var connecting = _mode == Mode.Client && _clientState == ClientState.Connecting;
+        var room = !lobby && !connecting && RoomViewVisible;
 
         _clientLobby.IsVisible = lobby;
         _clientConnecting.IsVisible = connecting;
-        _placeholderText.IsVisible = !lobby && !connecting && !_previewImage.IsVisible;
+        _roomView.IsVisible = room;
+        _placeholderText.IsVisible = !lobby && !connecting && !room && !_previewImage.IsVisible;
     }
 
     private void StopTimerIfIdle()
@@ -596,6 +599,8 @@ public partial class MainWindow : Window
         ApplyVolume(); // ...e no volume salvo
         _timer.Start();
         UpdateUi();
+        RefreshUsers(); // eu já apareço na grade da sala, antes de alguém entrar
+        UpdateStage();
     }
 
     private void PollHostEvents()
@@ -668,16 +673,23 @@ public partial class MainWindow : Window
             ? n.GetString()!
             : Loc.T("Common_Someone");
 
-    /// Lista da sala: primeiro o próprio Host, depois os clients (com o botão Expulsar).
-    /// Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
+    /// Lista da sala (lateral e grade): primeiro o próprio Host, depois os clients (na lateral,
+    /// com o botão Expulsar). Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
     private void RefreshUsers()
     {
         _usersPanel.Children.Clear();
         _hostUserNames.Clear();
-        if (!_roomOpen) return;
+        var members = new List<RoomMember>();
+        if (!_roomOpen)
+        {
+            SetRoomMembers(members);
+            return;
+        }
 
+        var myName = Loc.F("Users_YouHost", _username);
         _hostUserNames[HostUserId] = _username ?? "Host";
-        _usersPanel.Children.Add(BuildUserRow(_myAvatar, Loc.F("Users_YouHost", _username), HostUserId));
+        _usersPanel.Children.Add(BuildUserRow(_myAvatar, myName, HostUserId));
+        members.Add(new RoomMember(HostUserId, myName, _myAvatar));
 
         using var users = NativeMethods.HostUsers();
         foreach (var user in users.RootElement.EnumerateArray())
@@ -690,7 +702,10 @@ public partial class MainWindow : Window
             kick.Click += (_, _) => NativeMethods.HostKick(id);
 
             _usersPanel.Children.Add(BuildUserRow(PeerAvatar(id), name, id, kick));
+            members.Add(new RoomMember(id, name, PeerAvatar(id)));
         }
+
+        SetRoomMembers(members);
     }
 
     private void UpdateUi()
@@ -1080,19 +1095,27 @@ public partial class MainWindow : Window
         return item;
     }
 
-    /// Lista da sala: primeiro o Host, depois os clients (você marcado), cada um com o avatar.
-    /// Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
+    /// Lista da sala (lateral e grade): primeiro o Host, depois os clients (você marcado), cada um
+    /// com o avatar. Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
     private void RefreshClientUsers()
     {
         _clientUsersPanel.Children.Clear();
-        _clientUsersPanel.Children.Add(
-            BuildUserRow(PeerAvatar(HostUserId), Loc.F("Users_Host", _hostName), HostUserId));
+        var members = new List<RoomMember>();
+
+        var hostName = Loc.F("Users_Host", _hostName);
+        _clientUsersPanel.Children.Add(BuildUserRow(PeerAvatar(HostUserId), hostName, HostUserId));
+        members.Add(new RoomMember(HostUserId, hostName, PeerAvatar(HostUserId)));
+
         foreach (var (id, name) in _clientUsers.OrderBy(u => u.Key))
         {
             var mine = id == _myId;
-            _clientUsersPanel.Children.Add(
-                BuildUserRow(mine ? _myAvatar : PeerAvatar(id), mine ? Loc.F("Users_You", name) : name, id));
+            var avatar = mine ? _myAvatar : PeerAvatar(id);
+            var label = mine ? Loc.F("Users_You", name) : name;
+            _clientUsersPanel.Children.Add(BuildUserRow(avatar, label, id));
+            members.Add(new RoomMember(id, label, avatar));
         }
+
+        SetRoomMembers(members);
     }
 
     /// Linha de informações embaixo do vídeo: conectado, ping, a minha transmissão
