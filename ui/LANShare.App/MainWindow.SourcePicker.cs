@@ -11,9 +11,10 @@ using Avalonia.Threading;
 
 namespace LANShare.App;
 
-/// Painel de escolha do que transmitir (abre em "Iniciar transmissão" e em "Alterar transmissão"),
+/// Painel de escolha do que transmitir (abre pelo botão de transmitir da barra de baixo da sala),
 /// no Host com a sala aberta e no Client conectado.
-/// Duas abas: "Monitores inteiros" e "Janela específica".
+/// Duas abas: "Monitores inteiros" e "Janela específica". Embaixo: resolução, FPS e som da
+/// transmissão; transmitindo, aparece "Parar transmissão" e o confirmar vira "Alterar transmissão".
 public partial class MainWindow
 {
     /// Pausa entre uma volta de atualização das prévias e a próxima.
@@ -51,7 +52,8 @@ public partial class MainWindow
     private ListBox _monitorList = null!, _windowList = null!;
     private TextBlock _pickerStatus = null!;
     private Button _monitorsTabButton = null!, _windowsTabButton = null!;
-    private Button _pickerConfirmButton = null!, _pickerCancelButton = null!, _pickerAudioButton = null!;
+    private Button _pickerConfirmButton = null!, _pickerCancelButton = null!, _pickerAudioButton = null!,
+        _pickerStopButton = null!;
     private Avalonia.Controls.Shapes.Line _pickerAudioSlash = null!;
 
     private bool _pickerOpen;
@@ -79,6 +81,7 @@ public partial class MainWindow
         _pickerConfirmButton = Find<Button>("PickerConfirmButton");
         _pickerCancelButton = Find<Button>("PickerCancelButton");
         _pickerAudioButton = Find<Button>("PickerAudioButton");
+        _pickerStopButton = Find<Button>("PickerStopButton");
         _pickerAudioSlash = Find<Avalonia.Controls.Shapes.Line>("PickerAudioSlash");
 
         // 🔊: liga/desliga o som da transmissão; a escolha fica salva para a próxima vez
@@ -94,6 +97,11 @@ public partial class MainWindow
         _windowsTabButton.Click += (_, _) => SelectPickerTab(PickerTab.Windows);
         _pickerConfirmButton.Click += (_, _) => ConfirmSourcePicker();
         _pickerCancelButton.Click += (_, _) => CloseSourcePicker();
+        _pickerStopButton.Click += (_, _) =>
+        {
+            CloseSourcePicker();
+            NativeMethods.StreamStop(); // o fim chega por evento
+        };
 
         foreach (var list in new[] { _monitorList, _windowList })
         {
@@ -201,11 +209,24 @@ public partial class MainWindow
         Dispatcher.UIThread.Post(() => ActivePickerList.Focus());
     }
 
-    /// Texto e estado do botão de confirmar (Iniciar ou Alterar, conforme a transmissão).
+    /// Botões de baixo conforme a transmissão: Iniciar (sozinho) ou Parar + Alterar.
+    /// Transmitindo, resolução e FPS ficam travados (valem para a próxima transmissão).
     private void UpdatePickerConfirm()
     {
         _pickerConfirmButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
         _pickerConfirmButton.IsEnabled = ActivePickerList.SelectedItem is not null;
+
+        _pickerStopButton.IsVisible = _streaming;
+        Grid.SetColumn(_pickerConfirmButton, _streaming ? 2 : 0);
+        Grid.SetColumnSpan(_pickerConfirmButton, _streaming ? 1 : 3);
+
+        _resolutionBox.IsEnabled = _fpsBox.IsEnabled = !_streaming;
+        var lockedTip = _streaming ? Loc.T("Picker_QualityLocked") : null;
+        foreach (var box in new[] { _resolutionBox, _fpsBox })
+        {
+            ToolTip.SetTip(box, lockedTip);
+            ToolTip.SetShowOnDisabled(box, true); // a dica aparece mesmo com o seletor travado
+        }
     }
 
     /// Fecha o painel e começa (ou troca) a transmissão para o que foi escolhido.

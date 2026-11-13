@@ -120,6 +120,8 @@ internal static class Loc
         ["Room_UsersHeader"] = new[] { "USUÁRIOS NA SALA", "USERS IN THE ROOM", "USUARIOS EN LA SALA" },
         ["Room_OpenTooltip"] = new[] { "Abrir a tela da sala", "Open the room screen", "Abrir la pantalla de la sala" },
         ["Room_YourStream"] = new[] { "Sua transmissão", "Your stream", "Tu transmisión" },
+        ["Room_CameraSoon"] = new[] { "Câmera (em breve)", "Camera (coming soon)", "Cámara (próximamente)" },
+        ["Picker_QualityLocked"] = new[] { "Para mudar, pare a transmissão primeiro.", "To change it, stop the stream first.", "Para cambiarlo, detén la transmisión primero." },
         ["Room_YourStreamTooltip"] = new[] { "Ver a sua transmissão grande", "View your stream in large", "Ver tu transmisión en grande" },
         ["Users_YouHost"] = new[] { "{0} (você, host)", "{0} (you, host)", "{0} (tú, host)" },
         ["Users_You"] = new[] { "{0} (você)", "{0} (you)", "{0} (tú)" },

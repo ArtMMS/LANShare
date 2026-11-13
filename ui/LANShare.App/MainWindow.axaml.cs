@@ -25,7 +25,7 @@ public partial class MainWindow : Window
 
     // Estrutura geral
     private readonly Grid _mainLayout, _clientLobby;
-    private readonly StackPanel _homePanel, _streamControls;
+    private readonly StackPanel _homePanel;
     private readonly DockPanel _hostPanel, _clientPanel;
     private readonly Border _clientConnecting;
     private readonly TextBlock _versionText, _placeholderText, _infoText;
@@ -44,8 +44,7 @@ public partial class MainWindow : Window
     // Início
     private readonly Button _createRoomButton, _joinRoomButton;
 
-    // Transmitir (Host e Client)
-    private readonly Button _startStreamButton, _stopStreamButton;
+    // Transmitir (Host e Client): resolução e FPS ficam no painel de escolha do que transmitir
     private readonly ComboBox _resolutionBox, _fpsBox;
 
     // Host
@@ -108,7 +107,6 @@ public partial class MainWindow : Window
         _mainLayout = Find<Grid>("MainLayout");
         _clientLobby = Find<Grid>("ClientLobby");
         _homePanel = Find<StackPanel>("HomePanel");
-        _streamControls = Find<StackPanel>("StreamControls");
         _hostPanel = Find<DockPanel>("HostPanel");
         _clientPanel = Find<DockPanel>("ClientPanel");
         _clientConnecting = Find<Border>("ClientConnecting");
@@ -128,8 +126,6 @@ public partial class MainWindow : Window
         _createRoomButton = Find<Button>("CreateRoomButton");
         _joinRoomButton = Find<Button>("JoinRoomButton");
 
-        _startStreamButton = Find<Button>("StartStreamButton");
-        _stopStreamButton = Find<Button>("StopStreamButton");
         _resolutionBox = Find<ComboBox>("ResolutionBox");
         _fpsBox = Find<ComboBox>("FpsBox");
 
@@ -182,10 +178,6 @@ public partial class MainWindow : Window
         // Início
         _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
         _joinRoomButton.Click += (_, _) => EnterClientMode();
-
-        // Transmitir ("Iniciar transmissão" vira "Alterar transmissão" enquanto transmite)
-        _startStreamButton.Click += (_, _) => OpenSourcePicker();
-        _stopStreamButton.Click += (_, _) => NativeMethods.StreamStop(); // o fim chega por evento
 
         // Host
         _roomButton.Click += (_, _) => ToggleRoom();
@@ -447,7 +439,7 @@ public partial class MainWindow : Window
     private bool CanStream =>
         (_mode == Mode.Host && _roomOpen) || (_mode == Mode.Client && _clientState == ClientState.Connected);
 
-    /// Seletores e botões de transmitir (o mesmo bloco nos dois modos).
+    /// Botão de transmitir da barra de baixo e painel de escolha (o mesmo nos dois modos).
     private void UpdateStreamControls()
     {
         // Aviso + som só no momento em que a transmissão começa (trocar de fonte não conta)
@@ -456,11 +448,7 @@ public partial class MainWindow : Window
             Notify(Loc.T("Notify_YouStarted"), StreamGlyph, Sound.StreamStarted);
         _wasStreaming = _streaming;
 
-        _streamControls.IsVisible = CanStream;
-        _startStreamButton.IsEnabled = CanStream;
-        _startStreamButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
-        _stopStreamButton.IsEnabled = CanStream && _streaming;
-
+        UpdateRoomBar();
         if (_pickerOpen) UpdatePickerConfirm();
 
         // O ícone de tela no meu nome acompanha a minha transmissão

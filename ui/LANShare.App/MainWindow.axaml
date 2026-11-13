@@ -196,25 +196,6 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- Transmitir (Host com a sala aberta ou Client conectado): logo acima do rodapé -->
-                    <StackPanel x:Name="StreamControls" DockPanel.Dock="Bottom" Spacing="8"
-                                Margin="0,12,0,0" IsVisible="False">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="126">
-                                <ComboBoxItem>720p</ComboBoxItem>
-                                <ComboBoxItem>1080p</ComboBoxItem>
-                            </ComboBox>
-                            <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="126">
-                                <ComboBoxItem>15 FPS</ComboBoxItem>
-                                <ComboBoxItem>30 FPS</ComboBoxItem>
-                            </ComboBox>
-                        </StackPanel>
-                        <Button x:Name="StartStreamButton" Content="{l:Tr Stream_Start}"
-                                HorizontalAlignment="Stretch" />
-                        <Button x:Name="StopStreamButton" Content="{l:Tr Stream_Stop}"
-                                HorizontalAlignment="Stretch" IsEnabled="False" />
-                    </StackPanel>
-
                     <!-- Os três painéis ocupam o mesmo espaço; só um aparece por vez -->
                     <Grid>
 
@@ -440,27 +421,47 @@
                         </StackPanel>
                     </Border>
 
-                    <Grid ColumnDefinitions="*,12,Auto,12,*">
+                    <Grid ColumnDefinitions="*,12,Auto,12,2*">
                         <Button x:Name="PickerCancelButton" Grid.Column="0" Content="{l:Tr Common_Cancel}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                                 Padding="0,10" />
 
-                        <!-- Som da transmissão: verde = ligado; vermelho com risco = desligado -->
-                        <Button x:Name="PickerAudioButton" Grid.Column="2" Classes="pickerAudio on"
-                                ToolTip.Tip="{l:Tr Picker_AudioTooltip}" ToolTip.ShowDelay="1000">
-                            <Panel Width="26" Height="26">
-                                <TextBlock Classes="icon" Text="&#xE995;" FontSize="20"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <Line x:Name="PickerAudioSlash" StartPoint="3,3" EndPoint="23,23"
-                                      Stroke="#FF5C5C" StrokeThickness="2.5" StrokeLineCap="Round"
-                                      IsVisible="False" />
-                            </Panel>
-                        </Button>
+                        <!-- Resolução, FPS e som da transmissão (resolução/FPS travados enquanto transmite) -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                            <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="100"
+                                      VerticalAlignment="Stretch" VerticalContentAlignment="Center">
+                                <ComboBoxItem>720p</ComboBoxItem>
+                                <ComboBoxItem>1080p</ComboBoxItem>
+                            </ComboBox>
+                            <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="100"
+                                      VerticalAlignment="Stretch" VerticalContentAlignment="Center">
+                                <ComboBoxItem>15 FPS</ComboBoxItem>
+                                <ComboBoxItem>30 FPS</ComboBoxItem>
+                            </ComboBox>
 
-                        <Button x:Name="PickerConfirmButton" Grid.Column="4" Content="{l:Tr Stream_Start}"
-                                Classes="accent"
-                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                Padding="0,10" />
+                            <!-- Som da transmissão: verde = ligado; vermelho com risco = desligado -->
+                            <Button x:Name="PickerAudioButton" Classes="pickerAudio on"
+                                    ToolTip.Tip="{l:Tr Picker_AudioTooltip}" ToolTip.ShowDelay="1000">
+                                <Panel Width="26" Height="26">
+                                    <TextBlock Classes="icon" Text="&#xE995;" FontSize="20"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <Line x:Name="PickerAudioSlash" StartPoint="3,3" EndPoint="23,23"
+                                          Stroke="#FF5C5C" StrokeThickness="2.5" StrokeLineCap="Round"
+                                          IsVisible="False" />
+                                </Panel>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- Parar (só transmitindo) + Iniciar/Alterar -->
+                        <Grid Grid.Column="4" ColumnDefinitions="*,12,*">
+                            <Button x:Name="PickerStopButton" Grid.Column="0" Content="{l:Tr Stream_Stop}"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Padding="0,10" IsVisible="False" />
+                            <Button x:Name="PickerConfirmButton" Grid.Column="0" Grid.ColumnSpan="3"
+                                    Content="{l:Tr Stream_Start}" Classes="accent"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                    Padding="0,10" />
+                        </Grid>
                     </Grid>
                 </StackPanel>
             </Border>

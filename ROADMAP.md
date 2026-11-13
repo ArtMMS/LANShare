@@ -159,11 +159,11 @@
     - Watching a stream replaces it; closing the stream goes back to it
     - Clicking "USERS IN THE ROOM" opens it
     - Clicking someone's avatar in the user list opens it (streaming or not)
-- [ ] Bottom bar of the room screen
+- [x] Bottom bar of the room screen
     - Soundboard button
     - Camera button: white = off, green = on
     - Share screen button (monitor icon): white = off, green = on; opens the source picker
-- [ ] Move the resolution/FPS selectors into the source picker (next to the audio button)
+- [x] Move the resolution/FPS selectors into the source picker (next to the audio button)
 
 ## Camera
 

@@ -341,7 +341,7 @@ public partial class MainWindow
         {
             _volumeHiddenByIdle = false;
             _volumeButton.IsVisible = true;
-            _sfxButton.IsVisible = SoundboardAvailable;
+            _roomBar.IsVisible = SoundboardAvailable;
             RestoreCursor();
         }
 
@@ -354,11 +354,11 @@ public partial class MainWindow
     {
         _volumeHideTimer.Stop();
         if (!_fullscreen || !VolumeAvailable || _volumePanelOpen || _sfxPanelOpen) return;
-        if (_volumeButton.IsPointerOver || _sfxButton.IsPointerOver) return; // o mouse está parado em cima de um botão
+        if (_volumeButton.IsPointerOver || _roomBar.IsPointerOver) return; // o mouse está parado em cima de um botão
 
         _volumeHiddenByIdle = true;
         _volumeButton.IsVisible = false;
-        _sfxButton.IsVisible = false;
+        _roomBar.IsVisible = false;
         Cursor = new Cursor(StandardCursorType.None);
     }
 

@@ -2,6 +2,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
@@ -19,6 +21,9 @@ namespace LANShare.App;
 /// - transmitindo, a prévia da minha transmissão ganha um quadrado próprio, logo depois do meu
 ///   (o meu quadrado continua com o avatar; depois, com a câmera); clicar nele (ou no meu ícone
 ///   de tela na lista) mostra a prévia grande, como quem assiste vê; clicar nela volta à grade;
+/// - barra de baixo (sobre a grade e sobre a transmissão assistida): 🎉 efeitos sonoros, câmera
+///   (branco = desligada, verde = ligada; por enquanto desativada) e transmitir (ícone de monitor:
+///   branco = sem transmissão, verde = transmitindo; abre o painel de escolha do que transmitir);
 /// - é a tela padrão da sala: assistir alguém a substitui e parar de assistir volta para ela;
 ///   clicar em "USUÁRIOS NA SALA" ou num avatar da lista volta para ela (e para de assistir).
 public partial class MainWindow
@@ -49,6 +54,14 @@ public partial class MainWindow
 
     /// A prévia da minha transmissão está aberta grande (no lugar da grade)?
     private bool _ownPreviewBig;
+
+    private const string CameraGlyph = "\uE714";
+    private static readonly IBrush RoomBarIconOff = Brushes.White;
+
+    /// Barra de baixo da sala: 🎉, câmera e transmitir.
+    private StackPanel _roomBar = null!;
+    private Border _cameraButton = null!, _shareButton = null!;
+    private TextBlock _shareIcon = null!;
 
     /// Chamado uma vez no construtor (antes de qualquer UpdateStage).
     private void InitRoomView()
@@ -377,5 +390,106 @@ public partial class MainWindow
     {
         _ownStreamImage.Source = null;
         _ownStreamBitmap = null;
+    }
+
+    // ───────────────────────── Barra de baixo ─────────────────────────
+
+    /// Monta a barra (chamado pelo InitSoundboard, depois de o botão 🎉 existir).
+    private StackPanel BuildRoomBar()
+    {
+        // O 🎉 entra na barra: quem posiciona agora é ela
+        _sfxButton.HorizontalAlignment = HorizontalAlignment.Center;
+        _sfxButton.VerticalAlignment = VerticalAlignment.Center;
+        _sfxButton.Margin = new Thickness(0);
+        _sfxButton.IsVisible = true; // ele nascia escondido; agora quem aparece/some é a barra inteira
+
+        // Câmera: ainda não existe (seção Camera do roadmap); fica apagada, sem clique
+        _cameraButton = RoomBarButton(BarGlyph(CameraGlyph, RoomBarIconOff));
+        _cameraButton.Cursor = Cursor.Default;
+        ToolTip.SetTip(_cameraButton, Loc.T("Room_CameraSoon"));
+
+        // Transmitir: abre o painel de escolha (iniciar, trocar a fonte ou parar)
+        _shareIcon = BarGlyph(ScreenGlyph, RoomBarIconOff);
+        _shareButton = RoomBarButton(_shareIcon);
+        _shareButton.PointerEntered += (_, _) => SetRoomBarButtonHot(_shareButton, true);
+        _shareButton.PointerExited += (_, _) => SetRoomBarButtonHot(_shareButton, false);
+        _shareButton.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(_shareButton).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            SetSoundboardPanel(false);
+            OpenSourcePicker();
+        };
+
+        _roomBar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, VolumeEdgeMargin),
+            ZIndex = 20,
+            IsVisible = false,
+        };
+        _roomBar.Children.Add(_sfxButton);
+        _roomBar.Children.Add(_cameraButton);
+        _roomBar.Children.Add(_shareButton);
+
+        UpdateRoomBar();
+        return _roomBar;
+    }
+
+    /// Cor e dica do botão de transmitir (e da câmera, quando ela existir).
+    private void UpdateRoomBar()
+    {
+        if (_shareButton is null) return;
+
+        _shareIcon.Foreground = _streaming ? WatchedBorder : RoomBarIconOff;
+        ToolTip.SetTip(_shareButton, Loc.T(_streaming ? "Stream_Change" : "Stream_Start"));
+        SetRoomBarButtonHot(_shareButton, _shareButton.IsPointerOver);
+    }
+
+    /// Botão redondo da barra, no mesmo estilo do 🎉.
+    private static Border RoomBarButton(Control icon) => new()
+    {
+        Width = SfxButtonSize,
+        Height = SfxButtonSize,
+        CornerRadius = new CornerRadius(SfxButtonSize / 2),
+        Background = VolumeBackground,
+        BorderBrush = VolumeBorder,
+        BorderThickness = new Thickness(1),
+        Cursor = new Cursor(StandardCursorType.Hand),
+        Opacity = SfxIdleOpacity,
+        RenderTransform = SfxScaleIdle,
+        Transitions = new Transitions
+        {
+            new DoubleTransition { Property = OpacityProperty, Duration = SfxHoverAnimation },
+            new TransformOperationsTransition
+            {
+                Property = RenderTransformProperty,
+                Duration = SfxHoverAnimation,
+                Easing = new CubicEaseOut(),
+            },
+        },
+        Child = icon,
+    };
+
+    private static TextBlock BarGlyph(string glyph, IBrush color) => new()
+    {
+        Text = glyph,
+        FontFamily = IconFont,
+        FontSize = 18,
+        Foreground = color,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    /// Aceso (mouse em cima): visível por inteiro e um pouco maior. Transmitindo, o botão de
+    /// transmitir fica mais visível mesmo parado, para o verde aparecer.
+    private void SetRoomBarButtonHot(Border button, bool hot)
+    {
+        var idle = ReferenceEquals(button, _shareButton) && _streaming ? 0.85 : SfxIdleOpacity;
+        button.Opacity = hot ? 1 : idle;
+        button.RenderTransform = hot ? SfxScaleHot : SfxScaleIdle;
     }
 }

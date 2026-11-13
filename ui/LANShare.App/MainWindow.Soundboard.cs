@@ -144,10 +144,11 @@ public partial class MainWindow
         BuildSfxVolumeBox();
         BuildSfxAddDialog();
 
-        // Por cima do vídeo (mesmo Grid da imagem e do botão de volume)
+        // Por cima do vídeo (mesmo Grid da imagem e do botão de volume); o 🎉 fica na barra de
+        // baixo da sala, junto com os botões de câmera e de transmitir
         if (_previewImage.Parent is Panel stage)
         {
-            stage.Children.Add(_sfxButton);
+            stage.Children.Add(BuildRoomBar());
             stage.Children.Add(_sfxPanel);
             stage.Children.Add(_sfxVolumeBox);
         }
@@ -516,19 +517,21 @@ public partial class MainWindow
         return tile;
     }
 
-    /// Mostra ou esconde o botão 🎉 (chamado pelo UpdateUi do Host e pelo UpdateVolumeControls).
+    /// Mostra ou esconde a barra de baixo da sala, com o 🎉 (chamado pelo UpdateUi do Host e
+    /// pelo UpdateVolumeControls).
     private void UpdateSoundboardControls()
     {
         if (!SoundboardAvailable)
         {
             CloseSfxAddDialog();
             SetSoundboardPanel(false);
-            _sfxButton.IsVisible = false;
+            _roomBar.IsVisible = false;
             return;
         }
 
-        // Em tela cheia ele some junto com o botão de volume quando o mouse fica parado
-        _sfxButton.IsVisible = !(_fullscreen && _volumeHiddenByIdle);
+        // Em tela cheia ela some junto com o botão de volume quando o mouse fica parado
+        _roomBar.IsVisible = !(_fullscreen && _volumeHiddenByIdle);
+        UpdateRoomBar();
     }
 
     private void SetSoundboardPanel(bool open)
@@ -1454,5 +1457,3 @@ public partial class MainWindow
         return memory.ToArray();
     }
 }
-
-
