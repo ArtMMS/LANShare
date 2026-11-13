@@ -19,7 +19,8 @@ mod streams;
 pub use engine::{HostConfig, HostEngine};
 pub use events::{HostEvent, LocalAddress, LogLevel, UserEntry};
 pub use lanshare_core::protocol::{StreamKind, StreamQuality};
-pub use lanshare_stream::{app_windows, audio_sessions, monitors};
+pub use lanshare_stream::{app_windows, audio_sessions, camera, monitors};
+pub use lanshare_stream::CameraSettings;
 pub use lanshare_stream::{CaptureTarget, StreamSettings, PREVIEW_MAX_HEIGHT, PREVIEW_MAX_WIDTH};
 
 /// Roda o Host no terminal até o Ctrl+C (chamado pelo executável único).

@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 
 namespace LANShare.App;
 
@@ -22,7 +23,8 @@ namespace LANShare.App;
 ///   (o meu quadrado continua com o avatar; depois, com a câmera); clicar nele (ou no meu ícone
 ///   de tela na lista) mostra a prévia grande, como quem assiste vê; clicar nela volta à grade;
 /// - barra de baixo (sobre a grade e sobre a transmissão assistida): 🎉 efeitos sonoros, câmera
-///   (branco = desligada, verde = ligada; por enquanto desativada) e transmitir (ícone de monitor:
+///   (branco = desligada, verde = ligada; com ela ligada, o meu quadrado mostra a câmera no lugar
+///   do avatar) e transmitir (ícone de monitor:
 ///   branco = sem transmissão, verde = transmitindo; abre o painel de escolha do que transmitir);
 /// - é a tela padrão da sala: assistir alguém a substitui e parar de assistir volta para ela;
 ///   clicar em "USUÁRIOS NA SALA" ou num avatar da lista volta para ela (e para de assistir).
@@ -61,7 +63,17 @@ public partial class MainWindow
     /// Barra de baixo da sala: 🎉, câmera e transmitir.
     private StackPanel _roomBar = null!;
     private Border _cameraButton = null!, _shareButton = null!;
-    private TextBlock _shareIcon = null!;
+    private TextBlock _shareIcon = null!, _cameraIcon = null!;
+
+    /// A minha câmera está ligada? (Vem dos eventos do motor: camera_started / camera_stopped.)
+    private bool _cameraOn;
+
+    /// A imagem da minha câmera no meu quadrado (sempre a mesma, como a da prévia da transmissão).
+    private readonly Image _ownCameraImage = new() { Stretch = Stretch.UniformToFill };
+    private WriteableBitmap? _ownCameraBitmap;
+
+    /// Buffer da prévia da câmera (até 720p de altura; folga para câmeras bem largas).
+    private readonly byte[] _cameraPreviewBuffer = new byte[2560 * 720 * 4];
 
     /// Chamado uma vez no construtor (antes de qualquer UpdateStage).
     private void InitRoomView()
@@ -139,8 +151,10 @@ public partial class MainWindow
     /// Monta a grade de novo, com o maior quadrado 16:9 que cabe no espaço.
     private void LayoutRoomTiles()
     {
-        // A imagem da minha transmissão sai do quadrado antigo antes de entrar no novo
+        // As imagens da minha transmissão e da minha câmera saem dos quadrados antigos antes
+        // de entrar nos novos
         if (_ownStreamImage.Parent is Panel oldParent) oldParent.Children.Remove(_ownStreamImage);
+        if (_ownCameraImage.Parent is Panel oldCameraParent) oldCameraParent.Children.Remove(_ownCameraImage);
         _roomRows.Children.Clear();
 
         // Os quadrados na ordem da lista; transmitindo, o da minha transmissão vem logo depois do meu
@@ -187,16 +201,23 @@ public partial class MainWindow
         var lit = _sfxHighlights.TryGetValue(member.Id, out var until) && until > DateTime.UtcNow;
         var content = new Grid();
 
-        // Avatar (quando a câmera existir, a imagem dela entra no lugar)
-        var avatarSize = Math.Clamp(height * 0.42, 40, 160);
-        content.Children.Add(new Ellipse
+        // Câmera (a minha, ligada) ou avatar. As câmeras dos outros entram na próxima etapa.
+        if (member.Id == MySfxUserId && _cameraOn)
         {
-            Width = avatarSize,
-            Height = avatarSize,
-            Fill = AvatarBrush(member.Avatar),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-        });
+            content.Children.Add(_ownCameraImage);
+        }
+        else
+        {
+            var avatarSize = Math.Clamp(height * 0.42, 40, 160);
+            content.Children.Add(new Ellipse
+            {
+                Width = avatarSize,
+                Height = avatarSize,
+                Fill = AvatarBrush(member.Avatar),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+        }
 
         // Nome + ícone de tela
         var label = new StackPanel
@@ -403,10 +424,18 @@ public partial class MainWindow
         _sfxButton.Margin = new Thickness(0);
         _sfxButton.IsVisible = true; // ele nascia escondido; agora quem aparece/some é a barra inteira
 
-        // Câmera: ainda não existe (seção Camera do roadmap); fica apagada, sem clique
-        _cameraButton = RoomBarButton(BarGlyph(CameraGlyph, RoomBarIconOff));
-        _cameraButton.Cursor = Cursor.Default;
-        ToolTip.SetTip(_cameraButton, Loc.T("Room_CameraSoon"));
+        // Câmera: liga/desliga a minha câmera (a primeira do PC, 1080p a 30 FPS por enquanto;
+        // a escolha fica em Configurações -> Câmera, numa próxima etapa)
+        _cameraIcon = BarGlyph(CameraGlyph, RoomBarIconOff);
+        _cameraButton = RoomBarButton(_cameraIcon);
+        _cameraButton.PointerEntered += (_, _) => SetRoomBarButtonHot(_cameraButton, true);
+        _cameraButton.PointerExited += (_, _) => SetRoomBarButtonHot(_cameraButton, false);
+        _cameraButton.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(_cameraButton).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            ToggleCamera();
+        };
 
         // Transmitir: abre o painel de escolha (iniciar, trocar a fonte ou parar)
         _shareIcon = BarGlyph(ScreenGlyph, RoomBarIconOff);
@@ -439,7 +468,7 @@ public partial class MainWindow
         return _roomBar;
     }
 
-    /// Cor e dica do botão de transmitir (e da câmera, quando ela existir).
+    /// Cor e dica dos botões de transmitir e de câmera.
     private void UpdateRoomBar()
     {
         if (_shareButton is null) return;
@@ -447,6 +476,10 @@ public partial class MainWindow
         _shareIcon.Foreground = _streaming ? WatchedBorder : RoomBarIconOff;
         ToolTip.SetTip(_shareButton, Loc.T(_streaming ? "Stream_Change" : "Stream_Start"));
         SetRoomBarButtonHot(_shareButton, _shareButton.IsPointerOver);
+
+        _cameraIcon.Foreground = _cameraOn ? WatchedBorder : RoomBarIconOff;
+        ToolTip.SetTip(_cameraButton, Loc.T(_cameraOn ? "Room_CameraTurnOff" : "Room_CameraTurnOn"));
+        SetRoomBarButtonHot(_cameraButton, _cameraButton.IsPointerOver);
     }
 
     /// Botão redondo da barra, no mesmo estilo do 🎉.
@@ -484,12 +517,113 @@ public partial class MainWindow
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    /// Aceso (mouse em cima): visível por inteiro e um pouco maior. Transmitindo, o botão de
-    /// transmitir fica mais visível mesmo parado, para o verde aparecer.
+    /// Aceso (mouse em cima): visível por inteiro e um pouco maior. Ligados (verdes), os botões
+    /// de transmitir e de câmera ficam mais visíveis mesmo parados, para o verde aparecer.
     private void SetRoomBarButtonHot(Border button, bool hot)
     {
-        var idle = ReferenceEquals(button, _shareButton) && _streaming ? 0.85 : SfxIdleOpacity;
+        var on = (ReferenceEquals(button, _shareButton) && _streaming)
+                 || (ReferenceEquals(button, _cameraButton) && _cameraOn);
+        var idle = on ? 0.85 : SfxIdleOpacity;
         button.Opacity = hot ? 1 : idle;
         button.RenderTransform = hot ? SfxScaleHot : SfxScaleIdle;
+    }
+
+    // ───────────────────────── A minha câmera ─────────────────────────
+
+    /// Botão de câmera da barra: liga ou desliga. Ligar leva até ~1 s (a câmera abrindo).
+    private void ToggleCamera()
+    {
+        if (!InRoom) return;
+
+        if (_cameraOn || NativeMethods.CameraIsActive())
+        {
+            NativeMethods.CameraStop(); // o "camera_stopped" atualiza a tela
+            OnOwnCameraStopped(null);
+            return;
+        }
+
+        var (ok, error) = NativeMethods.CameraStart(null, 1080, 30);
+        if (!ok)
+        {
+            Notify(error ?? Loc.T("Camera_StartError"), CameraGlyph);
+            return;
+        }
+
+        _cameraOn = true;
+        UpdateRoomBar();
+        RefreshSfxUserLists(); // o meu quadrado troca o avatar pela câmera
+    }
+
+    /// Eventos da minha câmera (Host: camera_*; Client: own_camera_*). true = era deste assunto.
+    private bool HandleOwnCameraEvent(string type, JsonElement e)
+    {
+        switch (type)
+        {
+            case "camera_started":
+            case "own_camera_started":
+                if (!_cameraOn)
+                {
+                    _cameraOn = true;
+                    UpdateRoomBar();
+                    RefreshSfxUserLists();
+                }
+                return true;
+
+            case "camera_stats":
+            case "own_camera_stats":
+                return true;
+
+            case "camera_stopped":
+            case "own_camera_stopped":
+                OnOwnCameraStopped(e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
+                    ? err.GetString()
+                    : null);
+                return true;
+        }
+
+        return false;
+    }
+
+    /// A minha câmera desligou (eu desliguei, ou ela caiu com `error`).
+    private void OnOwnCameraStopped(string? error)
+    {
+        if (error is not null) Notify(Loc.F("Camera_Stopped", error), CameraGlyph);
+        if (!_cameraOn) return;
+
+        ResetOwnCamera();
+        UpdateRoomBar();
+        RefreshSfxUserLists(); // o meu quadrado volta para o avatar
+    }
+
+    /// Esquece a câmera (ao sair da sala ou quando ela desliga).
+    private void ResetOwnCamera()
+    {
+        _cameraOn = false;
+        _ownCameraImage.Source = null;
+        _ownCameraBitmap = null;
+    }
+
+    /// Pede a prévia mais recente da minha câmera e desenha no meu quadrado (só com a grade na tela).
+    private void UpdateOwnCameraTile()
+    {
+        if (!_cameraOn || !_roomView.IsVisible) return;
+        if (!NativeMethods.CameraPreview(_cameraPreviewBuffer, out var width, out var height)) return;
+
+        if (_ownCameraBitmap is null
+            || _ownCameraBitmap.PixelSize.Width != width
+            || _ownCameraBitmap.PixelSize.Height != height)
+        {
+            _ownCameraBitmap = new WriteableBitmap(
+                new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+            _ownCameraImage.Source = _ownCameraBitmap;
+        }
+
+        using (var frame = _ownCameraBitmap.Lock())
+        {
+            for (var y = 0; y < height; y++)
+                Marshal.Copy(_cameraPreviewBuffer, y * width * 4, frame.Address + y * frame.RowBytes, width * 4);
+        }
+
+        _ownCameraImage.InvalidateVisual();
     }
 }

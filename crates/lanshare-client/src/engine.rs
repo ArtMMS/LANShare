@@ -9,7 +9,7 @@
 
 use crate::discovery;
 use crate::normalize_address;
-use crate::streaming::OwnStream;
+use crate::streaming::{OwnCamera, OwnStream};
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     read_message, write_message, Message, SfxFrame, StreamKind, StreamQuality, UserInfo,
@@ -19,7 +19,7 @@ use lanshare_core::protocol::{
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
-use lanshare_stream::{CaptureTarget, PreviewSlot, StreamSettings};
+use lanshare_stream::{CameraSettings, CaptureTarget, PreviewSlot, StreamSettings};
 use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
 use lanshare_viewer::{EventTx, Watcher};
 use serde_json::{json, Value};
@@ -77,6 +77,10 @@ pub struct ClientEngine {
     own_stream: OwnStream,
     /// Miniatura da minha transmissão (a prévia).
     preview: PreviewSlot,
+    /// A minha câmera.
+    own_camera: OwnCamera,
+    /// Prévia da minha câmera (o meu quadrado na sala).
+    camera_preview: PreviewSlot,
     /// Botão 🔊 do seletor: a minha transmissão leva som?
     stream_audio: AtomicBool,
 }
@@ -113,6 +117,8 @@ impl ClientEngine {
             watcher,
             own_stream: OwnStream::default(),
             preview: PreviewSlot::default(),
+            own_camera: OwnCamera::default(),
+            camera_preview: PreviewSlot::default(),
             stream_audio: AtomicBool::new(true),
         })
     }
@@ -282,6 +288,7 @@ impl ClientEngine {
         let sfx_inbox = self.sfx_inbox.clone();
         let watcher = self.watcher.clone();
         let own_stream = self.own_stream.clone();
+        let own_camera = self.own_camera.clone();
 
         self.runtime.spawn(async move {
             let end = run_session(
@@ -294,12 +301,17 @@ impl ClientEngine {
                 sfx_inbox,
                 watcher.clone(),
                 own_stream.clone(),
+                own_camera.clone(),
             )
             .await;
 
-            // Fora da sala: para de assistir e de transmitir (parar a captura espera a thread dela)
+            // Fora da sala: para de assistir, de transmitir e a câmera (parar espera as threads)
             watcher.stop();
-            let _ = tokio::task::spawn_blocking(move || own_stream.stop()).await;
+            let _ = tokio::task::spawn_blocking(move || {
+                own_stream.stop();
+                own_camera.stop();
+            })
+            .await;
 
             // Libera a sessão ANTES de avisar: quem recebe o aviso já pode conectar de novo
             *session_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -431,6 +443,41 @@ impl ClientEngine {
         self.preview.read_into(out)
     }
 
+    // ───────────────────────────── Câmera ─────────────────────────────
+
+    /// Liga a minha câmera e avisa a sala: todos recebem a versão pequena (720p) e quem abrir
+    /// grande recebe a cheia. Volta depois de a câmera abrir (ou com o erro).
+    pub fn start_camera(&self, settings: CameraSettings) -> Result<(), String> {
+        let room = self
+            .lock_session()
+            .as_ref()
+            .map(|session| session.outgoing_tx.clone())
+            .ok_or_else(not_in_room)?;
+
+        self.own_camera.start(
+            self.runtime.handle(),
+            &self.events,
+            room,
+            self.camera_preview.clone(),
+            settings,
+        )
+    }
+
+    /// Desliga a minha câmera e avisa a sala. false = já estava desligada.
+    pub fn stop_camera(&self) -> bool {
+        self.own_camera.stop()
+    }
+
+    /// A minha câmera está ligada? (false também se ela caiu sozinha)
+    pub fn is_camera_on(&self) -> bool {
+        self.own_camera.is_running()
+    }
+
+    /// Copia a prévia da minha câmera (BGRA) para `out`, só se for nova. Devolve (largura, altura).
+    pub fn camera_preview_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.camera_preview.read_into(out)
+    }
+
     /// Desconecta e encerra o motor.
     pub fn stop(self) {
         if self.disconnect() {
@@ -438,6 +485,7 @@ impl ClientEngine {
         }
         self.watcher.stop();
         self.own_stream.stop();
+        self.own_camera.stop();
         self.runtime.shutdown_timeout(Duration::from_secs(2));
     }
 
@@ -553,6 +601,7 @@ async fn run_session(
     sfx_inbox: SfxInbox,
     watcher: Watcher,
     own_stream: OwnStream,
+    own_camera: OwnCamera,
 ) -> SessionEnd {
     send(&events, json!({ "type": "connecting", "address": address }));
 
@@ -636,6 +685,7 @@ async fn run_session(
     let cb_events = events.clone();
     let cb_watcher = watcher.clone();
     let cb_stream = own_stream.clone();
+    let cb_camera = own_camera.clone();
 
     let reason = run_connection(stream, shutdown.clone(), outgoing_rx, move |event| match event {
         ConnectionEvent::Rtt(rtt) => send(
@@ -736,15 +786,24 @@ async fn run_session(
                     );
                 }
             }
-            // Pedidos do Host para a MINHA transmissão (por enquanto só a tela; a câmera vem depois)
+            // Pedidos do Host para a MINHA transmissão (tela: só a versão cheia) e a MINHA câmera
             Message::ViewerAllowed {
                 viewer_id,
                 kind: StreamKind::Screen,
                 quality: StreamQuality::Full,
                 ticket,
             } => cb_stream.allow_viewer(viewer_id, ticket),
+            Message::ViewerAllowed {
+                viewer_id,
+                kind: StreamKind::Camera,
+                quality,
+                ticket,
+            } => cb_camera.allow_viewer(quality, viewer_id, ticket),
             Message::ViewerAllowed { .. } => {}
-            Message::ViewerRevoked { viewer_id } => cb_stream.revoke_viewer(viewer_id),
+            Message::ViewerRevoked { viewer_id } => {
+                cb_stream.revoke_viewer(viewer_id);
+                cb_camera.revoke_viewer(viewer_id);
+            }
 
             // O motivo que vem da rede está no idioma do Host: usa o texto no idioma deste app
             Message::Kicked { .. } => send(

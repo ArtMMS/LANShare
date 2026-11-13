@@ -431,6 +431,8 @@ public partial class MainWindow : Window
         if (_watchState != WatchState.None) UpdateWatchFrame();
         else if (_streaming && _ownPreviewBig) UpdateOwnPreviewBig();
         else if (_streaming) UpdateOwnStreamTile();
+
+        UpdateOwnCameraTile(); // a minha câmera no meu quadrado (só com a grade na tela)
     }
 
     // ───────────────────────── Transmitir (Host e Client) ─────────────────────────

@@ -24,7 +24,10 @@ use lanshare_core::protocol::{
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
 use lanshare_net::{run_connection, ConnectionEvent};
-use lanshare_stream::{CaptureTarget, PreviewSlot, StreamHandle, StreamServer, StreamSettings};
+use lanshare_stream::{
+    CameraBroadcast, CameraSettings, CaptureTarget, PreviewSlot, StreamHandle, StreamServer,
+    StreamSettings,
+};
 use lanshare_viewer::audio_player::{AudioOutputSetting, AudioVolume};
 use lanshare_viewer::Watcher;
 use serde::Deserialize;
@@ -101,6 +104,8 @@ struct Shared {
     streams: StreamDirectory,
     /// A transmissão do Host (None = não está transmitindo).
     host_stream: Arc<Mutex<Option<HostStream>>>,
+    /// A câmera do Host (None = desligada).
+    host_camera: Arc<Mutex<Option<CameraBroadcast>>>,
     /// A transmissão que o Host está assistindo.
     watcher: Watcher,
 }
@@ -108,6 +113,10 @@ struct Shared {
 impl Shared {
     fn lock_host_stream(&self) -> MutexGuard<'_, Option<HostStream>> {
         self.host_stream.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_host_camera(&self) -> MutexGuard<'_, Option<CameraBroadcast>> {
+        self.host_camera.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Alguém começou a transmitir (`kind`): anota no catálogo e avisa a sala
@@ -166,13 +175,20 @@ impl Shared {
 
         let ticket = new_watch_ticket();
         let allowed = if target == HOST_USER_ID {
-            // Por enquanto o Host só transmite a tela (a câmera dele entra na próxima etapa)
-            kind == StreamKind::Screen
-                && quality == StreamQuality::Full
-                && self
-                    .lock_host_stream()
+            match kind {
+                // A tela do Host só tem a versão cheia
+                StreamKind::Screen => {
+                    quality == StreamQuality::Full
+                        && self
+                            .lock_host_stream()
+                            .as_ref()
+                            .is_some_and(|stream| stream.server.allow_viewer(viewer, ticket.clone()))
+                }
+                StreamKind::Camera => self
+                    .lock_host_camera()
                     .as_ref()
-                    .is_some_and(|stream| stream.server.allow_viewer(viewer, ticket.clone()))
+                    .is_some_and(|camera| camera.allow_viewer(quality, viewer, ticket.clone())),
+            }
         } else {
             self.registry.send_to(
                 target,
@@ -206,6 +222,9 @@ impl Shared {
         if let Some(stream) = self.lock_host_stream().as_ref() {
             stream.server.revoke_viewer(viewer);
         }
+        if let Some(camera) = self.lock_host_camera().as_ref() {
+            camera.revoke_viewer(viewer);
+        }
 
         for streamer in self.streams.streamers() {
             if streamer != HOST_USER_ID && streamer != viewer {
@@ -229,6 +248,8 @@ pub struct HostEngine {
     shared: Shared,
     /// Miniatura do que o Host está transmitindo (preview do Host).
     preview: PreviewSlot,
+    /// Prévia da câmera do Host (o quadrado dele na sala).
+    camera_preview: PreviewSlot,
     /// Avatar do Host, enviado a quem entra na sala.
     host_avatar: Arc<Mutex<Option<String>>>,
     /// Efeitos sonoros que os Clients tocaram (a interface busca com take_sfx).
@@ -288,6 +309,7 @@ impl HostEngine {
             sfx_inbox: sfx_inbox.clone(),
             streams: StreamDirectory::default(),
             host_stream: Arc::new(Mutex::new(None)),
+            host_camera: Arc::new(Mutex::new(None)),
             watcher,
         };
 
@@ -325,6 +347,7 @@ impl HostEngine {
             shutdown_tx,
             shared,
             preview: PreviewSlot::default(),
+            camera_preview: PreviewSlot::default(),
             host_avatar,
             sfx_inbox,
             sfx_cooldown: Mutex::new(SfxCooldown::default()),
@@ -664,6 +687,70 @@ impl HostEngine {
             .is_some_and(|s| s.handle.is_running())
     }
 
+    // ───────────────────────────── Câmera ─────────────────────────────
+
+    /// Liga a câmera do Host e avisa a sala: todos recebem a versão pequena (720p) e quem abrir
+    /// grande recebe a cheia. Volta depois de a câmera abrir (ou com o erro).
+    pub fn start_camera(&self, settings: CameraSettings) -> Result<(), String> {
+        let mut slot = self.shared.lock_host_camera();
+        if slot.as_ref().is_some_and(|c| c.is_running()) {
+            return Err(tr(
+                "A câmera já está ligada.",
+                "The camera is already on.",
+                "La cámara ya está encendida.",
+            )
+            .to_string());
+        }
+        // Uma câmera anterior que caiu sozinha (o vigia ainda não limpou)
+        if let Some(old) = slot.take() {
+            old.stop();
+        }
+
+        let camera = CameraBroadcast::start(
+            self.runtime.handle(),
+            crate::stream_bridge::camera_events(self.events.clone()),
+            self.camera_preview.clone(),
+            settings,
+        )?;
+        let spot = StreamSpot {
+            ip: None,
+            port: camera.full_port(),
+            tile_port: Some(camera.tile_port()),
+        };
+        *slot = Some(camera);
+        drop(slot);
+
+        self.shared
+            .announce_stream(HOST_USER_ID, StreamKind::Camera, spot);
+        Ok(())
+    }
+
+    /// Desliga a câmera do Host e avisa a sala. false = já estava desligada.
+    pub fn stop_camera(&self) -> bool {
+        let camera = self.shared.lock_host_camera().take();
+        match camera {
+            Some(camera) => {
+                camera.stop();
+                self.shared.end_stream(HOST_USER_ID, StreamKind::Camera);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A câmera do Host está ligada? (false também se ela caiu sozinha)
+    pub fn is_camera_on(&self) -> bool {
+        self.shared
+            .lock_host_camera()
+            .as_ref()
+            .is_some_and(|c| c.is_running())
+    }
+
+    /// Copia a prévia da câmera do Host (BGRA) para `out`, só se for nova. Devolve (largura, altura).
+    pub fn camera_preview_into(&self, out: &mut [u8]) -> Option<(u32, u32)> {
+        self.camera_preview.read_into(out)
+    }
+
     /// Acesso ao runtime do tokio da sala (por exemplo, para o terminal ouvir o Ctrl+C).
     pub fn runtime_handle(&self) -> Handle {
         self.runtime.handle().clone()
@@ -674,6 +761,7 @@ impl HostEngine {
     pub fn stop(self) -> Vec<HostEvent> {
         self.shared.watcher.stop();
         self.stop_stream();
+        self.stop_camera();
         let _ = self.shutdown_tx.send(true);
 
         // Dá tempo para o aviso de saída chegar aos Clients
@@ -691,11 +779,12 @@ impl HostEngine {
     }
 }
 
-/// Se a transmissão do Host cair sozinha (por exemplo, erro de captura),
+/// Se a transmissão (ou a câmera) do Host cair sozinha (por exemplo, erro de captura),
 /// fecha a porta dela e avisa a sala, do mesmo jeito que numa parada normal.
 async fn watch_stream(shared: Shared, mut shutdown: watch::Receiver<bool>) {
     let mut ticker = tokio::time::interval(STREAM_WATCH_INTERVAL);
     let mut dead_polls = 0u32;
+    let mut camera_dead_polls = 0u32;
 
     loop {
         tokio::select! {
@@ -720,6 +809,24 @@ async fn watch_stream(shared: Shared, mut shutdown: watch::Receiver<bool>) {
             dead_polls = 0;
             stream.stop();
             shared.end_stream(HOST_USER_ID, StreamKind::Screen);
+        }
+
+        // A câmera do Host caiu sozinha (desconectada, erro do encoder...)
+        let camera_ended = {
+            let mut slot = shared.lock_host_camera();
+            let dead = slot.as_ref().is_some_and(|c| !c.is_running());
+            camera_dead_polls = if dead { camera_dead_polls + 1 } else { 0 };
+            if camera_dead_polls >= 2 {
+                slot.take()
+            } else {
+                None
+            }
+        };
+
+        if let Some(camera) = camera_ended {
+            camera_dead_polls = 0;
+            camera.stop();
+            shared.end_stream(HOST_USER_ID, StreamKind::Camera);
         }
     }
 }

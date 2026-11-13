@@ -198,6 +198,9 @@
    - Allow upload files, images and videos and allow download
    - Commands (Admin only) in chat [/ban /disban]
 
+ Android Port (Kotlin + Jetpack Compose)
+   - Allow only cameras transmission
+
  Stream multiple monitors at the same time (only one user)
     - Show untill 3 monitors, one on top of the other, and focus by click in one of them (showing the other ones on the bottom)
 

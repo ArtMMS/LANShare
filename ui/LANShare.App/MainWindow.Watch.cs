@@ -37,9 +37,12 @@ public partial class MainWindow
     private static readonly IBrush ScreenIconIdle = new SolidColorBrush(Color.Parse("#8A929C"));
     private static readonly IBrush ScreenIconHover = new SolidColorBrush(Color.Parse("#2E343C"));
 
-    /// Quem está transmitindo na sala (id; 0 = o Host). Eu mesmo não entro aqui
+    /// Quem está transmitindo a TELA na sala (id; 0 = o Host). Eu mesmo não entro aqui
     /// quando sou um Client: o Host não manda esse aviso de volta para quem transmite.
     private readonly HashSet<ulong> _streamers = new();
+
+    /// Quem está com a CÂMERA ligada na sala (a imagem nos quadrados entra na próxima etapa).
+    private readonly HashSet<ulong> _cameraUsers = new();
 
     /// Nomes da lista do Host (para os avisos e a barra de baixo).
     private readonly Dictionary<ulong, string> _hostUserNames = new();
@@ -63,8 +66,10 @@ public partial class MainWindow
     private void ResetWatch()
     {
         _streamers.Clear();
+        _cameraUsers.Clear();
         _hostUserNames.Clear();
         _ownPreviewBig = false;
+        ResetOwnCamera();
         ClearWatchState();
         UpdateWatchControls();
     }
@@ -157,8 +162,21 @@ public partial class MainWindow
     /// true = o evento era deste assunto (já foi tratado).
     private bool HandleWatchEvent(string type, JsonElement e)
     {
+        if (HandleOwnCameraEvent(type, e)) return true;
+
         switch (type)
         {
+            // Câmeras dos outros: por enquanto só anota quem está com ela ligada
+            case "user_streaming" when IsCameraEvent(e):
+                _cameraUsers.Add(e.GetProperty("id").GetUInt64());
+                RefreshSfxUserLists();
+                return true;
+
+            case "user_stream_stopped" when IsCameraEvent(e):
+                _cameraUsers.Remove(e.GetProperty("id").GetUInt64());
+                RefreshSfxUserLists();
+                return true;
+
             case "user_streaming":
             {
                 var id = e.GetProperty("id").GetUInt64();
@@ -260,6 +278,10 @@ public partial class MainWindow
 
         return false;
     }
+
+    /// O aviso é da câmera de alguém? (Sem "kind" = versão antiga = tela.)
+    private static bool IsCameraEvent(JsonElement e) =>
+        e.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String && kind.GetString() == "camera";
 
     /// O aviso é da tentativa atual de assistir? (Avisos de tentativas antigas são ignorados.)
     private bool IsCurrentWatch(JsonElement e) =>

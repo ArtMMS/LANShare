@@ -297,7 +297,7 @@ fn canvas_size(height: u32) -> (u32, u32) {
 /// Decide o bitrate a cada segundo, pelas filas dos espectadores.
 /// Desce rápido quando alguém não dá conta; sobe devagar quando todos estão em dia.
 #[derive(Debug)]
-struct AdaptiveBitrate {
+pub(crate) struct AdaptiveBitrate {
     /// O bitrate normal (o da resolução e FPS escolhidos).
     target: u32,
     /// O piso: nunca desce disso.
@@ -309,7 +309,7 @@ struct AdaptiveBitrate {
 }
 
 impl AdaptiveBitrate {
-    fn new(target: u32) -> Self {
+    pub(crate) fn new(target: u32) -> Self {
         Self {
             target,
             min: (target / MIN_BITRATE_FRACTION).max(MIN_BITRATE_BPS).min(target),
@@ -319,7 +319,7 @@ impl AdaptiveBitrate {
     }
 
     /// Chamado a cada segundo. Devolve o bitrate novo, se ele mudou.
-    fn update(&mut self, congestion: Congestion) -> Option<u32> {
+    pub(crate) fn update(&mut self, congestion: Congestion) -> Option<u32> {
         // Alguém não está dando conta: desce já
         if congestion.overflowed || congestion.max_queued >= QUEUE_HIGH {
             self.calm_secs = 0;
@@ -351,17 +351,17 @@ impl AdaptiveBitrate {
         Some(bitrate)
     }
 
-    fn current(&self) -> u32 {
+    pub(crate) fn current(&self) -> u32 {
         self.current
     }
 
     /// A qualidade está reduzida (alguém está com a conexão instável)?
-    fn is_reduced(&self) -> bool {
+    pub(crate) fn is_reduced(&self) -> bool {
         self.current < self.target
     }
 }
 
-fn mbps(bps: u32) -> f64 {
+pub(crate) fn mbps(bps: u32) -> f64 {
     bps as f64 / 1_000_000.0
 }
 
@@ -668,7 +668,7 @@ fn fit_into(frame: &CapturedFrame, width: u32, height: u32) -> CapturedFrame {
 
 /// Esse pacote H.264 (formato Annex B) é um keyframe?
 /// Procura as marcas de início 00 00 01 e olha o tipo de cada bloco (5 = quadro completo).
-fn is_keyframe(data: &[u8]) -> bool {
+pub(crate) fn is_keyframe(data: &[u8]) -> bool {
     let mut i = 0;
     while i + 3 < data.len() {
         if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {

@@ -3,12 +3,15 @@
 //!
 //! Eventos (JSON): own_stream_started, own_stream_stats, own_stream_stopped
 //! (com nomes próprios para não confundir com a transmissão que o Client assiste).
+//!
+//! A minha câmera (`OwnCamera`) funciona do mesmo jeito, com duas portas (versão cheia e versão
+//! pequena de 720p). Eventos: own_camera_started, own_camera_stats, own_camera_stopped.
 
 use lanshare_core::i18n::tr;
-use lanshare_core::protocol::{Message, StreamKind};
+use lanshare_core::protocol::{Message, StreamKind, StreamQuality};
 use lanshare_stream::{
-    CaptureTarget, PreviewSlot, StreamEvent, StreamEvents, StreamHandle, StreamServer,
-    StreamSettings,
+    CameraBroadcast, CameraSettings, CaptureTarget, PreviewSlot, StreamEvent, StreamEvents,
+    StreamHandle, StreamServer, StreamSettings,
 };
 use lanshare_viewer::EventTx;
 use serde_json::json;
@@ -218,6 +221,158 @@ impl OwnStream {
     }
 
     fn lock(&self) -> MutexGuard<'_, Option<Running>> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+// ───────────────────────────── A minha câmera ─────────────────────────────
+
+struct RunningCamera {
+    broadcast: CameraBroadcast,
+    /// Caixa de saída da sala (para o StreamEnded).
+    room: UnboundedSender<Message>,
+}
+
+/// A minha câmera. Clonar NÃO copia: todos os clones veem a mesma.
+#[derive(Clone, Default)]
+pub(crate) struct OwnCamera {
+    inner: Arc<Mutex<Option<RunningCamera>>>,
+}
+
+impl OwnCamera {
+    /// Liga a câmera, abre as duas portas e avisa a sala (StreamAnnounce com `tile_port`).
+    /// Volta depois de a câmera abrir (ou com o erro).
+    pub fn start(
+        &self,
+        runtime: &Handle,
+        events: &EventTx,
+        room: UnboundedSender<Message>,
+        preview: PreviewSlot,
+        settings: CameraSettings,
+    ) -> Result<(), String> {
+        let mut slot = self.lock();
+        if slot.as_ref().is_some_and(|c| c.broadcast.is_running()) {
+            return Err(tr(
+                "A câmera já está ligada.",
+                "The camera is already on.",
+                "La cámara ya está encendida.",
+            )
+            .to_string());
+        }
+        // Uma câmera anterior que caiu sozinha: a thread dela já terminou
+        if let Some(old) = slot.take() {
+            old.broadcast.stop();
+        }
+
+        let broadcast = CameraBroadcast::start(runtime, self.camera_events(events.clone()), preview, settings)?;
+
+        let announce = Message::StreamAnnounce {
+            kind: StreamKind::Camera,
+            port: broadcast.full_port(),
+            tile_port: Some(broadcast.tile_port()),
+        };
+        if room.send(announce).is_err() {
+            // Já saiu da sala: desfaz tudo
+            drop(slot);
+            broadcast.stop();
+            return Err(not_in_room());
+        }
+
+        *slot = Some(RunningCamera { broadcast, room });
+        Ok(())
+    }
+
+    /// Desliga a câmera e avisa a sala (StreamEnded). false = já estava desligada.
+    pub fn stop(&self) -> bool {
+        // Tira da caixa antes de esperar a thread terminar (para não segurar o lock)
+        let running = self.lock().take();
+        let Some(running) = running else {
+            return false;
+        };
+
+        let _ = running.room.send(Message::StreamEnded {
+            kind: StreamKind::Camera,
+        });
+        running.broadcast.stop();
+        true
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.lock().as_ref().is_some_and(|c| c.broadcast.is_running())
+    }
+
+    /// O Host autorizou alguém a ver a minha câmera (ViewerAllowed com kind = camera).
+    pub fn allow_viewer(&self, quality: StreamQuality, viewer_id: u64, ticket: String) {
+        if let Some(running) = self.lock().as_ref() {
+            running.broadcast.allow_viewer(quality, viewer_id, ticket);
+        }
+    }
+
+    /// O Host mandou derrubar alguém (ViewerRevoked).
+    pub fn revoke_viewer(&self, viewer_id: u64) {
+        if let Some(running) = self.lock().as_ref() {
+            running.broadcast.revoke_viewer(viewer_id);
+        }
+    }
+
+    /// A câmera caiu sozinha (ex.: desconectada): avisa a sala.
+    /// Chamado de dentro da própria thread da câmera: o `stop` do CameraBroadcast percebe isso
+    /// e não espera a si mesmo.
+    fn died(&self) {
+        let running = self.lock().take();
+        if let Some(running) = running {
+            let _ = running.room.send(Message::StreamEnded {
+                kind: StreamKind::Camera,
+            });
+            running.broadcast.stop();
+        }
+    }
+
+    /// Eventos da câmera -> JSON para a interface.
+    fn camera_events(&self, events: EventTx) -> StreamEvents {
+        let slot = self.clone();
+        StreamEvents::new(move |event| {
+            let message = match event {
+                StreamEvent::Started {
+                    width, height, fps, ..
+                } => json!({
+                    "type": "own_camera_started",
+                    "width": width,
+                    "height": height,
+                    "fps": fps,
+                }),
+                StreamEvent::Stats {
+                    mbps,
+                    viewers,
+                    bitrate_mbps,
+                    unstable,
+                    ..
+                } => json!({
+                    "type": "own_camera_stats",
+                    "mbps": mbps,
+                    "viewers": viewers,
+                    "bitrate_mbps": bitrate_mbps,
+                    "unstable": unstable,
+                }),
+                StreamEvent::Stopped { error } => {
+                    if error.is_some() {
+                        slot.died();
+                    }
+                    json!({ "type": "own_camera_stopped", "error": error })
+                }
+                StreamEvent::Debug(_) => return,
+                StreamEvent::Info(message) => {
+                    json!({ "type": "log", "level": "info", "message": message })
+                }
+                StreamEvent::Warn(message) => {
+                    json!({ "type": "log", "level": "warn", "message": message })
+                }
+            };
+            let _ = events.send(message);
+        })
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Option<RunningCamera>> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

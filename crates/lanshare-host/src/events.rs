@@ -119,6 +119,22 @@ pub enum HostEvent {
     /// A transmissão do Host terminou. `error` = None quando foi o Host que parou.
     StreamStopped { error: Option<String> },
 
+    /// A câmera do Host ligou (no tamanho e FPS que ela está usando de verdade).
+    CameraStarted { width: u32, height: u32, fps: u32 },
+
+    /// Resumo da câmera do Host (a cada ~1 segundo, enquanto alguém recebe).
+    CameraStats {
+        /// Megabits por segundo enviados (as duas versões somadas).
+        mbps: f64,
+        /// Quantos recebem a câmera.
+        viewers: usize,
+        bitrate_mbps: f64,
+        unstable: bool,
+    },
+
+    /// A câmera do Host desligou. `error` = None quando foi o Host que desligou.
+    CameraStopped { error: Option<String> },
+
     /// Mensagem de texto (avisos e diagnóstico).
     Log { level: LogLevel, message: String },
 }

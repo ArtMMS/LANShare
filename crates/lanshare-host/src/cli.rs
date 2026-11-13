@@ -5,7 +5,7 @@
 use crate::engine::{HostConfig, HostEngine};
 use crate::events::{HostEvent, LogLevel};
 use lanshare_core::protocol::{StreamKind, HOST_USER_ID};
-use lanshare_stream::StreamSettings;
+use lanshare_stream::{CameraSettings, StreamSettings};
 use std::io;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -249,6 +249,17 @@ impl EventPrinter {
                 }
             }
 
+            HostEvent::CameraStarted { width, height, fps } => {
+                println!("[host] Camera ligada: {width}x{height} a {fps} FPS.");
+            }
+
+            HostEvent::CameraStats { .. } => {}
+
+            HostEvent::CameraStopped { error } => match error {
+                Some(erro) => println!("[host] A camera parou: {erro}"),
+                None => println!("[host] Camera desligada."),
+            },
+
             HostEvent::Log { level, message } => match level {
                 LogLevel::Debug => println!("[diag] {message}"),
                 LogLevel::Info | LogLevel::Warn => println!("[host] {message}"),
@@ -353,6 +364,17 @@ fn handle_command(line: &str, prompt: &mut Prompt, engine: &HostEngine) {
         Some("share") => begin_share(engine, prompt),
 
         Some("stop") => stop_sharing(engine),
+
+        Some("camon") => match engine.start_camera(CameraSettings::default()) {
+            Ok(()) => println!("[host] Ligando a camera (1080p a 30 FPS, ou o mais perto disso)..."),
+            Err(motivo) => println!("[host] {motivo}"),
+        },
+
+        Some("camoff") => {
+            if !engine.stop_camera() {
+                println!("[host] A camera ja estava desligada.");
+            }
+        }
 
         Some("capture") => start_capture_test(parse_seconds(parts.next())),
 
@@ -477,6 +499,7 @@ fn print_help() {
     println!("[host]   encode [segs]     teste de captura + compressao H.264 na CPU");
     println!("[host]   hwencode [segs]   teste de captura + compressao H.264 na GPU");
     println!("[host]   audiotest [segs]  teste de captura do som do PC (grava lanshare-audiotest.wav)");
+    println!("[host]   camon / camoff    liga / desliga a sua camera para a sala");
     println!("[host]   camtest [segs]    teste da webcam (lista formatos, grava lanshare-camtest.bmp)");
     println!("[host]   help              mostra esta ajuda");
 }

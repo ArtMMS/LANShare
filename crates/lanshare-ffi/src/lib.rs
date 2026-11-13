@@ -5,15 +5,18 @@
 //! pelo C# com `lanshare_free_string`.
 //!
 //! O app está em modo Host OU Client (nunca os dois). As funções `lanshare_stream_*`,
-//! `lanshare_watch_*`, `lanshare_set_audio_output` e `lanshare_set_volume` valem para
-//! o modo que estiver ativo.
+//! `lanshare_camera_*`, `lanshare_watch_*`, `lanshare_set_audio_output` e `lanshare_set_volume`
+//! valem para o modo que estiver ativo.
 
 use lanshare_client::{audio_devices, ClientEngine};
 use lanshare_core::i18n::{self, tr, Language};
 use lanshare_core::settings::{self, Settings};
 use lanshare_core::sfx;
 use lanshare_host::monitors::{self, Thumbnail};
-use lanshare_host::{app_windows, audio_sessions, CaptureTarget, HostConfig, HostEngine, StreamSettings};
+use lanshare_host::{
+    app_windows, audio_sessions, camera, CameraSettings, CaptureTarget, HostConfig, HostEngine,
+    StreamSettings,
+};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, MutexGuard};
@@ -590,6 +593,85 @@ pub unsafe extern "C" fn lanshare_stream_preview(
     let size = with_engine(|engine| match engine {
         Active::Host(host) => host.preview_into(out),
         Active::Client(client) => client.preview_into(out),
+    })
+    .flatten();
+    write_size(size, width, height)
+}
+
+// ───────────────────────────── Câmera (modo ativo) ─────────────────────────────
+
+/// Câmeras do PC, como JSON: {"ok":true,"cameras":[{"id":"\\?\usb#...","name":"HD Webcam"}]}
+/// ou {"ok":false,"error":".."}. Não precisa de modo ativo. Chame fora da thread da interface.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_devices() -> *mut c_char {
+    match camera::list_cameras() {
+        Ok(cameras) => {
+            let list: Vec<_> = cameras
+                .iter()
+                .map(|c| serde_json::json!({ "id": c.id, "name": c.name }))
+                .collect();
+            to_c(serde_json::json!({ "ok": true, "cameras": list }).to_string())
+        }
+        Err(error) => reply_err(&error.to_string()),
+    }
+}
+
+/// Liga a minha câmera (Host ou Client) e avisa a sala: todos recebem a versão de 720p e quem
+/// abrir grande recebe a cheia. `device_id`: o "id" de `lanshare_camera_devices` (NULL ou vazio =
+/// a primeira câmera); `height` até 2160 e `fps` até 60 (a câmera usa o mais perto que tiver).
+/// Volta depois de a câmera abrir (pode levar até ~1 s). Retorna {"ok":true} ou {"ok":false,"error":".."}.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_start(device_id: *const c_char, height: u32, fps: u32) -> *mut c_char {
+    let settings = CameraSettings {
+        device_id: read_c_string(device_id).filter(|text| !text.trim().is_empty()),
+        height,
+        fps,
+    };
+    reply_result(with_engine(|engine| match engine {
+        Active::Host(host) => host.start_camera(settings),
+        Active::Client(client) => client.start_camera(settings),
+    }))
+}
+
+/// Desliga a minha câmera e avisa a sala. Retorna 1 se ela estava ligada, 0 se não.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_stop() -> i32 {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.stop_camera(),
+        Active::Client(client) => client.stop_camera(),
+    })
+    .unwrap_or(false) as i32
+}
+
+/// 1 se a minha câmera está ligada, 0 se não.
+#[no_mangle]
+pub extern "C" fn lanshare_camera_is_active() -> i32 {
+    with_engine(|engine| match engine {
+        Active::Host(host) => host.is_camera_on(),
+        Active::Client(client) => client.is_camera_on(),
+    })
+    .unwrap_or(false) as i32
+}
+
+/// Copia a prévia da minha câmera para `buffer` (BGRA, 4 bytes por pixel; até 720p de altura).
+/// Retorna 1 se havia uma imagem nova, 0 se não.
+///
+/// # Safety
+/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
+#[no_mangle]
+pub unsafe extern "C" fn lanshare_camera_preview(
+    buffer: *mut u8,
+    capacity: usize,
+    width: *mut u32,
+    height: *mut u32,
+) -> i32 {
+    if buffer.is_null() || width.is_null() || height.is_null() {
+        return 0;
+    }
+    let out = std::slice::from_raw_parts_mut(buffer, capacity);
+    let size = with_engine(|engine| match engine {
+        Active::Host(host) => host.camera_preview_into(out),
+        Active::Client(client) => client.camera_preview_into(out),
     })
     .flatten();
     write_size(size, width, height)

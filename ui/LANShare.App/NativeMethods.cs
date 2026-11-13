@@ -118,6 +118,23 @@ internal static class NativeMethods
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_stream_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
 
+    // ── Câmera (modo ativo: Host ou Client) ──
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_camera_devices();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr lanshare_camera_start(IntPtr deviceId, uint height, uint fps);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_camera_stop();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_camera_is_active();
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int lanshare_camera_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
+
     // ── Assistir (modo ativo: Host ou Client) ──
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -393,6 +410,26 @@ internal static class NativeMethods
     /// Copia a prévia da minha transmissão para `buffer`. False se não há prévia nova.
     public static bool StreamPreview(byte[] buffer, out int width, out int height) =>
         ReadFrame((b, c) => (lanshare_stream_preview(b, c, out var w, out var h), w, h), buffer, out width, out height);
+
+    // ───────────── Câmera (modo ativo: Host ou Client) ─────────────
+
+    /// Liga a minha câmera e avisa a sala. `deviceId` null = a primeira câmera do PC;
+    /// `height` até 2160 e `fps` até 60 (a câmera usa o mais perto que tiver). Leva até ~1 s.
+    public static (bool Ok, string? Error) CameraStart(string? deviceId, uint height, uint fps) =>
+        CallWithString(deviceId ?? "", ptr => lanshare_camera_start(ptr, height, fps));
+
+    /// Desliga a minha câmera. False se ela já estava desligada.
+    public static bool CameraStop() => lanshare_camera_stop() != 0;
+
+    /// A minha câmera está ligada?
+    public static bool CameraIsActive() => lanshare_camera_is_active() != 0;
+
+    /// Copia a prévia da minha câmera (até 720p) para `buffer`. False se não há imagem nova.
+    public static bool CameraPreview(byte[] buffer, out int width, out int height) =>
+        ReadFrame((b, c) => (lanshare_camera_preview(b, c, out var w, out var h), w, h), buffer, out width, out height);
+
+    /// As câmeras do PC (JSON {"ok":true,"cameras":[{"id","name"}]}). Chame fora da thread da interface.
+    public static JsonDocument CameraDevices() => JsonDocument.Parse(TakeString(lanshare_camera_devices()) ?? "{}");
 
     // ───────────── Assistir (modo ativo: Host ou Client) ─────────────
 
