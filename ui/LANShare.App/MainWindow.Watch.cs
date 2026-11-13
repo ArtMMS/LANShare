@@ -108,12 +108,12 @@ public partial class MainWindow
     }
 
     /// Parou de assistir (escolha minha, fim da transmissão ou erro). `message` = o que mostrar.
+    /// Se eu estiver transmitindo, a prévia da minha transmissão volta assim que chegar uma imagem nova.
     private void EndWatch(string? message)
     {
         ClearWatchState();
 
-        // Parei de assistir porque comecei a transmitir: a prévia da minha transmissão fica na tela
-        if (!_streaming) HidePreview(message ?? IdleStageText());
+        HidePreview(message ?? (_streaming ? Loc.T("Host_Streaming") : IdleStageText()));
 
         RefreshSfxUserLists();
         RefreshWatchInfo();
@@ -280,9 +280,8 @@ public partial class MainWindow
             return;
         }
 
-        // No Host, transmitindo, a linha mostra o resumo da transmissão dele
-        if (_mode != Mode.Host || _streaming) return;
-        _infoText.Text = WatchInfoText() ?? "";
+        // No Host a linha junta a transmissão dele e a que ele assiste
+        if (_mode == Mode.Host) RefreshHostInfo();
     }
 
     /// "Assistindo Fulano — 1920x1080 @ 30 FPS, 4.2 Mbps — A/V +3 ms — Conexão instável".

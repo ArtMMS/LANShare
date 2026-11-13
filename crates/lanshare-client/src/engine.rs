@@ -347,10 +347,6 @@ impl ClientEngine {
     /// O andamento chega por eventos: watch_connecting, watch_started, watch_denied,
     /// watch_failed e watch_ended.
     pub fn watch(&self, user_id: u64) -> Result<(), String> {
-        if self.own_stream.is_running() {
-            return Err(busy_streaming());
-        }
-
         let session = self.lock_session();
         let Some(session) = session.as_ref() else {
             return Err(not_in_room());
@@ -382,7 +378,7 @@ impl ClientEngine {
     // ───────────────────────────── Transmitir ─────────────────────────────
 
     /// Começa a transmitir um monitor ou uma janela e avisa a sala.
-    /// Para de assistir o que estava vendo (na v2.0 quem transmite não assiste).
+    /// Quem eu estiver assistindo continua na tela (dá para transmitir e assistir ao mesmo tempo).
     pub fn start_stream_on(&self, settings: StreamSettings, target: CaptureTarget) -> Result<(), String> {
         check_settings(settings)?;
 
@@ -392,7 +388,6 @@ impl ClientEngine {
             .map(|session| session.outgoing_tx.clone())
             .ok_or_else(not_in_room)?;
 
-        self.watcher.stop();
         self.own_stream.start(
             self.runtime.handle(),
             &self.events,
@@ -451,15 +446,6 @@ fn not_in_room() -> String {
         "Você não está numa sala.",
         "You are not in a room.",
         "No estás en ninguna sala.",
-    )
-    .to_string()
-}
-
-fn busy_streaming() -> String {
-    tr(
-        "Pare a sua transmissão para assistir outra pessoa.",
-        "Stop your stream to watch someone else.",
-        "Detén tu transmisión para ver a otra persona.",
     )
     .to_string()
 }

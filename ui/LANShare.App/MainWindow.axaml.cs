@@ -428,11 +428,12 @@ public partial class MainWindow : Window
         }
     }
 
-    /// Transmitindo, aparece a prévia da minha transmissão; senão, a transmissão que assisto.
+    /// Assistindo alguém, aparece a transmissão que assisto (mesmo se eu também estiver
+    /// transmitindo); senão, a prévia da minha transmissão.
     private void UpdateStageImage()
     {
-        if (_streaming) UpdatePreview();
-        else if (_watchState != WatchState.None) UpdateWatchFrame();
+        if (_watchState != WatchState.None) UpdateWatchFrame();
+        else if (_streaming) UpdatePreview();
     }
 
     // ───────────────────────── Transmitir (Host e Client) ─────────────────────────
@@ -484,12 +485,22 @@ public partial class MainWindow : Window
         UpdateModeUi();
     }
 
-    /// Texto da minha transmissão na barra de baixo (no Client ele divide a barra com a conexão).
+    /// Texto da minha transmissão na barra de baixo (divide a barra com a transmissão que
+    /// assisto e, no Client, com a conexão).
     private void SetOwnStreamInfo(string? text)
     {
         _ownStreamInfo = text;
         if (_mode == Mode.Client) RefreshClientInfo();
-        else _infoText.Text = text ?? "";
+        else RefreshHostInfo();
+    }
+
+    /// Linha de informações do Host: a minha transmissão e/ou a transmissão que estou assistindo.
+    private void RefreshHostInfo()
+    {
+        var parts = new List<string>();
+        if (_streaming && _ownStreamInfo is { } own) parts.Add(own);
+        if (WatchInfoText() is { } watch) parts.Add(watch);
+        _infoText.Text = string.Join(" — ", parts);
     }
 
     /// "Transmitindo — 4.2 Mbps, 2 usuário(s)" e, quando o bitrate adaptativo reduziu a
@@ -513,12 +524,22 @@ public partial class MainWindow : Window
     {
         _streaming = false;
         SetOwnStreamInfo(null);
-        if (_mode == Mode.Host)
-            _infoText.Text = error is null ? "" : Loc.F("Stream_Interrupted", error);
 
-        HidePreview(error is not null && _mode == Mode.Client
-            ? Loc.F("Stream_Interrupted", error)
-            : Loc.T("Stream_Stopped"));
+        if (_watchState != WatchState.None)
+        {
+            // Continuo assistindo: a imagem fica; se a minha transmissão caiu, só avisa
+            if (error is not null) Notify(Loc.F("Stream_Interrupted", error), StreamGlyph);
+        }
+        else
+        {
+            if (_mode == Mode.Host && error is not null)
+                _infoText.Text = Loc.F("Stream_Interrupted", error);
+
+            HidePreview(error is not null && _mode == Mode.Client
+                ? Loc.F("Stream_Interrupted", error)
+                : Loc.T("Stream_Stopped"));
+        }
+
         UpdateModeUi();
     }
 
@@ -1074,8 +1095,8 @@ public partial class MainWindow : Window
         }
     }
 
-    /// Linha de informações embaixo do vídeo: conectado, ping e a minha transmissão
-    /// (ou a transmissão que estou assistindo).
+    /// Linha de informações embaixo do vídeo: conectado, ping, a minha transmissão
+    /// e a transmissão que estou assistindo.
     private void RefreshClientInfo()
     {
         if (_clientState != ClientState.Connected || _kickedReason is not null) return;
@@ -1083,7 +1104,7 @@ public partial class MainWindow : Window
         var parts = new List<string> { Loc.T("Client_Connected") };
         if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
         if (_streaming && _ownStreamInfo is { } own) parts.Add(own);
-        else if (WatchInfoText() is { } watch) parts.Add(watch);
+        if (WatchInfoText() is { } watch) parts.Add(watch);
         _infoText.Text = string.Join(" — ", parts);
     }
 

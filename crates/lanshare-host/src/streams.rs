@@ -46,10 +46,6 @@ impl StreamDirectory {
         self.lock().get(&id).cloned()
     }
 
-    pub fn contains(&self, id: u64) -> bool {
-        self.lock().contains_key(&id)
-    }
-
     /// Todas as transmissões, ordenadas pelo id de quem transmite.
     pub fn all(&self) -> Vec<(u64, StreamSpot)> {
         let mut list: Vec<(u64, StreamSpot)> =

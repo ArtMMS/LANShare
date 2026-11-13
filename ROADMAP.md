@@ -133,6 +133,7 @@
 - [x] Screen-sharing indicator next to the user's name in the user list
 - [x] Select a stream by clicking the user (the user you're watching has a green border)
 - [x] "X started streaming" notification for any user
+
 - [x] (FIX) Stream speeds up on a bad connection: steady playback on the viewer
     - Show each frame at its capture time plus a small fixed delay (~100 ms)
     - Use a local clock when the stream has no audio
@@ -146,18 +147,46 @@
     - Keep the display on and the PC awake while watching a stream
     - Keep the display on and the PC awake while streaming
     - Release the request when watching/streaming stops or when leaving the room
-
-# V2.1.0 — Multi-View & Webcam
-
 - [ ] Watch other streams while streaming
-   - [ ] Adaptative/Customizable layout (change position and size)
-- [ ] Display the webcam feed of all connected users (webcam option on the users [& show avatars for those who doesn't have webcam turn on])
-   - Only cameras and avatars screen (like discord or skype); clickable on the user feed
-   - Allow Webcam Options (like OBS Studio)
-- [ ] Ban a user after 2 kicks (by IP, only for the current room)
-    - Count kicks per IP on the Host
-    - Refuse banned IPs before asking for the password ("You are banned from this room")
-    - The ban list is cleared when the Host opens a new room
+
+## Room view (default screen)
+
+- [ ] Room screen with every user in a grid (like Discord / Google Meet)
+    - Grid adapts to the number of users (1, 2, 3–4, 5–6, 7–9...)
+    - Each tile shows the camera (when on) or the avatar, the name and a screen-sharing badge
+    - The tile of whoever is playing a sound effect lights up (like the user list)
+- [ ] It is the default screen of the room (Host and Client)
+    - Watching a stream replaces it; closing the stream goes back to it
+    - Clicking "USERS IN THE ROOM" opens it
+    - Clicking someone's avatar in the user list opens it (streaming or not)
+- [ ] Bottom bar of the room screen
+    - Soundboard button
+    - Camera button: white = off, green = on
+    - Share screen button (monitor icon): white = off, green = on; opens the source picker
+- [ ] Move the resolution/FPS selectors into the source picker (next to the audio button)
+
+## Camera
+
+- [ ] Capture the webcam (Media Foundation)
+- [ ] Protocol: each stream has a kind (screen or camera); a user can have both at the same time
+- [ ] Camera goes to everyone in the room automatically, in two qualities
+    - 720p for the tiles (room view and camera overlay)
+    - Full quality (up to 4K / 60 FPS) only for whoever clicks to watch that camera in big
+- [ ] Camera icon next to the user's name in the user list (next to the screen icon)
+- [ ] "X turned on the camera" / "X turned off the camera" notifications
+- [ ] Settings → Camera
+    - Device selector, with a live preview
+    - Resolution (up to 4K) and FPS (up to 60), listing only what the device supports
+
+## Camera overlay (while watching a stream)
+
+- [ ] Floating 720p widgets with the cameras that are on, over the stream (no avatars)
+- [ ] Each widget can be moved anywhere on the screen and resized
+- [ ] Right click on a widget hides that camera
+- [ ] Shortcut (default C, configurable in Settings → Shortcuts)
+    - Press once: hides all cameras
+    - Press again: shows all cameras back, including the ones hidden one by one
+- [ ] Remember the position and size of each camera between streams
 
 ---
 
@@ -168,6 +197,7 @@
 
  Chat
    - Allow upload files, images and videos and allow download
+   - Commands (Admin only) in chat [/ban /disban]
 
  Stream multiple monitors at the same time (only one user)
     - Show untill 3 monitors, one on top of the other, and focus by click in one of them (showing the other ones on the bottom)

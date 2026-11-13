@@ -18,8 +18,8 @@ use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     new_watch_ticket, read_message, write_message, Message, SfxFrame, UserInfo, DEFAULT_PORT,
     HOST_USER_ID, MAX_AVATAR_LEN, PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT,
-    REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD, WATCH_BUSY_STREAMING,
-    WATCH_NOT_STREAMING, WATCH_SELF,
+    REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD, WATCH_NOT_STREAMING,
+    WATCH_SELF,
 };
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
@@ -145,10 +145,7 @@ impl Shared {
         if viewer == target {
             return deny(WATCH_SELF);
         }
-        // Na v2.0 quem transmite não assiste outra pessoa ao mesmo tempo
-        if self.streams.contains(viewer) {
-            return deny(WATCH_BUSY_STREAMING);
-        }
+        // Quem transmite também pode assistir outra pessoa ao mesmo tempo
         let Some(spot) = self.streams.get(target) else {
             return deny(WATCH_NOT_STREAMING);
         };
@@ -182,7 +179,7 @@ impl Shared {
         );
     }
 
-    /// `viewer` não pode mais assistir ninguém (saiu, foi expulso ou começou a transmitir).
+    /// `viewer` não pode mais assistir ninguém (saiu ou foi expulso).
     fn revoke_viewer_everywhere(&self, viewer: u64) {
         if let Some(stream) = self.lock_host_stream().as_ref() {
             stream.server.revoke_viewer(viewer);
@@ -445,15 +442,6 @@ impl HostEngine {
             )
             .to_string());
         }
-        if self.is_streaming() {
-            return Err(tr(
-                "Pare a sua transmissão para assistir outra pessoa.",
-                "Stop your stream to watch someone else.",
-                "Detén tu transmisión para ver a otra persona.",
-            )
-            .to_string());
-        }
-
         let not_streaming = || {
             tr(
                 "Essa pessoa não está transmitindo.",
@@ -520,7 +508,7 @@ impl HostEngine {
 
     /// Começa a transmitir um monitor ou uma janela (com ou sem som, conforme o último
     /// `set_stream_audio`) e avisa a sala. Só quem pedir ingresso recebe a imagem.
-    /// Para de assistir o que estava vendo (na v2.0 quem transmite não assiste).
+    /// Quem o Host estiver assistindo continua na tela (dá para transmitir e assistir ao mesmo tempo).
     pub fn start_stream_on(
         &self,
         settings: StreamSettings,
@@ -549,8 +537,6 @@ impl HostEngine {
         if let Some(old) = slot.take() {
             old.stop();
         }
-
-        self.shared.watcher.stop();
 
         let server = StreamServer::start(self.runtime.handle(), self.events.clone().into())
             .map_err(|erro| {
@@ -866,8 +852,7 @@ async fn handle_client(
             if port == 0 {
                 return;
             }
-            // Na v2.0 quem transmite não assiste: sai das transmissões que estava vendo
-            conn_shared.revoke_viewer_everywhere(id);
+            // Quem começa a transmitir continua assistindo o que estava vendo
             conn_shared.announce_stream(
                 id,
                 StreamSpot {
