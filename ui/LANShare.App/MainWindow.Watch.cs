@@ -10,10 +10,11 @@ using Avalonia.Media.Imaging;
 namespace LANShare.App;
 
 /// Assistir (v2.0), no Host e no Client:
-/// - quem transmite ganha o ícone de tela ao lado do nome; clicar assiste (clicar de novo para);
+/// - quem transmite ganha o ícone de tela ao lado do nome (cinza; verde quando eu assisto);
+///   clicar assiste (clicar de novo para);
 /// - quem você assiste fica com a borda verde na lista de usuários;
 /// - a transmissão escolhida aparece na área grande, com volume e tela cheia;
-/// - "Fulano iniciou a transmissão" avisa (com som) quando alguém começa.
+/// - "Fulano iniciou/encerrou a transmissão" avisa (com som) quando alguém começa ou para.
 public partial class MainWindow
 {
     private enum WatchState { None, Connecting, Watching }
@@ -28,6 +29,7 @@ public partial class MainWindow
 
     private static readonly IBrush WatchedBorder = new SolidColorBrush(Color.Parse("#3DDC84"));
     private static readonly IBrush WatchedFill = new SolidColorBrush(Color.Parse("#1F3DDC84"));
+    private static readonly IBrush ScreenIconIdle = new SolidColorBrush(Color.Parse("#8A929C"));
     private static readonly IBrush ScreenIconHover = new SolidColorBrush(Color.Parse("#2E343C"));
 
     /// Quem está transmitindo na sala (id; 0 = o Host). Eu mesmo não entro aqui
@@ -154,10 +156,14 @@ public partial class MainWindow
             }
 
             case "user_stream_stopped":
+            {
                 // Se eu assistia essa pessoa, o watch_ended chega logo em seguida
-                _streamers.Remove(e.GetProperty("id").GetUInt64());
+                var id = e.GetProperty("id").GetUInt64();
+                if (_streamers.Remove(id) && id != MySfxUserId)
+                    Notify(Loc.F("Notify_StreamEnded", UserName(id)), StreamGlyph, Sound.StreamStarted);
                 RefreshSfxUserLists();
                 return true;
+            }
 
             case "watch_connecting":
             {
@@ -343,7 +349,8 @@ public partial class MainWindow
     private bool IsWatchingUser(ulong userId) =>
         _watchState != WatchState.None && _watchUser == userId;
 
-    /// Ícone de tela de quem transmite. Clicar assiste (ou para). No meu nome, só mostra.
+    /// Ícone de tela de quem transmite: cinza; verde quando eu assisto.
+    /// Clicar assiste (ou para). No meu nome, só mostra.
     private Control ScreenIcon(ulong userId)
     {
         var mine = userId == MySfxUserId;
@@ -361,7 +368,7 @@ public partial class MainWindow
                 Text = ScreenGlyph,
                 FontFamily = IconFont,
                 FontSize = 14,
-                Foreground = watched ? WatchedBorder : null,
+                Foreground = watched ? WatchedBorder : ScreenIconIdle,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
@@ -369,7 +376,6 @@ public partial class MainWindow
 
         if (mine)
         {
-            icon.Opacity = 0.6;
             ToolTip.SetTip(icon, Loc.T("Watch_OwnTooltip"));
             return icon;
         }

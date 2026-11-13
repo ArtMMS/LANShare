@@ -155,11 +155,16 @@
  Optimize
  Support 1440p (Quad HD) and 4K
  Reach 60 FPS
+
+ Chat
+   - Allow upload files, images and videos and allow download
+
  Stream multiple monitors at the same time (only one user)
     - Show untill 3 monitors, one on top of the other, and focus by click in one of them (showing the other ones on the bottom)
 
+
+
  Allow multiples screen transmitions and notify who is showing the screen on the user feed
-    - Select screen transmission by click on the "blue border or screen-sharing icon" (The user you're watching has a green border)
     - Screen that shows all screen transmission with a customazible layout (change position and size)
     - Show or hide webcam options
     - Customize all webcam positions and sizes (automatic is on bottom)

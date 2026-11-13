@@ -174,6 +174,7 @@ internal static class Loc
         ["Notify_Kicked"] = new[] { "{0} foi removido da sala.", "{0} was removed from the room.", "{0} fue expulsado de la sala." },
         ["Notify_YouStarted"] = new[] { "Você iniciou a transmissão.", "You started the stream.", "Iniciaste la transmisión." },
         ["Notify_HostStarted"] = new[] { "{0} iniciou a transmissão.", "{0} started the stream.", "{0} inició la transmisión." },
+        ["Notify_StreamEnded"] = new[] { "{0} encerrou a transmissão.", "{0} ended the stream.", "{0} terminó la transmisión." },
 
         // ── Client ──
         ["Client_Disconnect"] = new[] { "Desconectar", "Disconnect", "Desconectar" },
