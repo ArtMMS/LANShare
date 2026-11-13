@@ -25,7 +25,7 @@ public partial class MainWindow : Window
 
     // Estrutura geral
     private readonly Grid _mainLayout, _clientLobby;
-    private readonly StackPanel _homePanel;
+    private readonly StackPanel _homePanel, _streamControls;
     private readonly DockPanel _hostPanel, _clientPanel;
     private readonly Border _clientConnecting;
     private readonly TextBlock _versionText, _placeholderText, _infoText;
@@ -44,11 +44,14 @@ public partial class MainWindow : Window
     // Início
     private readonly Button _createRoomButton, _joinRoomButton;
 
+    // Transmitir (Host e Client)
+    private readonly Button _startStreamButton, _stopStreamButton;
+    private readonly ComboBox _resolutionBox, _fpsBox;
+
     // Host
     private readonly TextBlock _statusLabel;
     private readonly TextBox _roomNameBox, _passwordBox;
-    private readonly Button _roomButton, _startStreamButton, _stopStreamButton, _hostBackButton;
-    private readonly ComboBox _resolutionBox, _fpsBox;
+    private readonly Button _roomButton, _hostBackButton;
     private readonly StackPanel _usersPanel;
 
     // Client
@@ -71,10 +74,13 @@ public partial class MainWindow : Window
     private bool _coreOk;
     private string? _username;
 
-    // Host
-    private bool _roomOpen;
+    // A minha transmissão (Host ou Client)
     private bool _streaming;
     private bool _wasStreaming; // para avisar só quando a transmissão começa
+    private string? _ownStreamInfo; // resumo da minha transmissão (barra de baixo do Client)
+
+    // Host
+    private bool _roomOpen;
 
     // Client
     private bool _clientActive;
@@ -102,6 +108,7 @@ public partial class MainWindow : Window
         _mainLayout = Find<Grid>("MainLayout");
         _clientLobby = Find<Grid>("ClientLobby");
         _homePanel = Find<StackPanel>("HomePanel");
+        _streamControls = Find<StackPanel>("StreamControls");
         _hostPanel = Find<DockPanel>("HostPanel");
         _clientPanel = Find<DockPanel>("ClientPanel");
         _clientConnecting = Find<Border>("ClientConnecting");
@@ -121,15 +128,16 @@ public partial class MainWindow : Window
         _createRoomButton = Find<Button>("CreateRoomButton");
         _joinRoomButton = Find<Button>("JoinRoomButton");
 
+        _startStreamButton = Find<Button>("StartStreamButton");
+        _stopStreamButton = Find<Button>("StopStreamButton");
+        _resolutionBox = Find<ComboBox>("ResolutionBox");
+        _fpsBox = Find<ComboBox>("FpsBox");
+
         _statusLabel = Find<TextBlock>("StatusLabel");
         _roomNameBox = Find<TextBox>("RoomNameBox");
         _passwordBox = Find<TextBox>("PasswordBox");
         _roomButton = Find<Button>("RoomButton");
-        _startStreamButton = Find<Button>("StartStreamButton");
-        _stopStreamButton = Find<Button>("StopStreamButton");
         _hostBackButton = Find<Button>("HostBackButton");
-        _resolutionBox = Find<ComboBox>("ResolutionBox");
-        _fpsBox = Find<ComboBox>("FpsBox");
         _usersPanel = Find<StackPanel>("UsersPanel");
 
         _clientStatusLabel = Find<TextBlock>("ClientStatusLabel");
@@ -173,10 +181,12 @@ public partial class MainWindow : Window
         _createRoomButton.Click += (_, _) => { ShowMode(Mode.Host); UpdateUi(); };
         _joinRoomButton.Click += (_, _) => EnterClientMode();
 
-        // Host ("Iniciar transmissão" vira "Alterar transmissão" enquanto transmite)
-        _roomButton.Click += (_, _) => ToggleRoom();
+        // Transmitir ("Iniciar transmissão" vira "Alterar transmissão" enquanto transmite)
         _startStreamButton.Click += (_, _) => OpenSourcePicker();
-        _stopStreamButton.Click += (_, _) => NativeMethods.HostStopStream();
+        _stopStreamButton.Click += (_, _) => NativeMethods.StreamStop(); // o fim chega por evento
+
+        // Host
+        _roomButton.Click += (_, _) => ToggleRoom();
         _hostBackButton.Click += (_, _) => ShowMode(Mode.Home); // só aparece com a sala fechada
 
         // Client
@@ -374,6 +384,7 @@ public partial class MainWindow : Window
         });
         _infoText.Text = "";
         UpdateProfileState();
+        UpdateStreamControls();
         UpdateVolumeControls(); // também atualiza o botão 🎉 dos efeitos sonoros
     }
 
@@ -401,21 +412,111 @@ public partial class MainWindow : Window
             if (_roomOpen)
             {
                 PollHostEvents();
-                // Transmitindo, o Host vê a própria prévia; senão, a transmissão que assiste
-                if (_streaming) UpdatePreview();
-                else if (_watchState != WatchState.None) UpdateWatchFrame();
+                UpdateStageImage();
             }
 
             if (_clientActive)
             {
                 PollClientEvents();
-                if (_clientState == ClientState.Connected && _watchState != WatchState.None) UpdateWatchFrame();
+                if (_clientState == ClientState.Connected) UpdateStageImage();
             }
         }
         catch (Exception ex)
         {
             _infoText.Text = Loc.F("Common_Error", ex.Message);
         }
+    }
+
+    /// Transmitindo, aparece a prévia da minha transmissão; senão, a transmissão que assisto.
+    private void UpdateStageImage()
+    {
+        if (_streaming) UpdatePreview();
+        else if (_watchState != WatchState.None) UpdateWatchFrame();
+    }
+
+    // ───────────────────────── Transmitir (Host e Client) ─────────────────────────
+
+    /// Dá para transmitir agora? (Host com a sala aberta ou Client conectado.)
+    private bool CanStream =>
+        (_mode == Mode.Host && _roomOpen) || (_mode == Mode.Client && _clientState == ClientState.Connected);
+
+    /// Seletores e botões de transmitir (o mesmo bloco nos dois modos).
+    private void UpdateStreamControls()
+    {
+        // Aviso + som só no momento em que a transmissão começa (trocar de fonte não conta)
+        var changed = _streaming != _wasStreaming;
+        if (_streaming && !_wasStreaming)
+            Notify(Loc.T("Notify_YouStarted"), StreamGlyph, Sound.StreamStarted);
+        _wasStreaming = _streaming;
+
+        _streamControls.IsVisible = CanStream;
+        _startStreamButton.IsEnabled = CanStream;
+        _startStreamButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
+        _stopStreamButton.IsEnabled = CanStream && _streaming;
+
+        if (_pickerOpen) UpdatePickerConfirm();
+
+        // O ícone de tela no meu nome acompanha a minha transmissão
+        if (changed) RefreshSfxUserLists();
+    }
+
+    /// Começa a transmitir o monitor escolhido no painel ("index" da lista de monitores).
+    private void StartStream(int monitorIndex)
+    {
+        var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
+        var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
+        var (ok, error) = NativeMethods.StreamStartMonitor(height, fps, monitorIndex);
+        if (!ok)
+        {
+            _infoText.Text = error ?? Loc.T("Stream_StartError");
+            return;
+        }
+
+        OnOwnStreamStarted(Loc.T("Stream_CapturingScreen"));
+    }
+
+    /// A minha transmissão começou (monitor ou janela): atualiza a lateral e a barra de baixo.
+    private void OnOwnStreamStarted(string info)
+    {
+        _streaming = true;
+        SetOwnStreamInfo(info);
+        UpdateModeUi();
+    }
+
+    /// Texto da minha transmissão na barra de baixo (no Client ele divide a barra com a conexão).
+    private void SetOwnStreamInfo(string? text)
+    {
+        _ownStreamInfo = text;
+        if (_mode == Mode.Client) RefreshClientInfo();
+        else _infoText.Text = text ?? "";
+    }
+
+    /// A minha transmissão terminou (parei, ou ela caiu com `error`).
+    private void OnOwnStreamStopped(string? error)
+    {
+        _streaming = false;
+        SetOwnStreamInfo(null);
+        if (_mode == Mode.Host)
+            _infoText.Text = error is null ? "" : Loc.F("Stream_Interrupted", error);
+
+        HidePreview(error is not null && _mode == Mode.Client
+            ? Loc.F("Stream_Interrupted", error)
+            : Loc.T("Stream_Stopped"));
+        UpdateModeUi();
+    }
+
+    /// Atualiza a lateral do modo atual (status, botões e listas).
+    private void UpdateModeUi()
+    {
+        if (_mode == Mode.Host) UpdateUi();
+        else if (_mode == Mode.Client) UpdateClientUi();
+    }
+
+    /// Pede a prévia mais recente da minha transmissão e desenha na área do vídeo.
+    private void UpdatePreview()
+    {
+        if (!NativeMethods.StreamPreview(_previewBuffer, out var width, out var height)) return;
+        PaintFrame(width, height);
     }
 
     // ───────────────────────── Host ─────────────────────────
@@ -427,6 +528,7 @@ public partial class MainWindow : Window
             NativeMethods.HostStop();
             _roomOpen = false;
             _streaming = false;
+            _ownStreamInfo = null;
             _peerAvatars.Clear();
             _sfxHighlights.Clear();
             ResetWatch();
@@ -455,23 +557,6 @@ public partial class MainWindow : Window
         ApplyAudioOutput(); // o Host também assiste: som na saída escolhida...
         ApplyVolume(); // ...e no volume salvo
         _timer.Start();
-        UpdateUi();
-    }
-
-    /// Começa a transmitir o monitor escolhido no painel ("index" da lista de monitores).
-    private void StartStream(int monitorIndex)
-    {
-        var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
-        var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
-        var (ok, error) = NativeMethods.HostStartStreamOn(height, fps, monitorIndex);
-        if (!ok)
-        {
-            _infoText.Text = error ?? Loc.T("Stream_StartError");
-            return;
-        }
-
-        _streaming = true;
-        _infoText.Text = Loc.T("Stream_CapturingScreen");
         UpdateUi();
     }
 
@@ -518,25 +603,22 @@ public partial class MainWindow : Window
                             fromHostEngine: true);
                         break;
                     case "stream_started":
-                        _infoText.Text = Loc.F(
+                        SetOwnStreamInfo(Loc.F(
                             "Stream_Started",
                             e.GetProperty("width").GetInt32(),
                             e.GetProperty("height").GetInt32(),
-                            e.GetProperty("fps").GetInt32());
+                            e.GetProperty("fps").GetInt32()));
                         break;
                     case "stream_stats":
-                        _infoText.Text = Loc.F(
+                        SetOwnStreamInfo(Loc.F(
                             "Stream_Stats",
                             e.GetProperty("mbps").GetDouble(),
-                            e.GetProperty("clients").GetInt32());
+                            e.GetProperty("clients").GetInt32()));
                         break;
                     case "stream_stopped":
-                        _streaming = false;
-                        _infoText.Text = e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
-                            ? Loc.F("Stream_Interrupted", err.GetString())
-                            : "";
-                        HidePreview(Loc.T("Stream_Stopped"));
-                        UpdateUi();
+                        OnOwnStreamStopped(e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
+                            ? err.GetString()
+                            : null);
                         break;
                 }
             }
@@ -550,13 +632,6 @@ public partial class MainWindow : Window
         e.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(n.GetString())
             ? n.GetString()!
             : Loc.T("Common_Someone");
-
-    /// Pede a miniatura mais recente ao Rust e desenha na área do vídeo.
-    private void UpdatePreview()
-    {
-        if (!NativeMethods.HostPreview(_previewBuffer, out var width, out var height)) return;
-        PaintFrame(width, height);
-    }
 
     /// Lista da sala: primeiro o próprio Host, depois os clients (com o botão Expulsar).
     /// Quem transmite ganha o ícone de tela; quem eu assisto fica com a borda verde.
@@ -585,25 +660,15 @@ public partial class MainWindow : Window
 
     private void UpdateUi()
     {
-        // Aviso + som só no momento em que a transmissão começa (trocar de fonte não conta)
-        if (_streaming && !_wasStreaming)
-            Notify(Loc.T("Notify_YouStarted"), StreamGlyph, Sound.StreamStarted);
-        _wasStreaming = _streaming;
-
         _statusLabel.Text = _roomOpen
             ? Loc.T(_streaming ? "Host_Streaming" : "Host_RoomOpen")
             : Loc.T("Host_RoomClosed");
         _roomButton.Content = Loc.T(_roomOpen ? "Host_CloseRoom" : "Host_OpenRoom");
         _roomNameBox.IsEnabled = _passwordBox.IsEnabled = !_roomOpen;
 
-        // Transmitindo, o mesmo botão troca o monitor/janela sem parar a transmissão
-        _startStreamButton.IsEnabled = _roomOpen;
-        _startStreamButton.Content = Loc.T(_streaming ? "Stream_Change" : "Stream_Start");
-        _stopStreamButton.IsEnabled = _roomOpen && _streaming;
-
         _hostBackButton.IsVisible = !_roomOpen; // com a sala aberta, "Fechar sala" já volta ao início
 
-        if (_pickerOpen) UpdatePickerConfirm();
+        UpdateStreamControls();
         UpdateProfileState();
         UpdateSoundboardControls(); // o botão 🎉 aparece com a sala aberta
     }
@@ -663,6 +728,9 @@ public partial class MainWindow : Window
         _hostName = "Host";
         _kickedReason = null;
         _pingMs = -1;
+        _streaming = false;
+        _wasStreaming = false;
+        _ownStreamInfo = null;
         ResetWatch();
     }
 
@@ -835,6 +903,28 @@ public partial class MainWindow : Window
                             fromHostEngine: false);
                         break;
 
+                    // ── A minha transmissão ──
+                    case "own_stream_started":
+                        SetOwnStreamInfo(Loc.F(
+                            "Stream_Started",
+                            e.GetProperty("width").GetInt32(),
+                            e.GetProperty("height").GetInt32(),
+                            e.GetProperty("fps").GetInt32()));
+                        break;
+
+                    case "own_stream_stats":
+                        SetOwnStreamInfo(Loc.F(
+                            "Stream_Stats",
+                            e.GetProperty("mbps").GetDouble(),
+                            e.GetProperty("viewers").GetInt32()));
+                        break;
+
+                    case "own_stream_stopped":
+                        OnOwnStreamStopped(e.TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.String
+                            ? err.GetString()
+                            : null);
+                        break;
+
                     case "kicked":
                         _kickedReason = e.GetProperty("reason").GetString() ?? Loc.T("Client_KickedDefault");
                         _infoText.Text = _kickedReason;
@@ -973,14 +1063,16 @@ public partial class MainWindow : Window
         }
     }
 
-    /// Linha de informações embaixo do vídeo: conectado, ping e a transmissão assistida.
+    /// Linha de informações embaixo do vídeo: conectado, ping e a minha transmissão
+    /// (ou a transmissão que estou assistindo).
     private void RefreshClientInfo()
     {
         if (_clientState != ClientState.Connected || _kickedReason is not null) return;
 
         var parts = new List<string> { Loc.T("Client_Connected") };
         if (_pingMs >= 0) parts.Add($"ping {_pingMs} ms");
-        if (WatchInfoText() is { } watch) parts.Add(watch);
+        if (_streaming && _ownStreamInfo is { } own) parts.Add(own);
+        else if (WatchInfoText() is { } watch) parts.Add(watch);
         _infoText.Text = string.Join(" — ", parts);
     }
 
@@ -993,7 +1085,7 @@ public partial class MainWindow : Window
         {
             ClientState.Idle => Loc.T("Client_Disconnected"),
             ClientState.Connecting => Loc.T("Client_Connecting"),
-            _ => Loc.T("Client_Connected"),
+            _ => Loc.T(_streaming ? "Host_Streaming" : "Client_Connected"),
         };
 
         _clientUsersHeader.IsVisible = _clientUsersPanel.IsVisible = connected;
@@ -1002,6 +1094,7 @@ public partial class MainWindow : Window
 
         UpdateProfileState();
         UpdateStage();
+        UpdateStreamControls();
         UpdateVolumeControls(); // os botões de volume e 🎉 dependem da conexão
     }
 

@@ -11,7 +11,8 @@ using Avalonia.Threading;
 
 namespace LANShare.App;
 
-/// Painel de escolha do que transmitir (abre em "Iniciar transmissão" e em "Alterar transmissão").
+/// Painel de escolha do que transmitir (abre em "Iniciar transmissão" e em "Alterar transmissão"),
+/// no Host com a sala aberta e no Client conectado.
 /// Duas abas: "Monitores inteiros" e "Janela específica".
 public partial class MainWindow
 {
@@ -126,7 +127,7 @@ public partial class MainWindow
     /// Abre o painel por cima de tudo. Transmitindo, já abre com a fonte atual marcada.
     private void OpenSourcePicker()
     {
-        if (!_roomOpen || _pickerOpen) return;
+        if (!CanStream || _pickerOpen) return;
 
         _pickerOpen = true;
         var generation = ++_pickerGeneration;
@@ -139,7 +140,7 @@ public partial class MainWindow
         _monitorList.ItemsSource = monitorItems;
         _windowList.ItemsSource = windowItems;
         _monitorList.SelectedIndex = monitorItems.Count > 0 ? 0 : -1; // o principal já vem selecionado
-        _windowList.SelectedIndex = -1; // a janela o Host escolhe
+        _windowList.SelectedIndex = -1; // a janela a pessoa escolhe
 
         var startTab = PickerTab.Monitors;
         if (_streaming && _streamWindow != 0)
@@ -216,7 +217,7 @@ public partial class MainWindow
         CloseSourcePicker();
 
         // Som ligado ou desligado (vale para a transmissão nova e para a que já está no ar)
-        var (audioOk, audioError) = NativeMethods.HostSetStreamAudio(_preferences.StreamAudio);
+        var (audioOk, audioError) = NativeMethods.StreamSetAudio(_preferences.StreamAudio);
         if (!audioOk) _infoText.Text = audioError ?? Loc.T("Stream_StartError");
 
         if (_streaming)
@@ -247,8 +248,8 @@ public partial class MainWindow
         if (tile.IsWindow ? tile.WindowId == _streamWindow : tile.MonitorIndex == _streamMonitor) return;
 
         var (ok, error) = tile.IsWindow
-            ? NativeMethods.HostSwitchWindow(tile.WindowId)
-            : NativeMethods.HostSwitchMonitor(tile.MonitorIndex);
+            ? NativeMethods.StreamSwitchWindow(tile.WindowId)
+            : NativeMethods.StreamSwitchMonitor(tile.MonitorIndex);
         if (!ok)
         {
             _infoText.Text = error ?? Loc.T("Stream_ChangeError");
@@ -256,7 +257,7 @@ public partial class MainWindow
         }
 
         RememberSource(tile);
-        _infoText.Text = Loc.T(tile.IsWindow ? "Stream_ChangedWindow" : "Stream_ChangedMonitor");
+        SetOwnStreamInfo(Loc.T(tile.IsWindow ? "Stream_ChangedWindow" : "Stream_ChangedMonitor"));
     }
 
     private void RememberSource(SourceTile tile)
@@ -270,16 +271,14 @@ public partial class MainWindow
     {
         var height = _resolutionBox.SelectedIndex == 0 ? 720u : 1080u;
         var fps = _fpsBox.SelectedIndex == 0 ? 15u : 30u;
-        var (ok, error) = NativeMethods.HostStartStreamWindow(height, fps, windowId);
+        var (ok, error) = NativeMethods.StreamStartWindow(height, fps, windowId);
         if (!ok)
         {
             _infoText.Text = error ?? Loc.T("Stream_StartError");
             return;
         }
 
-        _streaming = true;
-        _infoText.Text = Loc.T("Stream_CapturingWindow");
-        UpdateUi();
+        OnOwnStreamStarted(Loc.T("Stream_CapturingWindow"));
     }
 
     // ───────────────────────── Prévias e ícones ─────────────────────────

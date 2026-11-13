@@ -43,6 +43,11 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_host_set_avatar(IntPtr pngBase64);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void lanshare_host_stop();
+
+    // ── Monitores e janelas (não precisam de sala: Host e Client usam) ──
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_host_monitors();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
@@ -60,33 +65,6 @@ internal static class NativeMethods
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_host_window_icon(ulong id, byte[] buffer, UIntPtr capacity);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_start_stream(uint height, uint fps);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_start_stream_on(uint height, uint fps, int monitor);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_start_stream_window(uint height, uint fps, ulong id);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_switch_monitor(int monitor);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_switch_window(ulong id);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_host_set_stream_audio(int enabled);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int lanshare_host_stop_stream();
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int lanshare_host_preview(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern void lanshare_host_stop();
 
     // ── Client ──
 
@@ -106,19 +84,10 @@ internal static class NativeMethods
     private static extern IntPtr lanshare_client_set_avatar(IntPtr pngBase64);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_client_set_audio_output(IntPtr deviceId);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern IntPtr lanshare_client_set_volume(uint percent, int muted);
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern int lanshare_client_disconnect();
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern IntPtr lanshare_client_poll_event();
-
-    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-    private static extern int lanshare_client_frame(byte[] buffer, UIntPtr capacity, out uint width, out uint height);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     private static extern void lanshare_client_stop();
@@ -304,6 +273,10 @@ internal static class NativeMethods
     public static (bool Ok, string? Error) HostSetAvatar(string? pngBase64) =>
         CallWithString(pngBase64 ?? "", lanshare_host_set_avatar);
 
+    public static void HostStop() => lanshare_host_stop();
+
+    // ───────────── Monitores e janelas ─────────────
+
     /// Tamanho máximo da miniatura de monitor/janela (igual ao THUMB_MAX do monitors.rs).
     public const int ThumbnailMaxWidth = 400;
     public const int ThumbnailMaxHeight = 240;
@@ -355,45 +328,6 @@ internal static class NativeMethods
     public static bool HostWindowIcon(ulong id, byte[] buffer) =>
         lanshare_host_window_icon(id, buffer, (UIntPtr)buffer.Length) != 0;
 
-    // Funções antigas de transmissão do Host: saem na parte 3D-3 (troque por Stream*)
-
-    public static (bool Ok, string? Error) HostStartStream(uint height, uint fps) =>
-        ParseReply(lanshare_host_start_stream(height, fps));
-
-    /// Transmite um monitor específico (o "index" da lista; negativo = principal).
-    public static (bool Ok, string? Error) HostStartStreamOn(uint height, uint fps, int monitor) =>
-        ParseReply(lanshare_host_start_stream_on(height, fps, monitor));
-
-    /// Transmite uma janela específica (o "id" da lista de janelas).
-    public static (bool Ok, string? Error) HostStartStreamWindow(uint height, uint fps, ulong id) =>
-        ParseReply(lanshare_host_start_stream_window(height, fps, id));
-
-    /// Troca a transmissão em andamento para outro monitor, sem parar.
-    public static (bool Ok, string? Error) HostSwitchMonitor(int monitor) =>
-        ParseReply(lanshare_host_switch_monitor(monitor));
-
-    /// Troca a transmissão em andamento para uma janela, sem parar.
-    public static (bool Ok, string? Error) HostSwitchWindow(ulong id) =>
-        ParseReply(lanshare_host_switch_window(id));
-
-    /// Liga ou desliga o som da transmissão (botão 🔊 do seletor).
-    /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
-    public static (bool Ok, string? Error) HostSetStreamAudio(bool enabled) =>
-        ParseReply(lanshare_host_set_stream_audio(enabled ? 1 : 0));
-
-    public static bool HostStopStream() => lanshare_host_stop_stream() != 0;
-
-    /// Tamanho máximo da imagem (2560x1440, 4 bytes por pixel BGRA).
-    public const int PreviewMaxWidth = 2560;
-    public const int PreviewMaxHeight = 1440;
-    public const int PreviewBufferSize = PreviewMaxWidth * PreviewMaxHeight * 4;
-
-    /// Copia a miniatura da transmissão para `buffer`. False se ainda não há imagem.
-    public static bool HostPreview(byte[] buffer, out int width, out int height) =>
-        ReadFrame((b, c) => (lanshare_host_preview(b, c, out var w, out var h), w, h), buffer, out width, out height);
-
-    public static void HostStop() => lanshare_host_stop();
-
     // ───────────── Client ─────────────
 
     public static (bool Ok, string? Error) ClientStart() => ParseReply(lanshare_client_start());
@@ -410,14 +344,6 @@ internal static class NativeMethods
     public static (bool Ok, string? Error) ClientSetAvatar(string? pngBase64) =>
         CallWithString(pngBase64 ?? "", lanshare_client_set_avatar);
 
-    /// Por onde sai o som das transmissões (antiga: troque por SetAudioOutput na 3D-2).
-    public static (bool Ok, string? Error) ClientSetAudioOutput(string? deviceId) =>
-        CallWithString(deviceId ?? "", lanshare_client_set_audio_output);
-
-    /// Volume do som das transmissões (antiga: troque por SetVolume na 3D-2).
-    public static (bool Ok, string? Error) ClientSetVolume(int percent, bool muted) =>
-        ParseReply(lanshare_client_set_volume((uint)Math.Clamp(percent, 0, 100), muted ? 1 : 0));
-
     public static bool ClientDisconnect() => lanshare_client_disconnect() != 0;
 
     /// Próximo evento do Client (JSON) ou null se não há nenhum.
@@ -427,13 +353,14 @@ internal static class NativeMethods
         return json is null ? null : JsonDocument.Parse(json);
     }
 
-    /// Copia a imagem recebida para `buffer` (antiga: troque por WatchFrame na 3D-2).
-    public static bool ClientFrame(byte[] buffer, out int width, out int height) =>
-        ReadFrame((b, c) => (lanshare_client_frame(b, c, out var w, out var h), w, h), buffer, out width, out height);
-
     public static void ClientStop() => lanshare_client_stop();
 
     // ───────────── Transmitir (modo ativo: Host ou Client) ─────────────
+
+    /// Tamanho máximo da imagem (2560x1440, 4 bytes por pixel BGRA).
+    public const int PreviewMaxWidth = 2560;
+    public const int PreviewMaxHeight = 1440;
+    public const int PreviewBufferSize = PreviewMaxWidth * PreviewMaxHeight * 4;
 
     /// Começa a transmitir um monitor (o "index" da lista; negativo = principal) e avisa a sala.
     /// Para de assistir o que estava vendo.
@@ -453,6 +380,7 @@ internal static class NativeMethods
         ParseReply(lanshare_stream_switch_window(id));
 
     /// Liga ou desliga o som da minha transmissão (botão 🔊 do seletor).
+    /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
     public static (bool Ok, string? Error) StreamSetAudio(bool enabled) =>
         ParseReply(lanshare_stream_set_audio(enabled ? 1 : 0));
 

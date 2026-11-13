@@ -196,6 +196,25 @@
                         </Border>
                     </StackPanel>
 
+                    <!-- Transmitir (Host com a sala aberta ou Client conectado): logo acima do rodapé -->
+                    <StackPanel x:Name="StreamControls" DockPanel.Dock="Bottom" Spacing="8"
+                                Margin="0,12,0,0" IsVisible="False">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="126">
+                                <ComboBoxItem>720p</ComboBoxItem>
+                                <ComboBoxItem>1080p</ComboBoxItem>
+                            </ComboBox>
+                            <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="126">
+                                <ComboBoxItem>15 FPS</ComboBoxItem>
+                                <ComboBoxItem>30 FPS</ComboBoxItem>
+                            </ComboBox>
+                        </StackPanel>
+                        <Button x:Name="StartStreamButton" Content="{l:Tr Stream_Start}"
+                                HorizontalAlignment="Stretch" />
+                        <Button x:Name="StopStreamButton" Content="{l:Tr Stream_Stop}"
+                                HorizontalAlignment="Stretch" IsEnabled="False" />
+                    </StackPanel>
+
                     <!-- Os três painéis ocupam o mesmo espaço; só um aparece por vez -->
                     <Grid>
 
@@ -211,26 +230,9 @@
                         <!-- ── Criar sala (Host) ── -->
                         <DockPanel x:Name="HostPanel" LastChildFill="True" IsVisible="False">
 
-                            <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <ComboBox x:Name="ResolutionBox" SelectedIndex="1" Width="126">
-                                        <ComboBoxItem>720p</ComboBoxItem>
-                                        <ComboBoxItem>1080p</ComboBoxItem>
-                                    </ComboBox>
-                                    <ComboBox x:Name="FpsBox" SelectedIndex="1" Width="126">
-                                        <ComboBoxItem>15 FPS</ComboBoxItem>
-                                        <ComboBoxItem>30 FPS</ComboBoxItem>
-                                    </ComboBox>
-                                </StackPanel>
-                                <Button x:Name="StartStreamButton" Content="{l:Tr Stream_Start}"
-                                        HorizontalAlignment="Stretch" IsEnabled="False" />
-                                <Button x:Name="StopStreamButton" Content="{l:Tr Stream_Stop}"
-                                        HorizontalAlignment="Stretch" IsEnabled="False" />
-
-                                <!-- Só aparece com a sala fechada (com ela aberta, "Fechar sala" já volta ao início) -->
-                                <Button x:Name="HostBackButton" Content="{l:Tr Common_BackHome}"
-                                        HorizontalAlignment="Stretch" Margin="0,8,0,0" />
-                            </StackPanel>
+                            <!-- Só aparece com a sala fechada (com ela aberta, "Fechar sala" já volta ao início) -->
+                            <Button x:Name="HostBackButton" DockPanel.Dock="Bottom" Content="{l:Tr Common_BackHome}"
+                                    HorizontalAlignment="Stretch" Margin="0,12,0,0" />
 
                             <!-- A lista de usuários ocupa só o espaço que sobra e rola dentro dele
                                  (com muita gente na sala, ela não invade os botões de baixo) -->
@@ -353,7 +355,7 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Preview do Host / tela recebida no Client -->
+                        <!-- Prévia da minha transmissão / transmissão que estou assistindo -->
                         <Image x:Name="PreviewImage" Stretch="Uniform" Margin="16" IsVisible="False" />
                         <TextBlock x:Name="PlaceholderText"
                                    HorizontalAlignment="Center"
@@ -556,7 +558,3 @@
 
     </Grid>
 </Window>
-
-
-
-

@@ -30,7 +30,8 @@ public partial class MainWindow
     private static readonly IBrush WatchedFill = new SolidColorBrush(Color.Parse("#1F3DDC84"));
     private static readonly IBrush ScreenIconHover = new SolidColorBrush(Color.Parse("#2E343C"));
 
-    /// Quem está transmitindo na sala (id; 0 = o Host).
+    /// Quem está transmitindo na sala (id; 0 = o Host). Eu mesmo não entro aqui
+    /// quando sou um Client: o Host não manda esse aviso de volta para quem transmite.
     private readonly HashSet<ulong> _streamers = new();
 
     /// Nomes da lista do Host (para os avisos e a barra de baixo).
@@ -88,7 +89,7 @@ public partial class MainWindow
         _watchUser = userId;
         _watchState = WatchState.Connecting;
 
-        // Se estava com a prévia de outra coisa, ela some; a imagem nova aparece quando chegar
+        // Se estava com a imagem de outra transmissão, ela some; a nova aparece quando chegar
         HidePreview(Loc.F("Watch_Connecting", UserName(userId)));
         RefreshSfxUserLists();
         RefreshWatchInfo();
@@ -100,8 +101,8 @@ public partial class MainWindow
     {
         ClearWatchState();
 
-        // O Host começou a transmitir (e por isso parou de assistir): a prévia dele fica na tela
-        if (!(_mode == Mode.Host && _streaming)) HidePreview(message ?? IdleStageText());
+        // Parei de assistir porque comecei a transmitir: a prévia da minha transmissão fica na tela
+        if (!_streaming) HidePreview(message ?? IdleStageText());
 
         RefreshSfxUserLists();
         RefreshWatchInfo();
@@ -279,6 +280,10 @@ public partial class MainWindow
 
     // ───────────────────────── Lista de usuários ─────────────────────────
 
+    /// A pessoa está transmitindo? (No meu nome vale o meu estado, não o aviso da sala.)
+    private bool IsStreamingUser(ulong userId) =>
+        userId == MySfxUserId ? _streaming : _streamers.Contains(userId);
+
     /// Uma linha da lista da sala: avatar, nome, ícone de tela (se a pessoa transmite) e,
     /// no fim, um botão opcional (Expulsar). Borda azul quando tocou um efeito sonoro;
     /// borda verde quando é quem eu assisto.
@@ -318,7 +323,7 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
         });
-        if (_streamers.Contains(userId)) line.Children.Add(ScreenIcon(userId));
+        if (IsStreamingUser(userId)) line.Children.Add(ScreenIcon(userId));
         row.Children.Add(line);
 
         var wrapped = WithSfxHighlight(row, userId);

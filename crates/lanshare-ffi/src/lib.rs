@@ -290,94 +290,6 @@ pub unsafe extern "C" fn lanshare_host_window_icon(id: u64, buffer: *mut u8, cap
     1
 }
 
-// Funções antigas de transmissão do Host: a interface ainda usa estas.
-// Saem na parte 3D-3 (a interface passa a usar as `lanshare_stream_*`).
-
-/// Começa a transmitir o monitor principal. `height`: 720 ou 1080; `fps`: 15 ou 30.
-#[no_mangle]
-pub extern "C" fn lanshare_host_start_stream(height: u32, fps: u32) -> *mut c_char {
-    host_start_stream(height, fps, CaptureTarget::PrimaryMonitor)
-}
-
-/// Começa a transmitir um monitor. `monitor`: o "index" da lista de monitores
-/// (negativo = principal). `height`: 720 ou 1080; `fps`: 15 ou 30.
-#[no_mangle]
-pub extern "C" fn lanshare_host_start_stream_on(height: u32, fps: u32, monitor: i32) -> *mut c_char {
-    host_start_stream(height, fps, monitor_target(monitor))
-}
-
-/// Começa a transmitir uma janela (o "id" da lista de janelas).
-#[no_mangle]
-pub extern "C" fn lanshare_host_start_stream_window(height: u32, fps: u32, id: u64) -> *mut c_char {
-    host_start_stream(height, fps, CaptureTarget::Window(id))
-}
-
-/// Troca a transmissão em andamento para outro monitor (negativo = principal), sem parar.
-#[no_mangle]
-pub extern "C" fn lanshare_host_switch_monitor(monitor: i32) -> *mut c_char {
-    host_switch_source(monitor_target(monitor))
-}
-
-/// Troca a transmissão em andamento para uma janela (o "id" da lista), sem parar.
-#[no_mangle]
-pub extern "C" fn lanshare_host_switch_window(id: u64) -> *mut c_char {
-    host_switch_source(CaptureTarget::Window(id))
-}
-
-/// Liga (`enabled` diferente de 0) ou desliga o som da transmissão (botão 🔊 do seletor).
-/// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
-/// Monitor inteiro = som do PC; janela = só o som do app dela.
-#[no_mangle]
-pub extern "C" fn lanshare_host_set_stream_audio(enabled: i32) -> *mut c_char {
-    let host = lock_host();
-    match host.as_ref() {
-        None => reply_err(room_not_open()),
-        Some(engine) => {
-            engine.set_stream_audio(enabled != 0);
-            reply_ok()
-        }
-    }
-}
-
-/// Para a transmissão. Retorna 1 se havia uma transmissão, 0 se não.
-#[no_mangle]
-pub extern "C" fn lanshare_host_stop_stream() -> i32 {
-    let host = lock_host();
-    host.as_ref().map(|e| e.stop_stream()).unwrap_or(false) as i32
-}
-
-/// 1 se está transmitindo, 0 se não.
-#[no_mangle]
-pub extern "C" fn lanshare_host_is_streaming() -> i32 {
-    let host = lock_host();
-    host.as_ref().map(|e| e.is_streaming()).unwrap_or(false) as i32
-}
-
-/// Copia a miniatura (preview) da transmissão para `buffer` (BGRA, 4 bytes por pixel).
-/// `capacity` = tamanho do buffer em bytes (use 2560*1440*4). Preenche `width` e `height`.
-/// Retorna 1 se copiou, 0 se não há miniatura (ou o buffer é pequeno).
-///
-/// # Safety
-/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
-#[no_mangle]
-pub unsafe extern "C" fn lanshare_host_preview(
-    buffer: *mut u8,
-    capacity: usize,
-    width: *mut u32,
-    height: *mut u32,
-) -> i32 {
-    if buffer.is_null() || width.is_null() || height.is_null() {
-        return 0;
-    }
-    let host = lock_host();
-    let Some(engine) = host.as_ref() else {
-        return 0;
-    };
-
-    let out = std::slice::from_raw_parts_mut(buffer, capacity);
-    write_size(engine.preview_into(out), width, height)
-}
-
 /// Toca um efeito sonoro do Host para todos os Clients (a interface já tocou ele no Host).
 /// `pcm`: `len` amostras float intercaladas, 48 kHz, estéreo (no máximo MAX_SAMPLES do sfx.rs).
 /// Retorna {"ok":true} ou {"ok":false,"error":".."}. Leva alguns milissegundos: chame fora da thread da interface.
@@ -424,36 +336,6 @@ pub extern "C" fn lanshare_host_stop() {
     let engine = lock_host().take();
     if let Some(engine) = engine {
         let _ = engine.stop();
-    }
-}
-
-/// Índice da lista de monitores -> o que capturar (negativo = principal).
-fn monitor_target(monitor: i32) -> CaptureTarget {
-    match usize::try_from(monitor) {
-        Ok(index) => CaptureTarget::Monitor(index),
-        Err(_) => CaptureTarget::PrimaryMonitor,
-    }
-}
-
-fn host_start_stream(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
-    let host = lock_host();
-    match host.as_ref() {
-        None => reply_err(room_not_open()),
-        Some(engine) => match engine.start_stream_on(StreamSettings { height, fps }, target) {
-            Ok(()) => reply_ok(),
-            Err(error) => reply_err(&error),
-        },
-    }
-}
-
-fn host_switch_source(target: CaptureTarget) -> *mut c_char {
-    let host = lock_host();
-    match host.as_ref() {
-        None => reply_err(room_not_open()),
-        Some(engine) => match engine.switch_source(target) {
-            Ok(()) => reply_ok(),
-            Err(error) => reply_err(&error),
-        },
     }
 }
 
@@ -553,28 +435,6 @@ pub extern "C" fn lanshare_client_set_avatar(png_base64: *const c_char) -> *mut 
     with_client(|engine| engine.set_avatar(avatar))
 }
 
-/// Escolhe por onde sai o som das transmissões: o "id" da lista de `lanshare_audio_output_devices`.
-/// Vazio ou NULL = padrão do Windows (acompanha se o padrão mudar). Se já houver som tocando,
-/// ele muda de saída na hora. (Antiga: a nova é `lanshare_set_audio_output`, que vale também no Host.)
-#[no_mangle]
-pub extern "C" fn lanshare_client_set_audio_output(device_id: *const c_char) -> *mut c_char {
-    let device_id = read_c_string(device_id).filter(|text| !text.trim().is_empty());
-    with_client(|engine| {
-        engine.set_audio_output(device_id);
-        Ok(())
-    })
-}
-
-/// Volume do som das transmissões: `percent` de 0 a 100; `muted` diferente de 0 = mudo.
-/// Muda na hora, mesmo com som tocando. (Antiga: a nova é `lanshare_set_volume`.)
-#[no_mangle]
-pub extern "C" fn lanshare_client_set_volume(percent: u32, muted: i32) -> *mut c_char {
-    with_client(|engine| {
-        engine.set_volume(percent.min(100), muted != 0);
-        Ok(())
-    })
-}
-
 /// Toca um efeito sonoro para a sala: vai ao Host, que repassa a todos (a interface já tocou ele aqui).
 /// `pcm`: `len` amostras float intercaladas, 48 kHz, estéreo (no máximo MAX_SAMPLES do sfx.rs).
 /// Retorna {"ok":true} ou {"ok":false,"error":".."}. Leva alguns milissegundos: chame fora da thread da interface.
@@ -620,31 +480,6 @@ pub extern "C" fn lanshare_client_poll_event() -> *mut c_char {
         Some(event) => to_c(event.to_string()),
         None => std::ptr::null_mut(),
     }
-}
-
-/// Copia a imagem da transmissão assistida para `buffer` (BGRA, 4 bytes por pixel).
-/// Retorna 1 só se há uma imagem NOVA desde a última chamada; 0 se não.
-/// (Antiga: a nova é `lanshare_watch_frame`, que vale também no Host.)
-///
-/// # Safety
-/// `buffer` deve apontar para `capacity` bytes graváveis; `width` e `height`, para um u32 cada.
-#[no_mangle]
-pub unsafe extern "C" fn lanshare_client_frame(
-    buffer: *mut u8,
-    capacity: usize,
-    width: *mut u32,
-    height: *mut u32,
-) -> i32 {
-    if buffer.is_null() || width.is_null() || height.is_null() {
-        return 0;
-    }
-    let client = lock_client();
-    let Some(engine) = client.as_ref() else {
-        return 0;
-    };
-
-    let out = std::slice::from_raw_parts_mut(buffer, capacity);
-    write_size(engine.frame_into(out), width, height)
 }
 
 /// Desliga o modo Client (desconecta e encerra o motor).
@@ -702,6 +537,7 @@ pub extern "C" fn lanshare_stream_switch_window(id: u64) -> *mut c_char {
 
 /// Liga (`enabled` diferente de 0) ou desliga o som da minha transmissão (botão 🔊 do seletor).
 /// Vale para a próxima transmissão e, se já estiver transmitindo, muda na hora.
+/// Monitor inteiro = som do PC; janela = só o som do app dela.
 #[no_mangle]
 pub extern "C" fn lanshare_stream_set_audio(enabled: i32) -> *mut c_char {
     let enabled = enabled != 0;
@@ -757,6 +593,14 @@ pub unsafe extern "C" fn lanshare_stream_preview(
     })
     .flatten();
     write_size(size, width, height)
+}
+
+/// Índice da lista de monitores -> o que capturar (negativo = principal).
+fn monitor_target(monitor: i32) -> CaptureTarget {
+    match usize::try_from(monitor) {
+        Ok(index) => CaptureTarget::Monitor(index),
+        Err(_) => CaptureTarget::PrimaryMonitor,
+    }
 }
 
 fn stream_start(height: u32, fps: u32, target: CaptureTarget) -> *mut c_char {
