@@ -188,11 +188,12 @@
     - Press again: shows all cameras back, including the ones hidden one by one
 - [x] Remember the position and size of each camera between streams
 
-- [ ] Unlock 60 FPS Screen Transmission
-   - Se der problema na entrega para o client, a taxa de FPS (APENAS DESTE CLIENT) irá diminuir automaticamente para 30 ou 15 FPS. Para evitar lag
 ---
 
 ## Future Updates
+
+- [ ] Unlock 60 FPS Screen Transmission
+   - Se der problema na entrega para o client, a taxa de FPS (APENAS DESTE CLIENT) irá diminuir automaticamente para 30 ou 15 FPS. Para evitar lag
 
  Chat
    - Allow upload files, images and videos and allow download
@@ -204,11 +205,5 @@
  Stream multiple monitors at the same time (only one user)
     - Show untill 3 monitors, one on top of the other, and focus by click in one of them (showing the other ones on the bottom)
 
-
-
- Allow multiples screen transmitions and notify who is showing the screen on the user feed
-    - Screen that shows all screen transmission with a customazible layout (change position and size)
-    - Show or hide webcam options
-    - Customize all webcam positions and sizes (automatic is on bottom)
  Linux Port
 
