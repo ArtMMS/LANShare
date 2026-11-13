@@ -431,12 +431,12 @@ public partial class MainWindow : Window
         }
     }
 
-    /// Assistindo alguém, aparece a transmissão que assisto (mesmo se eu também estiver
-    /// transmitindo); senão, a prévia da minha transmissão.
+    /// Assistindo alguém, a transmissão que assisto ocupa a área grande (mesmo se eu também
+    /// estiver transmitindo); senão, a prévia da minha transmissão vai para o quadrado dela na grade.
     private void UpdateStageImage()
     {
         if (_watchState != WatchState.None) UpdateWatchFrame();
-        else if (_streaming) UpdatePreview();
+        else if (_streaming) UpdateOwnStreamTile();
     }
 
     // ───────────────────────── Transmitir (Host e Client) ─────────────────────────
@@ -527,20 +527,14 @@ public partial class MainWindow : Window
     {
         _streaming = false;
         SetOwnStreamInfo(null);
+        ClearOwnStreamTile(); // o quadrado da minha transmissão sai da grade no UpdateModeUi
 
-        if (_watchState != WatchState.None)
+        // A grade (ou a transmissão que assisto) continua na tela; se a minha caiu, avisa
+        if (error is not null)
         {
-            // Continuo assistindo: a imagem fica; se a minha transmissão caiu, só avisa
-            if (error is not null) Notify(Loc.F("Stream_Interrupted", error), StreamGlyph);
-        }
-        else
-        {
-            if (_mode == Mode.Host && error is not null)
+            Notify(Loc.F("Stream_Interrupted", error), StreamGlyph);
+            if (_mode == Mode.Host && _watchState == WatchState.None)
                 _infoText.Text = Loc.F("Stream_Interrupted", error);
-
-            HidePreview(error is not null && _mode == Mode.Client
-                ? Loc.F("Stream_Interrupted", error)
-                : Loc.T("Stream_Stopped"));
         }
 
         UpdateModeUi();
@@ -551,13 +545,6 @@ public partial class MainWindow : Window
     {
         if (_mode == Mode.Host) UpdateUi();
         else if (_mode == Mode.Client) UpdateClientUi();
-    }
-
-    /// Pede a prévia mais recente da minha transmissão e desenha na área do vídeo.
-    private void UpdatePreview()
-    {
-        if (!NativeMethods.StreamPreview(_previewBuffer, out var width, out var height)) return;
-        PaintFrame(width, height);
     }
 
     // ───────────────────────── Host ─────────────────────────

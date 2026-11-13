@@ -108,12 +108,12 @@ public partial class MainWindow
     }
 
     /// Parou de assistir (escolha minha, fim da transmissão ou erro). `message` = o que mostrar.
-    /// Se eu estiver transmitindo, a prévia da minha transmissão volta assim que chegar uma imagem nova.
+    /// A tela da sala volta (com o quadrado da minha transmissão, se eu estiver transmitindo).
     private void EndWatch(string? message)
     {
         ClearWatchState();
 
-        HidePreview(message ?? (_streaming ? Loc.T("Host_Streaming") : IdleStageText()));
+        HidePreview(message ?? IdleStageText());
 
         // A grade da sala costuma cobrir a mensagem: o motivo (erro, recusa) também vira aviso
         if (message is not null) Notify(message, StreamGlyph);
@@ -327,6 +327,16 @@ public partial class MainWindow
             Fill = AvatarBrush(avatar),
             Margin = new Thickness(0, 0, 10, 0),
             VerticalAlignment = VerticalAlignment.Center,
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        ToolTip.SetTip(circle, Loc.T("Room_OpenTooltip"));
+
+        // Clicar no avatar (transmitindo ou não) volta para a tela da sala
+        circle.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(circle).Properties.IsLeftButtonPressed) return;
+            e.Handled = true;
+            ShowRoomView();
         };
         DockPanel.SetDock(circle, Dock.Left);
         row.Children.Add(circle);

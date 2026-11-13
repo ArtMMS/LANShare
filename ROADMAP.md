@@ -155,7 +155,7 @@
     - Grid adapts to the number of users (1, 2, 3–4, 5–6, 7–9...)
     - Each tile shows the camera (when on) or the avatar, the name and a screen-sharing badge
     - The tile of whoever is playing a sound effect lights up (like the user list)
-- [ ] It is the default screen of the room (Host and Client)
+- [x] It is the default screen of the room (Host and Client)
     - Watching a stream replaces it; closing the stream goes back to it
     - Clicking "USERS IN THE ROOM" opens it
     - Clicking someone's avatar in the user list opens it (streaming or not)

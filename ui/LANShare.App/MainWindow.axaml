@@ -246,7 +246,8 @@
                                     <TextBox x:Name="PasswordBox" PlaceholderText="{l:Tr Host_PasswordPlaceholder}" PasswordChar="●" />
                                     <Button x:Name="RoomButton" Content="{l:Tr Host_OpenRoom}" HorizontalAlignment="Stretch" />
 
-                                    <TextBlock Text="{l:Tr Room_UsersHeader}" FontSize="11" Opacity="0.5" Margin="0,12,0,6" />
+                                    <TextBlock x:Name="HostUsersHeader" Text="{l:Tr Room_UsersHeader}" FontSize="11" Opacity="0.5"
+                                               Margin="0,12,0,6" HorizontalAlignment="Left" />
                                 </StackPanel>
 
                                 <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
@@ -272,7 +273,8 @@
                                     <TextBlock x:Name="ClientStatusLabel" Text="{l:Tr Client_Disconnected}" />
 
                                     <TextBlock x:Name="ClientUsersHeader" Text="{l:Tr Room_UsersHeader}" FontSize="11"
-                                               Opacity="0.5" Margin="0,12,0,0" IsVisible="False" />
+                                               Opacity="0.5" Margin="0,12,0,0" IsVisible="False"
+                                               HorizontalAlignment="Left" />
                                     <StackPanel x:Name="ClientUsersPanel" Spacing="8" IsVisible="False" />
                                 </StackPanel>
                             </ScrollViewer>

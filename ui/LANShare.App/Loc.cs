@@ -118,6 +118,8 @@ internal static class Loc
 
         // ── Lista de usuários ──
         ["Room_UsersHeader"] = new[] { "USUÁRIOS NA SALA", "USERS IN THE ROOM", "USUARIOS EN LA SALA" },
+        ["Room_OpenTooltip"] = new[] { "Abrir a tela da sala", "Open the room screen", "Abrir la pantalla de la sala" },
+        ["Room_YourStream"] = new[] { "Sua transmissão", "Your stream", "Tu transmisión" },
         ["Users_YouHost"] = new[] { "{0} (você, host)", "{0} (you, host)", "{0} (tú, host)" },
         ["Users_You"] = new[] { "{0} (você)", "{0} (you)", "{0} (tú)" },
         ["Users_Host"] = new[] { "{0} (host)", "{0} (host)", "{0} (host)" },
