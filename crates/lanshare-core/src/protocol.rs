@@ -11,6 +11,10 @@
 //! - TRANSMISSÃO (espectador -> transmissor): aberta ao clicar no ícone de tela de alguém.
 //!   Começa com WatchHello (com o ingresso) e depois leva Video, Audio e StreamStopped.
 //!   Vai direto ao transmissor: o vídeo não passa pelo Host.
+//!
+//! v13: cada transmissão tem um tipo (`StreamKind`: tela ou câmera) e cada pessoa pode ter as
+//! duas ao mesmo tempo. A câmera tem duas versões (`StreamQuality`): a pequena (720p, para os
+//! quadrados da sala, em porta própria: `tile_port`) e a cheia (para quem abre ela grande).
 
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::RandomState;
@@ -22,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Aumente sempre que o formato das mensagens mudar de forma incompatível.
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 pub const DEFAULT_PORT: u16 = 47800;
 
 /// De quanto em quanto tempo enviamos um Ping.
@@ -51,8 +55,33 @@ pub const REJECT_INVALID_TICKET: &str = "invalid_ticket";
 pub const WATCH_NOT_STREAMING: &str = "not_streaming";
 /// Pediu para assistir a si mesmo (a própria transmissão aparece pela prévia local).
 pub const WATCH_SELF: &str = "self";
-/// Quem está transmitindo não assiste outra pessoa ao mesmo tempo (fica para a v2.1).
+/// Quem está transmitindo não assiste outra pessoa ao mesmo tempo.
+/// Só Hosts de versões anteriores mandam este código (hoje dá para transmitir e assistir).
 pub const WATCH_BUSY_STREAMING: &str = "busy_streaming";
+/// Pediu a versão pequena (`StreamQuality::Tile`) de uma transmissão que não tem.
+pub const WATCH_NO_TILE: &str = "no_tile";
+
+/// O que está sendo transmitido. Uma pessoa pode ter as duas ao mesmo tempo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamKind {
+    /// Monitor ou janela.
+    #[default]
+    Screen,
+    /// Webcam.
+    Camera,
+}
+
+/// Qual versão da transmissão assistir.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamQuality {
+    /// A transmissão do jeito que foi escolhida (tela; câmera aberta grande).
+    #[default]
+    Full,
+    /// A versão pequena (720p) da câmera, para os quadrados da sala e da sobreposição.
+    Tile,
+}
 
 /// Um ingresso vale por este tempo depois de emitido (e só uma vez).
 pub const WATCH_TICKET_TTL: Duration = Duration::from_secs(30);
@@ -233,42 +262,69 @@ pub enum Message {
 
     // ───────────── Transmissões (sala) ─────────────
 
-    /// Client -> Host: comecei a transmitir; quem tiver ingresso me assiste nesta porta TCP.
-    StreamAnnounce { port: u16 },
-
-    /// Client -> Host: parei de transmitir.
-    StreamEnded,
-
-    /// Host -> Clients: alguém está transmitindo (aparece o ícone de tela ao lado do nome).
-    /// `ip` None = o IP do próprio Host (o mesmo em que você está conectado).
-    UserStreaming {
-        user_id: u64,
-        ip: Option<String>,
+    /// Client -> Host: comecei a transmitir (`kind`); quem tiver ingresso me assiste nesta
+    /// porta TCP. A câmera também abre a porta da versão pequena (`tile_port`).
+    StreamAnnounce {
+        kind: StreamKind,
         port: u16,
+        #[serde(default)]
+        tile_port: Option<u16>,
     },
 
-    /// Host -> Clients: alguém parou de transmitir.
-    UserStreamStopped { user_id: u64 },
+    /// Client -> Host: parei de transmitir (`kind`).
+    StreamEnded { kind: StreamKind },
 
-    /// Client -> Host: quero assistir a transmissão de `user_id`.
-    WatchRequest { user_id: u64 },
+    /// Host -> Clients: alguém está transmitindo (aparece o ícone de tela ou de câmera ao lado
+    /// do nome). `ip` None = o IP do próprio Host (o mesmo em que você está conectado).
+    UserStreaming {
+        user_id: u64,
+        kind: StreamKind,
+        ip: Option<String>,
+        port: u16,
+        #[serde(default)]
+        tile_port: Option<u16>,
+    },
+
+    /// Host -> Clients: alguém parou de transmitir (`kind`).
+    UserStreamStopped { user_id: u64, kind: StreamKind },
+
+    /// Client -> Host: quero assistir a transmissão `kind` de `user_id`, na versão `quality`.
+    WatchRequest {
+        user_id: u64,
+        kind: StreamKind,
+        quality: StreamQuality,
+    },
 
     /// Host -> Client: pode assistir. Conecte em ip:port e mande o WatchHello com o ingresso.
-    /// `ip` None = o IP do próprio Host.
+    /// `ip` None = o IP do próprio Host. `port` já é a porta da versão pedida.
     WatchGranted {
         user_id: u64,
+        kind: StreamKind,
+        quality: StreamQuality,
         ip: Option<String>,
         port: u16,
         ticket: String,
     },
 
-    /// Host -> Client: não dá para assistir `user_id` (código WATCH_*).
-    WatchDenied { user_id: u64, code: String },
+    /// Host -> Client: não dá para assistir (código WATCH_*).
+    WatchDenied {
+        user_id: u64,
+        kind: StreamKind,
+        quality: StreamQuality,
+        code: String,
+    },
 
-    /// Host -> Client que transmite: vai chegar `viewer_id` com este ingresso; aceite.
-    ViewerAllowed { viewer_id: u64, ticket: String },
+    /// Host -> Client que transmite: vai chegar `viewer_id` com este ingresso, na transmissão
+    /// `kind` (versão `quality`); aceite.
+    ViewerAllowed {
+        viewer_id: u64,
+        kind: StreamKind,
+        quality: StreamQuality,
+        ticket: String,
+    },
 
-    /// Host -> Client que transmite: derrube `viewer_id` (saiu da sala ou foi expulso).
+    /// Host -> Client que transmite: derrube `viewer_id` de todas as suas transmissões
+    /// (saiu da sala ou foi expulso).
     ViewerRevoked { viewer_id: u64 },
 
     // ───────────── Conexão de transmissão ─────────────
@@ -684,32 +740,60 @@ mod tests {
                 id: HOST_USER_ID,
                 png_base64: String::new(),
             },
-            Message::StreamAnnounce { port: 51234 },
-            Message::StreamEnded,
+            Message::StreamAnnounce {
+                kind: StreamKind::Screen,
+                port: 51234,
+                tile_port: None,
+            },
+            Message::StreamAnnounce {
+                kind: StreamKind::Camera,
+                port: 51300,
+                tile_port: Some(51301),
+            },
+            Message::StreamEnded {
+                kind: StreamKind::Camera,
+            },
             Message::UserStreaming {
                 user_id: 2,
+                kind: StreamKind::Screen,
                 ip: Some("26.10.0.5".to_string()),
                 port: 51234,
+                tile_port: None,
             },
             Message::UserStreaming {
                 user_id: HOST_USER_ID,
+                kind: StreamKind::Camera,
                 ip: None,
                 port: 51000,
+                tile_port: Some(51001),
             },
-            Message::UserStreamStopped { user_id: 2 },
-            Message::WatchRequest { user_id: 2 },
+            Message::UserStreamStopped {
+                user_id: 2,
+                kind: StreamKind::Screen,
+            },
+            Message::WatchRequest {
+                user_id: 2,
+                kind: StreamKind::Camera,
+                quality: StreamQuality::Tile,
+            },
             Message::WatchGranted {
                 user_id: 2,
+                kind: StreamKind::Camera,
+                quality: StreamQuality::Tile,
                 ip: Some("26.10.0.5".to_string()),
-                port: 51234,
+                port: 51301,
                 ticket: ticket.clone(),
             },
             Message::WatchDenied {
                 user_id: 2,
+                kind: StreamKind::Screen,
+                quality: StreamQuality::Full,
                 code: WATCH_NOT_STREAMING.to_string(),
             },
             Message::ViewerAllowed {
                 viewer_id: 1,
+                kind: StreamKind::Camera,
+                quality: StreamQuality::Full,
                 ticket: ticket.clone(),
             },
             Message::ViewerRevoked { viewer_id: 1 },

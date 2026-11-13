@@ -1,4 +1,6 @@
-//! Quem assiste: no máximo UMA transmissão por vez (v2.0). Usado pelo Host e pelo Client.
+//! Quem assiste: no máximo UMA transmissão grande por vez (v2.0). Usado pelo Host e pelo Client.
+//! Cada transmissão é (pessoa, tipo): a tela e a câmera de alguém são transmissões diferentes.
+//! Aqui é sempre a versão cheia (`StreamQuality::Full`).
 //!
 //! - Client: `request` (pediu ao Host) e depois `granted` (chegou o WatchGranted);
 //! - Host: `watch_now` (ele mesmo cria o ingresso e conecta direto).
@@ -7,6 +9,7 @@
 use crate::audio_player::{AudioOutputSetting, AudioVolume};
 use crate::session::{WatchSession, WatchTarget};
 use crate::EventTx;
+use lanshare_core::protocol::StreamKind;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,10 +17,19 @@ use tokio::runtime::Handle;
 
 #[derive(Default)]
 struct State {
-    /// Pedi ao Host para assistir este usuário e ainda espero a resposta.
-    wanted: Option<u64>,
+    /// Pedi ao Host para assistir esta transmissão (pessoa, tipo) e ainda espero a resposta.
+    wanted: Option<(u64, StreamKind)>,
     session: Option<WatchSession>,
+    /// O tipo da transmissão da `session`.
+    session_kind: StreamKind,
     next_id: u64,
+}
+
+impl State {
+    /// A sessão atual é desta transmissão?
+    fn session_is(&self, user_id: u64, kind: StreamKind) -> bool {
+        self.session_kind == kind && self.session.as_ref().is_some_and(|s| s.user_id == user_id)
+    }
 }
 
 /// Clonar NÃO copia: todos os clones controlam o mesmo "assistir".
@@ -42,40 +54,41 @@ impl Watcher {
         }
     }
 
-    /// Client: pediu ao Host para assistir `user_id`. Para o que estava assistindo.
-    pub fn request(&self, user_id: u64) {
+    /// Client: pediu ao Host para assistir a transmissão `kind` de `user_id`.
+    /// Para o que estava assistindo.
+    pub fn request(&self, user_id: u64, kind: StreamKind) {
         let mut state = self.lock();
-        state.wanted = Some(user_id);
+        state.wanted = Some((user_id, kind));
         if let Some(old) = state.session.take() {
             old.end(false);
         }
     }
 
     /// Client: chegou o WatchGranted. false = não foi pedido (ou já desisti): ignorado.
-    pub fn granted(&self, user_id: u64, addr: SocketAddr, ticket: String) -> bool {
+    pub fn granted(&self, user_id: u64, kind: StreamKind, addr: SocketAddr, ticket: String) -> bool {
         let mut state = self.lock();
-        if state.wanted != Some(user_id) {
+        if state.wanted != Some((user_id, kind)) {
             return false;
         }
         state.wanted = None;
-        self.start(&mut state, user_id, addr, ticket);
+        self.start(&mut state, user_id, kind, addr, ticket);
         true
     }
 
     /// Host: já tem o ingresso, conecta direto (para o que estava assistindo).
-    pub fn watch_now(&self, user_id: u64, addr: SocketAddr, ticket: String) {
+    pub fn watch_now(&self, user_id: u64, kind: StreamKind, addr: SocketAddr, ticket: String) {
         let mut state = self.lock();
         state.wanted = None;
         if let Some(old) = state.session.take() {
             old.end(false);
         }
-        self.start(&mut state, user_id, addr, ticket);
+        self.start(&mut state, user_id, kind, addr, ticket);
     }
 
     /// Client: o Host recusou. true = era o pedido em andamento (vale avisar a interface).
-    pub fn denied(&self, user_id: u64) -> bool {
+    pub fn denied(&self, user_id: u64, kind: StreamKind) -> bool {
         let mut state = self.lock();
-        if state.wanted == Some(user_id) {
+        if state.wanted == Some((user_id, kind)) {
             state.wanted = None;
             true
         } else {
@@ -83,13 +96,13 @@ impl Watcher {
         }
     }
 
-    /// A sala avisou que `user_id` parou de transmitir: se era quem eu assistia, encerra.
-    pub fn stream_ended(&self, user_id: u64) {
+    /// A sala avisou que `user_id` parou de transmitir `kind`: se era o que eu assistia, encerra.
+    pub fn stream_ended(&self, user_id: u64, kind: StreamKind) {
         let mut state = self.lock();
-        if state.wanted == Some(user_id) {
+        if state.wanted == Some((user_id, kind)) {
             state.wanted = None;
         }
-        if state.session.as_ref().is_some_and(|s| s.user_id == user_id) {
+        if state.session_is(user_id, kind) {
             if let Some(session) = state.session.take() {
                 session.end(true);
             }
@@ -107,12 +120,17 @@ impl Watcher {
 
     /// Quem estou assistindo (ou pedi para assistir). None = ninguém.
     pub fn watching(&self) -> Option<u64> {
+        self.watching_stream().map(|(user_id, _)| user_id)
+    }
+
+    /// A transmissão que estou assistindo (ou pedi para assistir): (pessoa, tipo).
+    pub fn watching_stream(&self) -> Option<(u64, StreamKind)> {
         let state = self.lock();
         state
             .session
             .as_ref()
             .filter(|s| !s.is_finished())
-            .map(|s| s.user_id)
+            .map(|s| (s.user_id, state.session_kind))
             .or(state.wanted)
     }
 
@@ -122,13 +140,15 @@ impl Watcher {
         frame.read_into(out)
     }
 
-    fn start(&self, state: &mut State, user_id: u64, addr: SocketAddr, ticket: String) {
+    fn start(&self, state: &mut State, user_id: u64, kind: StreamKind, addr: SocketAddr, ticket: String) {
         state.next_id += 1;
         let watch_id = state.next_id;
+        state.session_kind = kind;
 
         let _ = self.events.send(json!({
             "type": "watch_connecting",
             "user_id": user_id,
+            "kind": kind,
             "watch_id": watch_id,
         }));
 
@@ -190,7 +210,7 @@ mod tests {
         // Quem assiste chega antes do ingresso (a mesma corrida da rede de verdade)
         let ticket = new_watch_ticket();
         let addr = SocketAddr::from(([127, 0, 0, 1], server.port()));
-        watcher.watch_now(5, addr, ticket.clone());
+        watcher.watch_now(5, StreamKind::Screen, addr, ticket.clone());
         std::thread::sleep(Duration::from_millis(150));
         assert!(server.allow_viewer(9, ticket));
 

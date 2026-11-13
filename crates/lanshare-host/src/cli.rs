@@ -4,7 +4,7 @@
 
 use crate::engine::{HostConfig, HostEngine};
 use crate::events::{HostEvent, LogLevel};
-use lanshare_core::protocol::HOST_USER_ID;
+use lanshare_core::protocol::{StreamKind, HOST_USER_ID};
 use lanshare_stream::StreamSettings;
 use std::io;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -197,17 +197,18 @@ impl EventPrinter {
                 println!("[host] #{user_id} tocou o efeito sonoro '{name}'");
             }
 
-            HostEvent::UserStreaming { id } => {
+            HostEvent::UserStreaming { id, kind } => {
+                let what = kind_name(*kind);
                 if *id == HOST_USER_ID {
-                    println!("[host] Sua transmissao esta disponivel para a sala.");
+                    println!("[host] Sua transmissao ({what}) esta disponivel para a sala.");
                 } else {
-                    println!("[host] #{id} comecou a transmitir.");
+                    println!("[host] #{id} comecou a transmitir ({what}).");
                 }
             }
 
-            HostEvent::UserStreamStopped { id } => {
+            HostEvent::UserStreamStopped { id, kind } => {
                 if *id != HOST_USER_ID {
-                    println!("[host] #{id} parou de transmitir.");
+                    println!("[host] #{id} parou de transmitir ({}).", kind_name(*kind));
                 }
             }
 
@@ -445,6 +446,14 @@ fn start_audio_test(seconds: u64) {
             println!("[host] Falha na captura de som: {erro}");
         }
     });
+}
+
+/// Nome curto do tipo de transmissão, para o terminal.
+fn kind_name(kind: StreamKind) -> &'static str {
+    match kind {
+        StreamKind::Screen => "tela",
+        StreamKind::Camera => "camera",
+    }
 }
 
 /// Teste temporário da webcam (lista câmeras e formatos, grava um .bmp na pasta atual).

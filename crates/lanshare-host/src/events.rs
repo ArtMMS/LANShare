@@ -3,6 +3,7 @@
 //! O motor (engine.rs) não imprime nada: ele só emite eventos, e quem usa decide como mostrá-los.
 //! Os eventos viram JSON (campo "type" + dados) para a interface em C# ler pela FFI.
 
+use lanshare_core::protocol::StreamKind;
 use serde::Serialize;
 use std::sync::mpsc::Sender;
 
@@ -86,11 +87,11 @@ pub enum HostEvent {
     /// O som do próprio Host não gera evento: a interface já tocou ele.
     SfxPlayed { user_id: u64, name: String, sfx_id: u64 },
 
-    /// Alguém começou a transmitir (id 0 = o próprio Host).
-    UserStreaming { id: u64 },
+    /// Alguém começou a transmitir `kind` (tela ou câmera; id 0 = o próprio Host).
+    UserStreaming { id: u64, kind: StreamKind },
 
-    /// Alguém parou de transmitir (id 0 = o próprio Host).
-    UserStreamStopped { id: u64 },
+    /// Alguém parou de transmitir `kind` (id 0 = o próprio Host).
+    UserStreamStopped { id: u64, kind: StreamKind },
 
     /// A transmissão da tela do Host começou.
     StreamStarted {

@@ -18,8 +18,8 @@ use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
     new_watch_ticket, read_message, write_message, Message, SfxFrame, UserInfo, DEFAULT_PORT,
     HOST_USER_ID, MAX_AVATAR_LEN, PROTOCOL_VERSION, REJECT_PASSWORD_TIMEOUT,
-    REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD, WATCH_NOT_STREAMING,
-    WATCH_SELF,
+    REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD, StreamKind, StreamQuality,
+    WATCH_NOT_STREAMING, WATCH_NO_TILE, WATCH_SELF,
 };
 use lanshare_core::settings;
 use lanshare_core::sfx::{self, SfxCooldown, SfxInbox};
@@ -110,33 +110,44 @@ impl Shared {
         self.host_stream.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Alguém começou a transmitir: anota no catálogo e avisa a sala (aparece o ícone de tela).
-    fn announce_stream(&self, id: u64, spot: StreamSpot) {
-        self.registry.broadcast(&spot.message(id), Some(id));
-        self.streams.set(id, spot);
-        self.events.emit(HostEvent::UserStreaming { id });
+    /// Alguém começou a transmitir (`kind`): anota no catálogo e avisa a sala
+    /// (aparece o ícone de tela ou de câmera).
+    fn announce_stream(&self, id: u64, kind: StreamKind, spot: StreamSpot) {
+        self.registry.broadcast(&spot.message(id, kind), Some(id));
+        self.streams.set(id, kind, spot);
+        self.events.emit(HostEvent::UserStreaming { id, kind });
     }
 
-    /// Alguém parou de transmitir (ou saiu da sala): tira do catálogo e avisa a sala.
-    fn end_stream(&self, id: u64) {
+    /// Alguém parou de transmitir `kind`: tira do catálogo e avisa a sala.
+    fn end_stream(&self, id: u64, kind: StreamKind) {
         // Se o Host assistia essa transmissão, a conexão fecha já
-        self.watcher.stream_ended(id);
+        self.watcher.stream_ended(id, kind);
 
-        if !self.streams.remove(id) {
+        if !self.streams.remove(id, kind) {
             return;
         }
         self.registry
-            .broadcast(&Message::UserStreamStopped { user_id: id }, None);
-        self.events.emit(HostEvent::UserStreamStopped { id });
+            .broadcast(&Message::UserStreamStopped { user_id: id, kind }, None);
+        self.events.emit(HostEvent::UserStreamStopped { id, kind });
     }
 
-    /// `viewer` quer assistir `target`: emite o ingresso, avisa quem transmite e responde.
-    fn watch_request(&self, viewer: u64, target: u64) {
+    /// Alguém saiu da sala: todas as transmissões dele acabam.
+    fn end_all_streams(&self, id: u64) {
+        for kind in self.streams.kinds_of(id) {
+            self.end_stream(id, kind);
+        }
+    }
+
+    /// `viewer` quer assistir a transmissão `kind` de `target`, na versão `quality`:
+    /// emite o ingresso, avisa quem transmite e responde.
+    fn watch_request(&self, viewer: u64, target: u64, kind: StreamKind, quality: StreamQuality) {
         let deny = |code: &str| {
             self.registry.send_to(
                 viewer,
                 Message::WatchDenied {
                     user_id: target,
+                    kind,
+                    quality,
                     code: code.to_string(),
                 },
             );
@@ -146,20 +157,29 @@ impl Shared {
             return deny(WATCH_SELF);
         }
         // Quem transmite também pode assistir outra pessoa ao mesmo tempo
-        let Some(spot) = self.streams.get(target) else {
+        let Some(spot) = self.streams.get(target, kind) else {
             return deny(WATCH_NOT_STREAMING);
+        };
+        let Some(port) = spot.port_for(quality) else {
+            return deny(WATCH_NO_TILE);
         };
 
         let ticket = new_watch_ticket();
         let allowed = if target == HOST_USER_ID {
-            self.lock_host_stream()
-                .as_ref()
-                .is_some_and(|stream| stream.server.allow_viewer(viewer, ticket.clone()))
+            // Por enquanto o Host só transmite a tela (a câmera dele entra na próxima etapa)
+            kind == StreamKind::Screen
+                && quality == StreamQuality::Full
+                && self
+                    .lock_host_stream()
+                    .as_ref()
+                    .is_some_and(|stream| stream.server.allow_viewer(viewer, ticket.clone()))
         } else {
             self.registry.send_to(
                 target,
                 Message::ViewerAllowed {
                     viewer_id: viewer,
+                    kind,
+                    quality,
                     ticket: ticket.clone(),
                 },
             )
@@ -172,8 +192,10 @@ impl Shared {
             viewer,
             Message::WatchGranted {
                 user_id: target,
+                kind,
+                quality,
                 ip: spot.ip,
-                port: spot.port,
+                port,
                 ticket,
             },
         );
@@ -185,7 +207,7 @@ impl Shared {
             stream.server.revoke_viewer(viewer);
         }
 
-        for (streamer, _) in self.streams.all() {
+        for streamer in self.streams.streamers() {
             if streamer != HOST_USER_ID && streamer != viewer {
                 self.registry
                     .send_to(streamer, Message::ViewerRevoked { viewer_id: viewer });
@@ -431,9 +453,15 @@ impl HostEngine {
 
     // ───────────────────────────── Assistir ─────────────────────────────
 
-    /// Assiste a transmissão de um Client: o próprio Host cria o ingresso, avisa quem
-    /// transmite e conecta direto. O andamento chega por `try_next_viewer_event`.
+    /// Assiste a transmissão da tela de um Client (versão cheia). Ver `watch_kind`.
     pub fn watch(&self, user_id: u64) -> Result<(), String> {
+        self.watch_kind(user_id, StreamKind::Screen)
+    }
+
+    /// Assiste a transmissão `kind` de um Client, na versão cheia: o próprio Host cria o
+    /// ingresso, avisa quem transmite e conecta direto. O andamento chega por
+    /// `try_next_viewer_event`.
+    pub fn watch_kind(&self, user_id: u64, kind: StreamKind) -> Result<(), String> {
         if user_id == HOST_USER_ID {
             return Err(tr(
                 "Você não pode assistir a própria transmissão.",
@@ -451,7 +479,7 @@ impl HostEngine {
             .to_string()
         };
 
-        let spot = self.shared.streams.get(user_id).ok_or_else(not_streaming)?;
+        let spot = self.shared.streams.get(user_id, kind).ok_or_else(not_streaming)?;
         let ip = spot
             .ip
             .as_deref()
@@ -461,6 +489,8 @@ impl HostEngine {
         let ticket = new_watch_ticket();
         let allowed = Message::ViewerAllowed {
             viewer_id: HOST_USER_ID,
+            kind,
+            quality: StreamQuality::Full,
             ticket: ticket.clone(),
         };
         if !self.registry.send_to(user_id, allowed) {
@@ -469,7 +499,7 @@ impl HostEngine {
 
         self.shared
             .watcher
-            .watch_now(user_id, SocketAddr::new(ip, spot.port), ticket);
+            .watch_now(user_id, kind, SocketAddr::new(ip, spot.port), ticket);
         Ok(())
     }
 
@@ -563,7 +593,15 @@ impl HostEngine {
         drop(slot);
 
         self.shared
-            .announce_stream(HOST_USER_ID, StreamSpot { ip: None, port });
+            .announce_stream(
+                HOST_USER_ID,
+                StreamKind::Screen,
+                StreamSpot {
+                    ip: None,
+                    port,
+                    tile_port: None,
+                },
+            );
         Ok(())
     }
 
@@ -605,7 +643,7 @@ impl HostEngine {
         match stream {
             Some(running) => {
                 running.stop();
-                self.shared.end_stream(HOST_USER_ID);
+                self.shared.end_stream(HOST_USER_ID, StreamKind::Screen);
                 true
             }
             None => false,
@@ -681,7 +719,7 @@ async fn watch_stream(shared: Shared, mut shutdown: watch::Receiver<bool>) {
         if let Some(stream) = ended {
             dead_polls = 0;
             stream.stop();
-            shared.end_stream(HOST_USER_ID);
+            shared.end_stream(HOST_USER_ID, StreamKind::Screen);
         }
     }
 }
@@ -788,9 +826,9 @@ async fn handle_client(
         });
     }
 
-    // ...e quem está transmitindo agora (aparece o ícone de tela ao lado do nome)
-    for (streamer, spot) in shared.streams.all() {
-        let _ = intro_tx.send(spot.message(streamer));
+    // ...e quem está transmitindo agora (aparece o ícone de tela/câmera ao lado do nome)
+    for (streamer, kind, spot) in shared.streams.all() {
+        let _ = intro_tx.send(spot.message(streamer, kind));
     }
     drop(intro_tx);
 
@@ -848,31 +886,39 @@ async fn handle_client(
                 sfx_id,
             });
         }
-        ConnectionEvent::Message(Message::StreamAnnounce { port }) => {
+        ConnectionEvent::Message(Message::StreamAnnounce {
+            kind,
+            port,
+            tile_port,
+        }) => {
             if port == 0 {
                 return;
             }
             // Quem começa a transmitir continua assistindo o que estava vendo
             conn_shared.announce_stream(
                 id,
+                kind,
                 StreamSpot {
                     ip: Some(addr.ip().to_string()),
                     port,
+                    tile_port: tile_port.filter(|&p| p != 0),
                 },
             );
         }
-        ConnectionEvent::Message(Message::StreamEnded) => conn_shared.end_stream(id),
-        ConnectionEvent::Message(Message::WatchRequest { user_id }) => {
-            conn_shared.watch_request(id, user_id)
-        }
+        ConnectionEvent::Message(Message::StreamEnded { kind }) => conn_shared.end_stream(id, kind),
+        ConnectionEvent::Message(Message::WatchRequest {
+            user_id,
+            kind,
+            quality,
+        }) => conn_shared.watch_request(id, user_id, kind, quality),
         ConnectionEvent::Message(_) => {}
     })
     .await;
 
     shared.registry.remove(id);
 
-    // Se ele transmitia, a transmissão acaba; se assistia alguém, perde o acesso
-    shared.end_stream(id);
+    // Se ele transmitia (tela e/ou câmera), acaba; se assistia alguém, perde o acesso
+    shared.end_all_streams(id);
     shared.revoke_viewer_everywhere(id);
 
     let was_kicked = shared.kicker.finish(id);

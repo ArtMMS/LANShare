@@ -12,7 +12,8 @@ use crate::normalize_address;
 use crate::streaming::OwnStream;
 use lanshare_core::i18n::tr;
 use lanshare_core::protocol::{
-    read_message, write_message, Message, SfxFrame, UserInfo, MAX_AVATAR_LEN, PROTOCOL_VERSION,
+    read_message, write_message, Message, SfxFrame, StreamKind, StreamQuality, UserInfo,
+    MAX_AVATAR_LEN, PROTOCOL_VERSION,
     REJECT_PASSWORD_TIMEOUT, REJECT_PROTOCOL_MISMATCH, REJECT_ROOM_FULL, REJECT_WRONG_PASSWORD,
 };
 use lanshare_core::settings;
@@ -352,10 +353,14 @@ impl ClientEngine {
             return Err(not_in_room());
         };
 
-        self.watcher.request(user_id);
+        self.watcher.request(user_id, StreamKind::Screen);
         session
             .outgoing_tx
-            .send(Message::WatchRequest { user_id })
+            .send(Message::WatchRequest {
+                user_id,
+                kind: StreamKind::Screen,
+                quality: StreamQuality::Full,
+            })
             .map_err(|_| not_in_room())
     }
 
@@ -674,22 +679,26 @@ async fn run_session(
             }
 
             // ── Transmissões ──
-            Message::UserStreaming { user_id, .. } => send(
+            Message::UserStreaming { user_id, kind, .. } => send(
                 &cb_events,
-                json!({ "type": "user_streaming", "id": user_id }),
+                json!({ "type": "user_streaming", "id": user_id, "kind": kind }),
             ),
-            Message::UserStreamStopped { user_id } => {
-                cb_watcher.stream_ended(user_id);
+            Message::UserStreamStopped { user_id, kind } => {
+                cb_watcher.stream_ended(user_id, kind);
                 send(
                     &cb_events,
-                    json!({ "type": "user_stream_stopped", "id": user_id }),
+                    json!({ "type": "user_stream_stopped", "id": user_id, "kind": kind }),
                 );
             }
+            // A versão pequena da câmera (quadrados) ainda não é usada: só a cheia
+            Message::WatchGranted { quality, .. } if quality != StreamQuality::Full => {}
             Message::WatchGranted {
                 user_id,
+                kind,
                 ip,
                 port,
                 ticket,
+                ..
             } => {
                 let ip = match ip {
                     Some(text) => text.parse::<IpAddr>().ok(),
@@ -697,7 +706,7 @@ async fn run_session(
                 };
                 match ip {
                     Some(ip) => {
-                        cb_watcher.granted(user_id, SocketAddr::new(ip, port), ticket);
+                        cb_watcher.granted(user_id, kind, SocketAddr::new(ip, port), ticket);
                     }
                     None => send(
                         &cb_events,
@@ -714,16 +723,27 @@ async fn run_session(
                     ),
                 }
             }
-            Message::WatchDenied { user_id, code } => {
-                if cb_watcher.denied(user_id) {
+            Message::WatchDenied {
+                user_id,
+                kind,
+                quality,
+                code,
+            } => {
+                if quality == StreamQuality::Full && cb_watcher.denied(user_id, kind) {
                     send(
                         &cb_events,
-                        json!({ "type": "watch_denied", "user_id": user_id, "code": code }),
+                        json!({ "type": "watch_denied", "user_id": user_id, "kind": kind, "code": code }),
                     );
                 }
             }
-            // Pedidos do Host para a MINHA transmissão
-            Message::ViewerAllowed { viewer_id, ticket } => cb_stream.allow_viewer(viewer_id, ticket),
+            // Pedidos do Host para a MINHA transmissão (por enquanto só a tela; a câmera vem depois)
+            Message::ViewerAllowed {
+                viewer_id,
+                kind: StreamKind::Screen,
+                quality: StreamQuality::Full,
+                ticket,
+            } => cb_stream.allow_viewer(viewer_id, ticket),
+            Message::ViewerAllowed { .. } => {}
             Message::ViewerRevoked { viewer_id } => cb_stream.revoke_viewer(viewer_id),
 
             // O motivo que vem da rede está no idioma do Host: usa o texto no idioma deste app

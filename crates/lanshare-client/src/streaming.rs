@@ -5,7 +5,7 @@
 //! (com nomes próprios para não confundir com a transmissão que o Client assiste).
 
 use lanshare_core::i18n::tr;
-use lanshare_core::protocol::Message;
+use lanshare_core::protocol::{Message, StreamKind};
 use lanshare_stream::{
     CaptureTarget, PreviewSlot, StreamEvent, StreamEvents, StreamHandle, StreamServer,
     StreamSettings,
@@ -77,7 +77,12 @@ impl OwnStream {
             audio_enabled,
         );
 
-        if room.send(Message::StreamAnnounce { port }).is_err() {
+        let announce = Message::StreamAnnounce {
+            kind: StreamKind::Screen,
+            port,
+            tile_port: None,
+        };
+        if room.send(announce).is_err() {
             // Já saiu da sala: desfaz tudo
             server.stop();
             drop(slot);
@@ -102,7 +107,9 @@ impl OwnStream {
         };
 
         running.server.stop();
-        let _ = running.room.send(Message::StreamEnded);
+        let _ = running.room.send(Message::StreamEnded {
+            kind: StreamKind::Screen,
+        });
         running.handle.stop();
         true
     }
@@ -150,7 +157,9 @@ impl OwnStream {
         let running = self.lock().take();
         if let Some(running) = running {
             running.server.stop();
-            let _ = running.room.send(Message::StreamEnded);
+            let _ = running.room.send(Message::StreamEnded {
+                kind: StreamKind::Screen,
+            });
             // O `handle` é descartado aqui sem esperar: a thread dele é esta, que já está terminando
         }
     }
